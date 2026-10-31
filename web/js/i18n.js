@@ -60,7 +60,7 @@ export function applyMotion() {
 
 export function setLocaleMode(mode) {
   localeMode.value = mode
-  writeRaw(KEYS.lang, mode)
+  writeRaw(KEYS.lang, mode === 'en' || mode === 'zh-CN' ? mode : null)
   applyLocale()
 }
 

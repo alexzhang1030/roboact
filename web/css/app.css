@@ -417,6 +417,11 @@ label { display: block; color: var(--muted); font-size: 12px; margin: 8px 0 4px;
   display: inline-flex; align-items: center; justify-content: center;
 }
 .lang-btn:hover, .motion-btn:hover { background: var(--bg); border-color: var(--control); }
+.log-filter {
+  display: flex; align-items: center; gap: 8px;
+  font-size: var(--fs-12); line-height: var(--lh-12); color: var(--muted); margin-bottom: 8px;
+}
+.log-filter select { font: inherit; color: var(--text); background: var(--surface); border: 1px solid var(--control); border-radius: 4px; height: 28px; }
 
 @media (max-width: 800px) {
   .left { display: none; }

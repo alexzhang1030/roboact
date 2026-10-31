@@ -1,5 +1,5 @@
 /** Browser-only display preferences. Keys always use the `roboact.` prefix.
- *  Execution / safety config stays on the server.
+ *  Execution / safety config stays on the server. No auth keys.
  */
 export const STORAGE_PREFIX = 'roboact.'
 
@@ -7,12 +7,10 @@ export const KEYS = {
   theme: 'roboact.theme',
   lang: 'roboact.lang',
   motion: 'roboact.motion',
-  leftOpen: 'roboact.leftOpen',
-  rightW: 'roboact.rightW',
+  panels: 'roboact.panels',
   grid: 'roboact.grid',
-  lastFlow: 'roboact.lastFlow',
-  canvas: 'roboact.canvas',
-  token: 'roboact.token',
+  logFilter: 'roboact.logFilter',
+  viewportPrefix: 'roboact.viewport.',
 }
 
 function prefixed(key) {
@@ -29,20 +27,6 @@ export function writeRaw(key, value) {
   try {
     if (value == null) localStorage.removeItem(key)
     else localStorage.setItem(key, value)
-  } catch (_) {}
-}
-
-/** Access token for a non-loopback bind. Session only (PRD v1.4.6). */
-export function readSession(key) {
-  if (!prefixed(key)) return null
-  try { return sessionStorage.getItem(key) } catch (_) { return null }
-}
-
-export function writeSession(key, value) {
-  if (!prefixed(key)) return
-  try {
-    if (value == null) sessionStorage.removeItem(key)
-    else sessionStorage.setItem(key, value)
   } catch (_) {}
 }
 
@@ -80,16 +64,27 @@ export function detectBrowserMotionReduce() {
   }
 }
 
-/** Last opened flow id. Reject junk so a bad localStorage value is ignored. */
-export function readLastFlow() {
-  const v = readRaw(KEYS.lastFlow)
-  if (!v || v.length > 80 || /[^a-zA-Z0-9_-]/.test(v)) return null
-  return v
+export function readPanels() {
+  const raw = readRaw(KEYS.panels)
+  if (!raw) return { leftOpen: true, rightW: 360 }
+  try {
+    const v = JSON.parse(raw)
+    if (!v || typeof v !== 'object') return { leftOpen: true, rightW: 360 }
+    const n = Number(v.rightW)
+    return {
+      leftOpen: v.leftOpen !== false && v.leftOpen !== 0 && v.leftOpen !== '0',
+      rightW: Number.isFinite(n) && n >= 320 ? n : 360,
+    }
+  } catch (_) {
+    return { leftOpen: true, rightW: 360 }
+  }
 }
 
-/** Canvas pan/zoom. Bad or partial JSON falls back to Vue Flow defaults. */
-export function readCanvas() {
-  const raw = readRaw(KEYS.canvas)
+export function writePanels(leftOpen, rightW) {
+  writeRaw(KEYS.panels, JSON.stringify({ leftOpen: !!leftOpen, rightW }))
+}
+
+function parseViewport(raw) {
   if (!raw) return null
   try {
     const v = JSON.parse(raw)
@@ -103,10 +98,26 @@ export function readCanvas() {
   }
 }
 
-export function writeCanvas(v) {
+export function viewportKey(flowId) {
+  if (!flowId || /[^a-zA-Z0-9_-]/.test(flowId)) return null
+  return KEYS.viewportPrefix + flowId
+}
+
+export function readViewport(flowId) {
+  const key = viewportKey(flowId)
+  return key ? parseViewport(readRaw(key)) : null
+}
+
+export function writeViewport(flowId, v) {
+  const key = viewportKey(flowId)
+  if (!key) return
   if (!v) {
-    writeRaw(KEYS.canvas, null)
+    writeRaw(key, null)
     return
   }
-  writeRaw(KEYS.canvas, JSON.stringify({ x: v.x, y: v.y, zoom: v.zoom }))
+  writeRaw(key, JSON.stringify({ x: v.x, y: v.y, zoom: v.zoom }))
+}
+
+export function readLogFilter() {
+  return readChoice(KEYS.logFilter, ['all', 'error'], 'all')
 }

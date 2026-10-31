@@ -384,14 +384,10 @@ def test_a36_images_stay_out_of_sqlite(tmp_path):
     asyncio.run(go())
 
 
-def test_loopback_only_bind():
-    from roboact.server import require_loopback_host
+def test_non_loopback_host_warns_only():
+    from roboact.server import warn_non_loopback_host
 
-    require_loopback_host("127.0.0.1")
-    require_loopback_host("localhost")
-    require_loopback_host("::1")
-    try:
-        require_loopback_host("0.0.0.0")
-        raise AssertionError("non-loopback must exit")
-    except SystemExit:
-        pass
+    warn_non_loopback_host("127.0.0.1")
+    warn_non_loopback_host("localhost")
+    warn_non_loopback_host("::1")
+    warn_non_loopback_host("0.0.0.0")

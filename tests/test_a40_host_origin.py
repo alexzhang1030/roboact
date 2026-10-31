@@ -100,15 +100,35 @@ def test_a40_host_origin_content_type(tmp_path):
             proc.kill()
 
 
-def test_non_loopback_host_flag_exits():
-    r = subprocess.run(
-        [sys.executable, "-m", "roboact", "--host", "0.0.0.0", "--port", str(free_port()), "--db", "/tmp/no.db"],
+def test_non_loopback_host_flag_warns():
+    port = free_port()
+    proc = subprocess.Popen(
+        [sys.executable, "-m", "roboact", "--host", "0.0.0.0", "--port", str(port), "--db", "/tmp/no.db"],
         cwd=str(ROOT),
-        capture_output=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
         text=True,
-        timeout=5,
     )
-    print(r.stdout)
-    print(r.stderr)
-    assert r.returncode != 0
-    assert "loopback" in (r.stderr + r.stdout).lower() or "127.0.0.1" in (r.stderr + r.stdout)
+    try:
+        buf = ""
+        t0 = time.time()
+        while time.time() - t0 < 5:
+            line = proc.stdout.readline() if proc.stdout else ""
+            buf += line
+            if "WARNING" in buf and "no authentication" in buf.lower():
+                break
+            if proc.poll() is not None:
+                rest = proc.stdout.read() if proc.stdout else ""
+                buf += rest
+                break
+        print(buf)
+        assert proc.poll() is None, buf
+        assert "WARNING" in buf
+        assert "no authentication" in buf.lower()
+        assert "anyone on that network" in buf.lower()
+    finally:
+        proc.terminate()
+        try:
+            proc.wait(timeout=3)
+        except subprocess.TimeoutExpired:
+            proc.kill()

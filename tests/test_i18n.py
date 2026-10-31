@@ -117,13 +117,14 @@ def test_pref_keys_use_roboact_prefix():
         "theme": "roboact.theme",
         "lang": "roboact.lang",
         "motion": "roboact.motion",
-        "leftOpen": "roboact.leftOpen",
-        "rightW": "roboact.rightW",
+        "panels": "roboact.panels",
         "grid": "roboact.grid",
-        "lastFlow": "roboact.lastFlow",
-        "canvas": "roboact.canvas",
-        "token": "roboact.token",
+        "logFilter": "roboact.logFilter",
+        "viewportPrefix": "roboact.viewport.",
     }
+    assert "token" not in keys
+    assert "readSession" not in src
+    assert "writeSession" not in src
     assert "STORAGE_PREFIX = 'roboact.'" in src
     assert "key.startsWith(STORAGE_PREFIX)" in src
     html = (FRONT / "index.html").read_text(encoding="utf-8")

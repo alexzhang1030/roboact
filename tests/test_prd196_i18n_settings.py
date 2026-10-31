@@ -398,9 +398,9 @@ def test_prd197_bad_localstorage_falls_back_to_browser(server):
               localStorage.setItem('roboact.theme', 'neon')
               localStorage.setItem('roboact.lang', 'de')
               localStorage.setItem('roboact.motion', 'maybe')
-              localStorage.setItem('roboact.canvas', '{bad')
-              localStorage.setItem('roboact.rightW', 'nope')
-              localStorage.setItem('roboact.lastFlow', '!!!')
+              localStorage.setItem('roboact.panels', '{bad')
+              localStorage.setItem('roboact.viewport.x', '{bad')
+              localStorage.setItem('roboact.logFilter', 'maybe')
             }"""
         )
         page.reload(wait_until="domcontentloaded")
@@ -432,6 +432,7 @@ def test_prd197_panel_grid_persist_and_follow_theme(server):
               window.__af.leftOpen.value = false
               window.__af.rightW.value = 400
               window.__af.showMini.value = false
+              window.__af.logFilter.value = 'error'
             }"""
         )
         page.wait_for_timeout(80)
@@ -439,12 +440,15 @@ def test_prd197_panel_grid_persist_and_follow_theme(server):
         page.wait_for_function("window.__ready === true", timeout=20000)
         assert page.evaluate("() => document.documentElement.dataset.theme") == "light"
         assert page.evaluate("() => document.documentElement.dataset.lang") == "zh-CN"
-        assert page.evaluate("() => localStorage.getItem('roboact.leftOpen')") == "0"
-        assert page.evaluate("() => localStorage.getItem('roboact.rightW')") == "400"
+        panels = page.evaluate("() => JSON.parse(localStorage.getItem('roboact.panels') || '{}')")
+        assert panels.get("leftOpen") is False
+        assert panels.get("rightW") == 400
         assert page.evaluate("() => localStorage.getItem('roboact.grid')") == "0"
+        assert page.evaluate("() => localStorage.getItem('roboact.logFilter')") == "error"
         assert page.evaluate("() => window.__af.leftOpen.value") is False
         assert page.evaluate("() => window.__af.rightW.value") == 400
         assert page.evaluate("() => window.__af.showMini.value") is False
+        assert page.evaluate("() => window.__af.logFilter.value") == "error"
         page.locator('[data-testid="theme-btn"]').click()
         page.locator('[data-theme-mode="system"]').click()
         page.wait_for_function("() => document.documentElement.dataset.theme === 'dark'")
@@ -456,15 +460,9 @@ def test_prd197_panel_grid_persist_and_follow_theme(server):
         p.stop()
 
 
-def test_prd197_last_flow_and_canvas_persist(server):
-    created = http_json(server["base"], "/api/flows", "POST", {"name": "second-flow"})
-    fid = created["flow"]["id"]
-    assert fid
-    boot = http_json(server["base"], f"/api/bootstrap?flow_id={fid}")
-    assert boot["flow"]["id"] == fid
-    missing = http_json(server["base"], "/api/bootstrap?flow_id=fl_nope")
-    assert missing["flow"]["id"] != "fl_nope"
-
+def test_prd197_viewport_persist_per_flow(server):
+    boot = http_json(server["base"], "/api/bootstrap")
+    fid = boot["flow"]["id"]
     p, _path = _launch()
     try:
         br = _browser(p)
@@ -473,14 +471,12 @@ def test_prd197_last_flow_and_canvas_persist(server):
         _goto_ready(page, server["base"] + "/")
         page.evaluate(
             """(id) => {
-              localStorage.setItem('roboact.lastFlow', id)
-              localStorage.setItem('roboact.canvas', JSON.stringify({x: 120, y: -40, zoom: 1.35}))
+              localStorage.setItem('roboact.viewport.' + id, JSON.stringify({x: 120, y: -40, zoom: 1.35}))
             }""",
             fid,
         )
         page.reload(wait_until="domcontentloaded")
         page.wait_for_function("window.__ready === true", timeout=20000)
-        assert page.evaluate("() => window.__af.meta.value.id") == fid
         page.wait_for_timeout(200)
         vp = page.evaluate(
             """() => {

@@ -649,17 +649,24 @@ def _is_loopback(host: str) -> bool:
     return host in LOOPBACK
 
 
-def require_loopback_host(host: str) -> None:
+def warn_non_loopback_host(host: str) -> None:
+    """Alex 2026-10-31: no auth. Non-loopback is allowed; warn, do not block."""
     if not _is_loopback(host):
-        raise SystemExit(
-            f"roboact binds loopback only (127.0.0.1 / ::1 / localhost); got {host!r}. "
-            "From another computer use SSH port forwarding: "
-            "ssh -L 17465:127.0.0.1:17465 <controller>"
+        print(
+            f"WARNING: --host {host} is not loopback. There is no authentication; "
+            "anyone on that network can control the robot.",
+            file=sys.stderr,
+            flush=True,
         )
 
 
+def require_loopback_host(host: str) -> None:
+    # Kept as a name for older tests; 1.4.8 does not block. Warn only.
+    warn_non_loopback_host(host)
+
+
 async def serve(host: str, port: int, db_path: str, test_mode: bool = False) -> None:
-    require_loopback_host(host)
+    warn_non_loopback_host(host)
     app = App(db_path, test_mode=test_mode, port=port)
     await app.start()
     server = await asyncio.start_server(lambda r, w: _client(app, r, w), host, port)
@@ -674,7 +681,7 @@ def main(argv: list[str] | None = None) -> None:
     p.add_argument(
         "--host",
         default=os.environ.get("ROBOACT_HOST", "127.0.0.1"),
-        help="Loopback only: 127.0.0.1, ::1, or localhost.",
+        help="Bind address. Default 127.0.0.1. Non-loopback prints a warning (no auth).",
     )
     p.add_argument("--port", type=int, default=int(os.environ.get("ROBOACT_PORT", "7465")))
     p.add_argument("--db", default=os.environ.get("ROBOACT_DB", "data/roboact.db"))

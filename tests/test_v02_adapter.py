@@ -253,15 +253,11 @@ def test_adapter_lost_pauses(tmp_path):
     asyncio.run(go())
 
 
-def test_loopback_only_bind():
-    from roboact.server import require_loopback_host
+def test_non_loopback_host_warns_only():
+    from roboact.server import warn_non_loopback_host
 
-    require_loopback_host("127.0.0.1")
-    try:
-        require_loopback_host("0.0.0.0")
-        raise AssertionError("non-loopback must exit")
-    except SystemExit:
-        pass
+    warn_non_loopback_host("127.0.0.1")
+    warn_non_loopback_host("0.0.0.0")
 
 
 def test_missing_action_marked(tmp_path):

@@ -12,7 +12,7 @@ import {
   setLocaleMode, setThemeMode, setMotionMode, applyTheme, applyLocale, applyMotion,
   applyStorageEvent, syncAll, actionLabel, mapError, fieldLabel, CATALOGS,
 } from './i18n.js'
-import { KEYS, writeRaw, readRaw, readLastFlow, readCanvas, writeCanvas } from './prefs.js'
+import { KEYS, writeRaw, readRaw, readPanels, writePanels, readViewport, writeViewport, readLogFilter } from './prefs.js'
 
 const q = new URLSearchParams(location.search)
 const PERF_N = +(q.get('n') || 0)
@@ -69,11 +69,9 @@ const App = defineComponent({
     const nodes = ref([])
     const edges = ref([])
     const groups = ref([])
-    const leftOpen = ref(readRaw(KEYS.leftOpen) !== '0')
-    const rightW = ref((() => {
-      const n = Number(readRaw(KEYS.rightW))
-      return Number.isFinite(n) && n >= 320 ? n : 360
-    })())
+    const _panels = readPanels()
+    const leftOpen = ref(_panels.leftOpen)
+    const rightW = ref(_panels.rightW)
     const tab = ref('params')
     const selected = ref(null)
     const run = ref(null)
@@ -85,8 +83,9 @@ const App = defineComponent({
     const langOpen = ref(false)
     const motionOpen = ref(false)
     const showMini = ref(readRaw(KEYS.grid) !== '0')
-    const savedViewport = (!PERF_N && !GALLERY) ? readCanvas() : null
+    const savedViewport = ref(null)
     const defaultViewport = { x: 0, y: 0, zoom: 1 }
+    const logFilter = ref(readLogFilter())
     let canvasReady = false
     let canvasTimer = null
     const addMenu = ref(null)
@@ -142,7 +141,14 @@ const App = defineComponent({
 
     const selectedNode = computed(() => nodes.value.find(n => n.id === selected.value) || null)
     const specOf = (n) => nodeTypesList.value.find(t => t.type === (n && n.data && n.data.nodeType))
-    const nodeRecords = computed(() => records.value.filter(r => r.node_id === selected.value))
+    const nodeRecords = computed(() => {
+      const list = records.value.filter(r => r.node_id === selected.value)
+      if (logFilter.value === 'error') return list.filter(r => r.status === 'error')
+      return list
+    })
+    const logRecords = computed(() => (
+      logFilter.value === 'error' ? records.value.filter(r => r.status === 'error') : records.value
+    ))
     const rounds = computed(() => {
       const rs = [...new Set(nodeRecords.value.map(r => r.round))]
       return rs.sort((a, b) => a - b)
@@ -297,10 +303,9 @@ const App = defineComponent({
       void locale.value
       return GALLERY_STATE_DEFS.map(s => ({ ...s, word: t(s.key) }))
     })
-    watch(leftOpen, v => writeRaw(KEYS.leftOpen, v ? '1' : '0'))
-    watch(rightW, v => writeRaw(KEYS.rightW, String(v)))
+    watch([leftOpen, rightW], () => writePanels(leftOpen.value, rightW.value))
     watch(showMini, v => writeRaw(KEYS.grid, v ? '1' : '0'))
-    watch(() => meta.value && meta.value.id, id => { if (id) writeRaw(KEYS.lastFlow, id) })
+    watch(logFilter, v => writeRaw(KEYS.logFilter, v === 'error' ? 'error' : 'all'))
     const selectedSpec = computed(() => specOf(selectedNode.value))
     const deadlineAdapterOnly = computed(() => {
       const act = selectedSpec.value && selectedSpec.value.action
@@ -469,8 +474,7 @@ const App = defineComponent({
     }
 
     async function loadAll() {
-      const last = readLastFlow()
-      const b = await get('/api/bootstrap' + (last ? ('?flow_id=' + encodeURIComponent(last)) : ''))
+      const b = await get('/api/bootstrap')
       nodeTypesList.value = (b.node_types || []).map(t => ({ ...t, type: t.type || t.type_id, label: t.label || t.title }))
       tools.value = b.tools || []
       adapter.value = b.adapter || { name: '', status: 'disconnected', target: 'sim' }
@@ -505,7 +509,7 @@ const App = defineComponent({
         applyPauseReason(b.run.pause)
         listen(run.value.run_id || run.value.id)
       }
-      if (meta.value.id) writeRaw(KEYS.lastFlow, meta.value.id)
+      savedViewport.value = (!PERF_N && !GALLERY) ? readViewport(meta.value.id) : null
     }
 
     function normalizeRun(r) {
@@ -870,8 +874,8 @@ const App = defineComponent({
     function persistViewportNow() {
       if (PERF_N || GALLERY || !canvasReady) return
       const v = vf.viewport.value
-      if (!v) return
-      writeCanvas({ x: v.x, y: v.y, zoom: v.zoom })
+      if (!v || !meta.value.id) return
+      writeViewport(meta.value.id, { x: v.x, y: v.y, zoom: v.zoom })
     }
     function persistViewport() {
       if (PERF_N || GALLERY || !canvasReady) return
@@ -879,8 +883,9 @@ const App = defineComponent({
       canvasTimer = setTimeout(persistViewportNow, 200)
     }
     function restoreCanvas() {
-      const saved = savedViewport || readCanvas()
+      const saved = savedViewport.value || readViewport(meta.value && meta.value.id)
       if (saved) vf.setViewport(saved)
+      else if (vf.fitView) vf.fitView()
     }
     watch(() => vf.viewport.value, () => {
       applyGrid()
@@ -899,15 +904,17 @@ const App = defineComponent({
     function onStorage(e) {
       applyStorageEvent(e)
       if (!e || !e.key || !String(e.key).startsWith('roboact.')) return
-      if (e.key === KEYS.leftOpen) leftOpen.value = e.newValue !== '0'
-      else if (e.key === KEYS.rightW) {
-        const n = Number(e.newValue)
-        if (Number.isFinite(n) && n >= 320) rightW.value = n
+      if (e.key === KEYS.panels) {
+        const p = readPanels()
+        leftOpen.value = p.leftOpen
+        rightW.value = p.rightW
       } else if (e.key === KEYS.grid) {
         showMini.value = e.newValue !== '0'
-      } else if (e.key === KEYS.canvas && e.newValue) {
-        const v = readCanvas()
-        if (v) vf.setViewport(v)
+      } else if (e.key === KEYS.logFilter) {
+        logFilter.value = e.newValue === 'error' ? 'error' : 'all'
+      } else if (e.key && e.key.startsWith(KEYS.viewportPrefix) && e.newValue) {
+        const v = readViewport(meta.value && meta.value.id)
+        if (v && e.key === KEYS.viewportPrefix + meta.value.id) vf.setViewport(v)
       }
     }
     function groupTitle(name) {
@@ -1002,15 +1009,15 @@ const App = defineComponent({
       slot1Label, slot1Disabled, slot2Disabled, banners, mismatch, pauseRun, runWord, runWordKind,
       adapterLost, uiLost, operatorLost, rejectedActions, resolveMotion, theme, themeMode, setThemeMode,
       applyTheme, selected, tab, toggleTheme, locale, localeMode, setLocaleMode, motion, motionMode,
-      setMotionMode, t, leftOpen, rightW, showMini, meta,
+      setMotionMode, t, leftOpen, rightW, showMini, meta, logFilter,
     }
 
     return {
       nodeTypesList, tools, adapter, meta, nodes, edges, groups, leftOpen, rightW, tab, selected, selectedNode,
       run, records, runs, conn, theme, themeMode, themeOpen, setThemeMode, pickTheme, langOpen, locale, localeMode, pickLang,
-      motion, motionMode, motionOpen, pickMotion, savedViewport, defaultViewport, persistViewportNow,
+      motion, motionMode, motionOpen, pickMotion, savedViewport, defaultViewport, persistViewportNow, logFilter,
       showMini, addMenu, addQ, rejectMsg, overlay, specOf, t, displayType, fieldLabel, groupTitle, slot1Key,
-      nodeRecords, rounds, shownRec, viewRound, runActive, waitingApproval, confirmNote, versionWarn, stepsClass, stepsText,
+      nodeRecords, logRecords, rounds, shownRec, viewRound, runActive, waitingApproval, confirmNote, versionWarn, stepsClass, stepsText,
       filteredTypes, paletteTypes, paletteGroups, paletteStatus, groupBoxes, portSources, stepLimit, overrides, singleRound, compareA, compareB, compareOut,
       deadlineAdapterOnly, outputImages, isReal, crashRecovery, selectedSpec,
       lodLow, nodeTypes: { agent: FlowNode }, edgeTypes: { loop: LoopEdge },
@@ -1234,6 +1241,12 @@ const App = defineComponent({
               </div>
             </template>
             <template v-if="tab==='rec'">
+              <label class="log-filter">{{ t('log.filter') }}
+                <select v-model="logFilter" data-testid="log-filter">
+                  <option value="all">{{ t('log.all') }}</option>
+                  <option value="error">{{ t('log.error') }}</option>
+                </select>
+              </label>
               <p v-if="selectedWait" class="kv">{{ t('rec.waited', { waited: selectedWait.wait_s ?? 0, limit: selectedWait.wait_max_s ?? '—' }) }}</p>
               <div v-for="r in nodeRecords" :key="r.step" class="kv" style="margin-bottom:8px;border-bottom:1px solid var(--border);padding-bottom:8px">
                 {{ t('rec.line', { step: r.step, round: r.round, status: r.status, ms: r.duration_ms }) }}
@@ -1252,10 +1265,16 @@ const App = defineComponent({
               <p class="kv">{{ t('run.kv', { status: run.status, steps: run.steps_used || run.global_step || run.step || 0 }) }}</p>
               <p v-if="run.error" style="color:var(--red)">{{ run.error.type || run.error.message || run.error }}</p>
               <p v-if="run.status==='step_limit'">{{ t('run.step_limit_note') }}</p>
+              <label class="log-filter">{{ t('log.filter') }}
+                <select v-model="logFilter" data-testid="log-filter-run">
+                  <option value="all">{{ t('log.all') }}</option>
+                  <option value="error">{{ t('log.error') }}</option>
+                </select>
+              </label>
               <h3>{{ t('run.errors') }}</h3>
               <div class="err-list">
-                <button v-for="r in records.filter(x=>x.status==='error')" :key="r.step" @click="selected=r.node_id">{{ r.node_id }} · {{ (r.error && (r.error.type || r.error.message)) || r.status }}</button>
-                <p v-if="!records.some(x=>x.status==='error')" style="color:var(--muted)">{{ t('run.none') }}</p>
+                <button v-for="r in logRecords.filter(x=>x.status==='error')" :key="r.step" @click="selected=r.node_id">{{ r.node_id }} · {{ (r.error && (r.error.type || r.error.message)) || r.status }}</button>
+                <p v-if="!logRecords.some(x=>x.status==='error')" style="color:var(--muted)">{{ t('run.none') }}</p>
               </div>
               <h3>{{ t('run.history') }}</h3>
               <select v-model="compareA"><option value="">{{ t('run.compare_a') }}</option><option v-for="r in runs" :key="r.id" :value="r.id">{{ r.id }} · {{ r.status }}</option></select>

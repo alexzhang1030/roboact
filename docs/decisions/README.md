@@ -16,3 +16,4 @@ These records are public. Do not put chat logs, robot or controller addresses, n
 | [light-dark.md](light-dark.md) | Light and dark via CSS variables |
 | [i18n-en-zh.md](i18n-en-zh.md) | English + zh-CN; first load from `navigator.languages` |
 | [public-repo-hygiene.md](public-repo-hygiene.md) | No secrets, private IPs, or chat logs in git |
+| [auth-deferred.md](auth-deferred.md) | No tokens; A39 deferred; `--host` warns |

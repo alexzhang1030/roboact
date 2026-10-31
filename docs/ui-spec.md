@@ -345,51 +345,86 @@
 
 界面文字不是只用系统字体：西文和数字用 Inter，中文才落到系统字体。只用系统字体的话，macOS、Windows、Linux 上数字和西文的字形都不一样，截图对照会对不上。
 
-## 18. 语言（en / 中文）
+## 18. 语言（English / 简体中文）
 
-### 18.1 切换
-- 默认英文。第一次打开不管浏览器语言，都是英文。
-- **覆盖（PRD v1.4.6 / Alex）：** 第一次打开读 `navigator.languages`。第一条以 `zh` 开头用中文，其他一律英文；读不到也是英文。上面「不管浏览器语言」一条作废。用户手动选过以后存 `localStorage`，以存的为准；菜单里「跟随浏览器」清回这条规则。
-- 顶栏最右，主题按钮左边放一个文字按钮。英文界面上写「中文」，中文界面上写「EN」，点一下切换。不用国旗。另有「跟随浏览器 / English / 中文」三项。
-- 选择存在 `localStorage` 的 `roboact.lang`，值是 `system`、`en` 或 `zh-CN`。和主题一样，在 `<head>` 的内联脚本里先设好 `<html lang="en">` 或 `<html lang="zh-CN">`，避免先显示一种语言再跳成另一种。
-- 切换只换文字，不重载页面，不打断正在跑的流程。
-- 词表是 `web/i18n/en.js` 和 `web/i18n/zh-CN.js`，ES 模块，不构建（PRD / Steve；下面 18.2 的 `.json` 文件名以这两份为准）。
+### 18.1 设置怎么定（PRD v1.4.5，Steve 10-31 定）
+- 语言：没手动选过时读 `navigator.languages`，第一个以 `zh` 开头就用简体中文，其他一律英文，读不到也用英文。
+- 主题：没手动选过时读 `prefers-color-scheme`（第 17.2 节）。
+- 手动选过以后存进 `localStorage`（`roboact.lang` 为 `en` / `zh-CN`，`roboact.theme`），以后按存下的来。两个页面同时开着时监听 `storage` 事件，一边切了另一边跟着变。
+- 浏览器里只存显示偏好：语言、主题、画布缩放和位置、面板宽度、日志筛选。超时、断开暂停时间、`precondition_wait_s`、连哪个 adapter 都在服务端，界面上只显示，不存浏览器（Tedrake、Thompson 10-31）。
+- 顶栏最右，主题按钮左边放语言按钮：英文界面写「中文」，中文界面写「EN」。不用国旗。`<head>` 内联脚本先设 `<html lang>`，打开时不闪另一种语言。切换不刷新页面，不打断运行。
 
 ### 18.2 哪些翻，哪些不翻
-- 翻：界面上写死的字，包括按钮、菜单、状态词、提示、错误说明、控制节点名。全部放进 `i18n/en.json` 和 `i18n/zh.json`，键相同，缺键时显示英文，不显示键名。
-- 不翻：用户自己写的流程名、节点备注、常量值。
-- adapter 给的动作名：adapter 可以按语言给 `label`，比如 `{"en":"Walk to","zh":"走到"}`；只给一种就都显示那一种；都没给就显示动作 id，用 JetBrains Mono。
-- 数字、时间、步数格式两种语言一样：24 小时制，用 JetBrains Mono。
+- 翻：界面写死的字。键就是后端的代码（`operator_lost`、`interrupted_unknown`…），界面按代码查当前语言的字。存储、接口、运行日志里只有代码，不存界面字。
+- 不翻：用户起的流程名、节点名、备注、常量和输入输出的值。
+- adapter 给的动作名、参数说明、`read_state` 字段名：有 `labels[当前语言]` 就用，没有就显示 `name`，用 JetBrains Mono，不显示空白。单位（`m`、`rad`、`m/s`）原样显示。
+- 数字和时间两种语言一样：24 小时制，JetBrains Mono。英文界面不用全大写。
 
 ### 18.3 字体
-字体栈不变（第 17.1 节）。`lang` 一定要设对：中文时浏览器才会挑简体中文字形，英文界面里出现中文（比如用户写的流程名）也能落到系统中文字体。
+字体栈不变（第 17.1 节），英文只用 Inter。`lang` 要设对：中文时浏览器才挑简体字形，英文界面里出现中文流程名也能落到系统中文字体。
 
-### 18.4 排版
-英文比中文长，所以：
-- 按钮、标签页、顶栏状态不定死宽度，按文字撑开。
-- 节点卡片宽度不变，标题一行放不下就截断加「…」，悬停显示全名。
-- 顶栏最长的一句是「Paused · Robot controller disconnected」，在 1280 宽下不能折行，也不能挤掉右边的按钮。
-- 不用全大写，状态词首字母大写就行。
+### 18.4 英文变长后会挤的地方（按 Inter 实测宽度）
+节点卡片宽 240 px，标题行去掉左右内边距和类型图标后，标题加状态词大约只剩 188 px。
+1. **节点标题行放不下长状态词。** 「Interrupted · Result unknown」12 px 宽 163 px，「Running · Waiting for precondition」192 px，标题几乎没地方或者直接溢出。改法：英文节点标题行只放图标加一个词（Interrupted、Waiting、Running），「·」后面的那半句挪到下面的摘要行（摘要行宽 216 px）。中文也照这个规则，两种语言结构一样。
+2. **节点标题。** 宽度不变，放不下就截断加「…」，悬停显示全名。
+3. **顶栏状态。** 最长的是「Paused · Robot controller disconnected」，13 px 宽 242 px。1280 宽下必须一行放下，不能挤掉右边的连接状态、语言和主题按钮；放不下时先收起 adapter 名，再收起流程名的版本号。
+4. **按钮和标签页。** 不定死宽度，按文字撑开。`.btn.w` 的 72 px 最小宽度保留。
+5. **右侧面板** 宽 360 px，说明文字本来就会折行，不用改。
 
-### 18.5 对照表（状态和控制节点，两种语言都要一一对上）
+### 18.5 文案表
 
-| 中文 | English |
-|---|---|
-| 运行中 | Running |
-| 运行中 · 等待前提条件 | Running · Waiting for precondition |
-| 完成 | Done |
-| 出错 | Error |
-| 断点 | Breakpoint |
-| 已暂停 | Paused |
-| 已停止 | Stopped |
-| 中断 · 结果未知 | Interrupted · Result unknown |
-| 页面断开 | Page disconnected |
-| 机器人控制器断开 | Robot controller disconnected |
-| 仿真 | Sim |
-| 真机 | Real robot |
-| 开始 / 输出 / 常量 | Start / Output / Constant |
-| 条件判断 / 合并 / 人工确认 | If / Merge / Confirm |
-| 是 / 否 | Yes / No |
-| 跟随系统 / 浅色 / 深色 | System / Light / Dark |
+**节点状态**（`state`，界面规格第 3、3.1 节）
 
-验收：用英文截一遍 12 屏，状态词不折行、不截断，按钮不溢出。
+| 代码 | 中文 | English（标题行） | English（摘要行） |
+|---|---|---|---|
+| `running` | 运行中 | Running | |
+| `running` + 等前提 | 运行中 · 等待前提条件 | Waiting | Waiting for precondition |
+| `done` | 完成 | Done | |
+| `error` | 出错 | Error | |
+| `paused_before` / `paused_after` | 断点 | Breakpoint | |
+| `interrupted_unknown` | 中断 · 结果未知 | Interrupted | Result unknown. Read back before continuing. |
+| `interrupted` | 中断 | Interrupted | |
+| `stopped` | 已停止 | Stopped | |
+| `skipped` | 跳过 | Skipped | |
+| `queued` | 排队 | Queued | |
+| `awaiting_approval` | 等待确认 | Awaiting approval | |
+| `cancel.cancel_response = rejected` | 取消被拒 | Running | Cancel rejected |
+
+**暂停原因**（`pause.reason`，执行模型第 4 节表，10 个）。顶栏写「Paused · 」加下面的字：
+
+| `reason` | 中文 | English |
+|---|---|---|
+| `breakpoint` | 断点 | Breakpoint |
+| `user` | 手动 | Paused by you |
+| `step_done` | 单步 | Step done |
+| `approval` | 等待确认 | Waiting for approval |
+| `restart` | 服务重启后 | After service restart |
+| `storage_error` | 记录写不进去 | Can't save run log |
+| `write_timeout` | 写入超时 | Write timed out |
+| `motion_timeout` | 动作超时 | Motion timed out |
+| `adapter_lost` | 机器人控制器断开 | Robot controller disconnected |
+| `operator_lost` | 页面断开 | Page disconnected |
+
+`user` 在顶栏写「Paused」，不加后缀。
+
+**运行状态**（顶栏）：运行中 Running；已完成 Done；已停止 Stopped；出错 Error；超出步数上限 Step limit reached。
+
+**控制节点**：开始 Start；输出 Output；常量 Constant；条件判断 If；合并 Merge；人工确认 Approval。条件判断的两个出口：是 Yes；否 No。
+
+**按钮**：运行 Run；继续 Continue；单步 Step；暂停 Pause；停止 Stop；确认 Approve；重试 Retry；标记为完成 Mark as done；读回状态 Read back；保存 Save；导出 Export；导入 Import。
+
+**顶栏其他**：仿真 Sim；真机 Real robot；已连接 Connected；重连中 Reconnecting；跟随系统 System；浅色 Light；深色 Dark；第 2 轮 Round 2。
+
+**报错**（接口错误码，界面上显示）：
+
+| 代码 | 中文 | English |
+|---|---|---|
+| `awaiting_approval` | 正在等人工确认，只能点确认或停止 | Waiting for approval. Approve or stop. |
+| `readback_required` | 先读回机器人状态，再选重试或标记为完成 | Read back the robot's state, then retry or mark as done. |
+| `precondition_failed` | 前提条件没满足 | Precondition not met |
+| 令牌失效（401） | 访问令牌失效，重新打开启动时给的地址 | Access token expired. Reopen the link printed at startup. |
+| 动作已不存在 | 这个动作 adapter 已经不提供了 | This action is no longer provided by the adapter. |
+
+表里没有的界面文字，Torvalds 的 agent 加词时两份词表同时加，键用代码或 `ui.` 开头的英文短名，交我看英文写法。
+
+验收：两种语言各截 12 屏，浅色、深色各一张。英文节点标题行没有溢出，顶栏在 1280 宽下一行放下，没有漏翻也没有显示键名。
