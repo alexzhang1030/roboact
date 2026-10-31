@@ -54,7 +54,7 @@ Version 1.5 (2026-10-31). Companion to `prd-en-v1.5.md` section 4. exec-model = 
 <a id="9"></a>
 ## 9. Version lock
 1. While stopped at a breakpoint, edit the canvas.
-2. Pass: the run continues on the old version; `从新版本重跑` (rerun from new version) appears.
+2. Pass: the run continues on the old version; `banner.rerun` appears.
 
 <a id="10"></a>
 ## 10. Color-blind check
@@ -71,12 +71,12 @@ Version 1.5 (2026-10-31). Companion to `prd-en-v1.5.md` section 4. exec-model = 
 ## 12. Snapshot staleness
 1. Use two nodes not in the same loop.
 2. Change only the downstream node's params; rerun it. Pass: upstream snapshot not marked "maybe stale".
-3. Change an upstream node's param. Pass: downstream snapshot marked "maybe stale"; slash and `缓存 · 上游已改` shown.
+3. Change an upstream node's param. Pass: downstream snapshot marked "maybe stale"; slash and `src.stale` shown.
 
 <a id="13"></a>
 ## 13. Human approval
 1. Run a flow with a Human approval node in the middle.
-2. Pass: run stops there, state "waiting for approval" (`等待确认`); no new downstream records.
+2. Pass: run stops there, state `status.awaiting`; no new downstream records.
 3. Click Reject. Pass: only the reject branch runs; approve-branch nodes show "skipped".
 4. Click from two pages at once. Pass: first wins; second is told it was already handled.
 
@@ -88,7 +88,7 @@ Version 1.5 (2026-10-31). Companion to `prd-en-v1.5.md` section 4. exec-model = 
 <a id="15"></a>
 ## 15. Step limit
 1. Run a loop whose exit never holds, with total step limit 10.
-2. Pass: stops after step 10; state "step limit exceeded" (`超出步数上限`); no step 11 record.
+2. Pass: stops after step 10; state `run.word.step_limit`; no step 11 record.
 
 <a id="16"></a>
 ## 16. Loop breakpoints
