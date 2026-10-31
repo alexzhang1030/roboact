@@ -78,6 +78,8 @@ class ActionDescriptor(BaseModel):
     precondition_wait_s: float | None = None
     read_state: bool = False
     expiry: Literal["controller", "adapter_only"] = "controller"
+    labels: dict[str, str] = Field(default_factory=dict)
+    name: str | None = None
     side_effect_note: str = ""
     confirm_text: str = ""
     icon: str = ""
@@ -380,7 +382,7 @@ class Adapter:
             waited = self.last_precondition_wait_s or 0
             return ActionResult(
                 success=False,
-                message=f"前提条件没满足（等了 {int(round(waited))} s）",
+                message="precondition_failed",
                 measured=dict(last or {}),
             )
         if on_phase:
@@ -440,17 +442,17 @@ class Adapter:
         while not handle.done:
             if handle.cancelled:
                 handle.done = True
-                handle.result = ActionResult(success=False, message="已取消")
+                handle.result = ActionResult(success=False, message="cancelled")
                 break
             if handle.deadline is not None and time.time() >= handle.deadline:
                 handle.done = True
-                handle.result = ActionResult(success=False, message="超时")
+                handle.result = ActionResult(success=False, message="timeout")
                 break
             prog = await self.poll_progress(handle)
             if prog and on_progress:
                 await _emit(on_progress, prog)
             await asyncio.sleep(0.04)
-        return handle.result or ActionResult(success=False, message="没有结果")
+        return handle.result or ActionResult(success=False, message="no_result")
 
 
 async def _emit(fn: ProgressFn, progress: Progress) -> None:
@@ -515,6 +517,8 @@ FAKE_ACTIONS: list[ActionDescriptor] = [
         id="fake_read_pose",
         version="fake-v1",
         title="假·读位姿",
+        name="Read pose",
+        labels={"en": "Read pose", "zh-CN": "假·读位姿"},
         params=[],
         outputs=[
             OutputSpec(name="pose", type="any", title="位姿"),
@@ -534,6 +538,8 @@ FAKE_ACTIONS: list[ActionDescriptor] = [
         id="fake_set_pose",
         version="fake-v1",
         title="假·到点",
+        name="Go to pose",
+        labels={"en": "Go to pose", "zh-CN": "假·到点"},
         params=[
             ParamSpec(name="target", type="any", required=False, title="目标"),
             ParamSpec(name="x", type="number", unit="m", range=(-2.0, 2.0), default=0.0, required=False, title="X"),
@@ -557,6 +563,8 @@ FAKE_ACTIONS: list[ActionDescriptor] = [
         id="fake_gripper",
         version="fake-v1",
         title="假·夹爪",
+        name="Gripper",
+        labels={"en": "Gripper", "zh-CN": "假·夹爪"},
         params=[
             ParamSpec(name="open", type="boolean", default=True, required=False, title="张开"),
             ParamSpec(name="target", type="any", required=False, title="目标"),
@@ -578,6 +586,8 @@ FAKE_ACTIONS: list[ActionDescriptor] = [
         id="fake_tick",
         version="fake-v1",
         title="假·节拍",
+        name="Tick",
+        labels={"en": "Tick", "zh-CN": "假·节拍"},
         params=[],
         outputs=[OutputSpec(name="n", type="number", title="节拍")],
         side_effect="none",
@@ -594,6 +604,8 @@ FAKE_ACTIONS: list[ActionDescriptor] = [
         id="fake_camera",
         version="fake-v1",
         title="假·相机",
+        name="Camera",
+        labels={"en": "Camera", "zh-CN": "假·相机"},
         params=[],
         outputs=[OutputSpec(name="frame", type="image", title="画面")],
         side_effect="read",
@@ -689,7 +701,7 @@ class FakeAdapter(Adapter):
             t0 = time.monotonic()
             while time.monotonic() - t0 < self.block_s:
                 if handle.cancelled:
-                    return ActionResult(success=False, message="已取消")
+                    return ActionResult(success=False, message="cancelled")
                 await asyncio.sleep(0.02)
         if action_id == "fake_read_pose":
             return ActionResult(success=True, outputs={"pose": dict(self.pose)}, measured={"pose": dict(self.pose)})
@@ -716,11 +728,11 @@ class FakeAdapter(Adapter):
             try:
                 for i in range(self.async_steps):
                     if handle.cancelled:
-                        handle.result = ActionResult(success=False, message="已取消")
+                        handle.result = ActionResult(success=False, message="cancelled")
                         handle.done = True
                         return
                     if handle.deadline is not None and time.time() >= handle.deadline:
-                        handle.result = ActionResult(success=False, message="超时")
+                        handle.result = ActionResult(success=False, message="timeout")
                         handle.done = True
                         return
                     handle.progress = Progress(percent=round((i + 1) / self.async_steps * 100), text=f"到点 {i + 1}/{self.async_steps}")
@@ -740,7 +752,7 @@ class FakeAdapter(Adapter):
         task = self._async_jobs.get(handle.id)
         while not handle.done:
             if handle.deadline is not None and time.time() >= handle.deadline and not handle.cancelled:
-                handle.result = handle.result or ActionResult(success=False, message="超时")
+                handle.result = handle.result or ActionResult(success=False, message="timeout")
                 handle.done = True
                 break
             if handle.progress and on_progress:

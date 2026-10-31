@@ -9,9 +9,30 @@ from tests.conftest import chrome_path
 from tests.http_api import http_json, put_flow
 from tests.test_ui import _launch, _page
 
+try:
+    from PIL import Image
+except ImportError:
+    Image = None
+
 pw = pytest.importorskip("playwright.sync_api")
 
 ART = Path("/opt/cursor/artifacts")
+ROOT = Path(__file__).resolve().parents[1]
+SHEETS = ROOT / "docs" / "design"
+
+# Rams sheet stem → live app screenshot stem (without -light/-dark).
+SHEET_TO_APP = {
+    "r-bp": "uispec-canvas-paused-breakpoint",
+    "r-running": "uispec-canvas-running",
+    "r-waiting": "uispec-canvas-waiting",
+    "r-unknown": "uispec-node-unknown",
+    "r-unknown-reading": "uispec-node-unknown-reading",
+    "r-cancel-rejected": "uispec-node-cancel-rejected",
+    "r-operator-lost": "uispec-canvas-paused-operator-lost",
+    "r-adapter-lost": "uispec-canvas-paused-adapter-lost",
+    "r-missing": "uispec-node-action-missing",
+    "r-camera": "uispec-node-camera",
+}
 
 
 def _shot(page, screen: str, state: str, theme: str) -> None:
@@ -29,9 +50,11 @@ def _open(br, base, path="/"):
 def _theme(page, theme: str) -> None:
     page.evaluate(
         """(theme) => {
-          document.documentElement.dataset.theme = theme
-          localStorage.setItem('roboact-theme', theme)
-          if (window.__af && window.__af.theme) window.__af.theme.value = theme
+          if (window.__af && window.__af.setThemeMode) window.__af.setThemeMode(theme)
+          else {
+            document.documentElement.dataset.theme = theme
+            localStorage.setItem('roboact.theme', theme)
+          }
         }""",
         theme,
     )
@@ -66,7 +89,7 @@ def _both(page, screen, state):
         _shot(page, screen, state, theme)
 
 
-def test_ui_spec_screenshots_one_pass(server, token_server):
+def test_ui_spec_screenshots_one_pass(server):
     ART.mkdir(parents=True, exist_ok=True)
     p, path = _launch()
     try:
@@ -155,6 +178,18 @@ def test_ui_spec_screenshots_one_pass(server, token_server):
         _set_run(page, "paused", "motion_timeout")
         _both(page, "node", "unknown")
 
+        page.evaluate("() => { if (window.__af.selected) window.__af.selected.value = 'go'; if (window.__af.tab) window.__af.tab.value = 'rec' }")
+        _set_node(page, "go", {
+            "status": "interrupted_unknown",
+            "state": "interrupted_unknown",
+            "word": "中断 · 结果未知",
+        })
+        _set_run(page, "paused", "motion_timeout")
+        _both(page, "node", "unknown-reading")
+
+        page.evaluate("() => { if (window.__af.selected) window.__af.selected.value = 'cam'; if (window.__af.tab) window.__af.tab.value = 'out' }")
+        _both(page, "node", "camera")
+
         _set_run(page, "paused", "user")
         page.evaluate(
             """() => {
@@ -211,13 +246,6 @@ def test_ui_spec_screenshots_one_pass(server, token_server):
         except Exception:
             pass
 
-        page4, _, _ = _page(br, token_server["base"])
-        page4.goto(token_server["base"] + "/", wait_until="domcontentloaded")
-        page4.wait_for_function("window.__ready === true", timeout=20000)
-        page4.wait_for_selector(".token-gate", timeout=8000)
-        _both(page4, "screen", "token-gate")
-        page4.close()
-
         br.close()
     finally:
         p.stop()
@@ -227,3 +255,83 @@ def test_ui_spec_screenshots_one_pass(server, token_server):
     assert len(names) >= 12, names
     assert len(darks) >= 12, darks
     assert len(names) == len(darks)
+    _write_sheet_compare_report()
+
+
+def _mean_rgb(path: Path) -> tuple[float, float, float] | None:
+    if Image is None or not path.is_file():
+        return None
+    im = Image.open(path).convert("RGB")
+    px = list(im.getdata())
+    n = len(px) or 1
+    return (sum(p[0] for p in px) / n, sum(p[1] for p in px) / n, sum(p[2] for p in px) / n)
+
+
+def _write_sheet_compare_report() -> None:
+    """Compare live shots to Rams' sheets. Report only — do not restyle to match."""
+    lines = [
+        "# Theme sheet compare (ui-spec §17)",
+        "",
+        "Live app screenshots vs `docs/design/` PNG sheets. Layout is expected to differ",
+        "(sheets are a richer mock: logo, crumb, example 取杯子 graph). Colour tokens",
+        "must still match §17. This file lists mismatches; it does not auto-tune CSS.",
+        "",
+        "| Sheet | Theme | App shot | Sheet size | App size | Mean ΔRGB | Notes |",
+        "|---|---|---|---|---|---|---|",
+    ]
+    missing = []
+    for stem, app_stem in SHEET_TO_APP.items():
+        for theme, suffix in (("light", ""), ("dark", "-dark")):
+            sheet = SHEETS / f"{stem}{suffix}.png"
+            # light files are r-bp.png; dark are r-bp-dark.png
+            if theme == "light":
+                sheet = SHEETS / f"{stem}.png"
+            app = ART / f"{app_stem}-{theme}.png"
+            notes = []
+            if not sheet.is_file():
+                notes.append("missing sheet")
+                missing.append(str(sheet))
+            if not app.is_file():
+                notes.append("missing app shot")
+                missing.append(str(app))
+            ssize = asize = "—"
+            delta = "—"
+            if Image is not None and sheet.is_file() and app.is_file():
+                sim = Image.open(sheet)
+                aim = Image.open(app)
+                ssize = f"{sim.size[0]}×{sim.size[1]}"
+                asize = f"{aim.size[0]}×{aim.size[1]}"
+                if sim.size != (1440, 900):
+                    notes.append(f"sheet not 1440×900")
+                if aim.size[0] < 1200:
+                    notes.append("app viewport narrower than sheet")
+                sm = _mean_rgb(sheet)
+                am = _mean_rgb(app)
+                if sm and am:
+                    d = (abs(sm[0] - am[0]) + abs(sm[1] - am[1]) + abs(sm[2] - am[2])) / 3
+                    delta = f"{d:.1f}"
+                    if d > 18:
+                        notes.append("overall tone differs (layout / chrome)")
+                notes.append("graph and chrome differ from mock")
+            if not notes:
+                notes.append("ok")
+            lines.append(
+                f"| {stem}{suffix or ''} | {theme} | `{app.name if app.is_file() else app_stem}` | {ssize} | {asize} | {delta} | {'; '.join(notes)} |"
+            )
+    extra = sorted(p.name for p in SHEETS.glob("r-*-dark.png"))
+    lines.extend(["", "## Design sheets present", "", ", ".join(extra) or "(none)", ""])
+    lines.extend([
+        "## Expected structural mismatches (not tuned)",
+        "",
+        "- Sheets include a logo, flow crumb (`/ 取杯子`), and a 7-node example graph. The live app shows the FakeAdapter demo (start / 假·到点 / 假·夹爪 / 假·相机).",
+        "- Sheets put 仿真/真机 and adapter name in the top-right cluster; the live app puts 保存文件 / 打开 before the appearance control.",
+        "- Appearance control matches §17 (half-filled circle, far right, follow system / light / dark).",
+        "- Sheets use `--hair` / `--surface2` for some separators; live chrome still uses `--border` for top/left/right edges.",
+        "- Fonts: live UI is Inter + JetBrains Mono from `roboact/static/fonts/` with system CJK fallback, as §17.",
+        "- r-token sheets exist in `docs/design/` (401 token gate). Authentication is deferred (A39); the live app has no token gate.",
+        "",
+    ])
+    ART.mkdir(parents=True, exist_ok=True)
+    report = ART / "theme-sheet-compare.md"
+    report.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    assert not [m for m in missing if m.endswith(".png") and "docs/design" in m], missing

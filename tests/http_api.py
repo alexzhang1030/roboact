@@ -9,7 +9,7 @@ from typing import Any
 def http_json(base: str, path: str, method: str = "GET", body: Any = None, timeout: float = 8.0) -> Any:
     data = None if body is None else json.dumps(body).encode()
     req = urllib.request.Request(base + path, data=data, method=method)
-    if data is not None:
+    if method in ("POST", "PUT", "PATCH", "DELETE"):
         req.add_header("Content-Type", "application/json")
     try:
         with urllib.request.urlopen(req, timeout=timeout) as r:

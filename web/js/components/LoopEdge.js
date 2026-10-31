@@ -1,6 +1,7 @@
 import { defineComponent, markRaw, computed } from 'vue'
 import { BaseEdge, EdgeLabelRenderer } from '@vue-flow/core'
 import { nodeStatus, edgeRound } from '../status-store.js'
+import { t, locale } from '../i18n.js'
 
 export default markRaw(defineComponent({
   name: 'LoopEdge',
@@ -14,8 +15,9 @@ export default markRaw(defineComponent({
       return { path, lx: (sx + tx) / 2, ly: dip }
     })
     const label = computed(() => {
+      void locale.value
       const r = (nodeStatus[props.target] && nodeStatus[props.target].round) || edgeRound[props.id] || (props.data && props.data.round) || 0
-      return r ? ('第 ' + r + ' 轮') : '第 1 轮'
+      return t('loop.round', { round: r || 1 })
     })
     return { geo, label }
   },

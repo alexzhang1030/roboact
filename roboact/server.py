@@ -22,13 +22,16 @@ from .util import now_iso
 
 
 ROOT = Path(__file__).resolve().parent.parent
+PKG = Path(__file__).resolve().parent
 WEB = ROOT / "web"
 DOCS = ROOT / "docs"
 ASSETS = ROOT / "assets"
+PKG_STATIC = PKG / "static"
 REASONS = {200: "OK", 201: "Created", 202: "Accepted", 204: "No Content", 400: "Bad Request",
            401: "Unauthorized", 403: "Forbidden", 404: "Not Found", 409: "Conflict",
            410: "Gone",
-           422: "Unprocessable Entity", 500: "Error"}
+           415: "Unsupported Media Type",
+          422: "Unprocessable Entity", 500: "Error"}
 MIME = {
     ".html": "text/html; charset=utf-8",
     ".js": "text/javascript; charset=utf-8",
@@ -43,10 +46,84 @@ MIME = {
 }
 
 LOOPBACK = {"127.0.0.1", "localhost", "::1"}
+ALLOWED_HOST_NAMES = frozenset({"127.0.0.1", "localhost", "::1", "[::1]"})
+COMMAND_METHODS = frozenset({"POST", "PUT", "PATCH", "DELETE"})
+
+
+def parse_host_header(raw: str) -> tuple[str, str]:
+    h = (raw or "").strip()
+    if not h:
+        return "", ""
+    if h.startswith("["):
+        end = h.find("]")
+        if end < 0:
+            return h.lower(), ""
+        name = h[: end + 1].lower()
+        rest = h[end + 1 :]
+        port = rest[1:] if rest.startswith(":") else ""
+        return name, port
+    if h.count(":") == 1:
+        name, port = h.split(":", 1)
+        return name.lower(), port
+    return h.lower(), ""
+
+
+def host_allowed(host_header: str, bind_port: int | None) -> bool:
+    """Loopback Host only. Port may differ from the bind (SSH / TCP proxy)."""
+    name, _port = parse_host_header(host_header)
+    if name not in ALLOWED_HOST_NAMES:
+        return False
+    return True
+
+
+def origin_allowed(origin: str, host_header: str) -> bool:
+    if not origin:
+        return False
+    try:
+        parsed = urlparse(origin)
+    except Exception:
+        return False
+    if parsed.scheme not in ("http", "https"):
+        return False
+    host = (parsed.hostname or "").lower()
+    if host not in {"127.0.0.1", "localhost", "::1"}:
+        return False
+    req_name, req_port = parse_host_header(host_header)
+    req_host = req_name.strip("[]")
+    if host != req_host and not ({host, req_host} <= {"127.0.0.1", "localhost"}):
+        return False
+    origin_port = parsed.port
+    if origin_port is None:
+        origin_port = 443 if parsed.scheme == "https" else 80
+    if req_port and str(origin_port) != req_port:
+        return False
+    return True
+
+
+def request_origin(headers: dict[str, str]) -> str:
+    """EventSource on Chromium is same-origin and often omits Origin; Referer is the page."""
+    origin = (headers.get("origin") or "").strip()
+    if origin:
+        return origin
+    referer = (headers.get("referer") or "").strip()
+    if not referer:
+        return ""
+    try:
+        parsed = urlparse(referer)
+    except Exception:
+        return ""
+    if parsed.scheme not in ("http", "https") or not parsed.netloc:
+        return ""
+    return f"{parsed.scheme}://{parsed.netloc}"
+
+
+def content_type_is_json(headers: dict[str, str]) -> bool:
+    ct = (headers.get("content-type") or "").split(";", 1)[0].strip().lower()
+    return ct == "application/json"
 
 
 class App:
-    def __init__(self, db_path: str, test_mode: bool = False, token: str | None = None, require_token: bool = False) -> None:
+    def __init__(self, db_path: str, test_mode: bool = False, port: int | None = None) -> None:
         self.data_dir = str(Path(db_path).resolve().parent)
         self.store = open_store(db_path)
         self.adapter = FakeAdapter()
@@ -54,8 +131,7 @@ class App:
         self.hub = SseHub(self.store)
         self.ex = Executor(self.store, self.adapter, self.hub, self.data_dir)
         self.test_mode = test_mode
-        self.token = token
-        self.require_token = require_token
+        self.port = port
         self._ensure_flow()
 
     def _demo_graph(self) -> dict[str, Any]:
@@ -86,17 +162,6 @@ class App:
                 return g
         return self.store.create_flow("假适配器演示", self._demo_graph())
 
-    def _token_ok(self, headers: dict[str, str], query: dict[str, str]) -> bool:
-        if not self.require_token:
-            return True
-        got = (
-            headers.get("x-roboact-token")
-            or headers.get("authorization", "").removeprefix("Bearer ").strip()
-            or query.get("token")
-            or ""
-        )
-        return bool(self.token) and got == self.token
-
     async def start(self) -> None:
         self.hub.start()
         self.ex.start_background()
@@ -106,26 +171,42 @@ class App:
         parsed = urlparse(path)
         route = parsed.path
         query = {k: v[0] if v else "" for k, v in parse_qs(parsed.query).items()}
-        if route.startswith("/api/") and not self._token_ok(headers, query):
-            await self._json(writer, 401, {"error": "unauthorized", "message": "需要访问令牌。", "detail": {}})
+        if not host_allowed(headers.get("host") or "", self.port):
+            await self._json(writer, 403, {"error": "bad_host", "message": "bad_host", "detail": {}})
+            return
+        if (headers.get("upgrade") or "").lower() == "websocket":
+            if not origin_allowed(headers.get("origin") or "", headers.get("host") or ""):
+                await self._json(writer, 403, {"error": "bad_origin", "message": "bad_origin", "detail": {}})
+                return
+            await self._json(writer, 400, {"error": "no_websocket", "message": "no_websocket", "detail": {}})
+            return
+        is_events = route.endswith("/events")
+        if is_events and not origin_allowed(request_origin(headers), headers.get("host") or ""):
+            await self._json(writer, 403, {"error": "bad_origin", "message": "bad_origin", "detail": {}})
+            return
+        if route.startswith("/api/") and method in COMMAND_METHODS and not content_type_is_json(headers):
+            await self._json(writer, 415, {"error": "bad_content_type", "message": "bad_content_type", "detail": {}})
             return
         try:
             data = json.loads(body.decode("utf-8") or "null") if body else None
         except json.JSONDecodeError:
-            await self._json(writer, 400, {"error": "invalid_graph", "message": "JSON 无法解析", "detail": {}})
+            await self._json(writer, 400, {"error": "invalid_graph", "message": "invalid_graph", "detail": {}})
             return
         try:
             await self._dispatch(method, route, query, data, headers, writer)
         except ApiError as e:
             await self._json(writer, e.status, e.body())
         except FileNotFoundError:
-            await self._json(writer, 404, {"error": "not_found", "message": "找不到资源", "detail": {}})
+            await self._json(writer, 404, {"error": "not_found", "message": "not_found", "detail": {}})
         except Exception as e:
-            await self._json(writer, 500, {"error": "internal", "message": str(e), "detail": {}})
+            await self._json(writer, 500, {"error": "internal", "message": "internal", "detail": {"type": type(e).__name__}})
 
     async def _dispatch(self, method, route, query, data, headers, writer) -> None:
         if method == "OPTIONS":
             await self._raw(writer, 204, b"", "text/plain")
+            return
+        if method == "HEAD":
+            await self._static(writer, route, head=True)
             return
         if route == "/api/bootstrap" and method == "GET":
             flow = self._ensure_flow()
@@ -441,7 +522,6 @@ class App:
             "Content-Type: text/event-stream; charset=utf-8\r\n"
             "Cache-Control: no-cache\r\n"
             "Connection: keep-alive\r\n"
-            "Access-Control-Allow-Origin: *\r\n"
             "\r\n"
         )
         writer.write(head.encode())
@@ -475,9 +555,16 @@ class App:
         finally:
             self.hub.unsubscribe(run_id, q)
 
-    async def _static(self, writer: asyncio.StreamWriter, route: str) -> None:
+    async def _static(self, writer: asyncio.StreamWriter, route: str, head: bool = False) -> None:
         rel = "index.html" if route in ("", "/") else unquote(route).lstrip("/")
-        if rel.startswith("docs/"):
+        if rel.startswith("static/"):
+            target = (PKG_STATIC / rel[7:]).resolve()
+            root = PKG_STATIC.resolve()
+        elif rel.startswith("docs/fonts/"):
+            # Design sheets load ../fonts from /docs/design/; same files as the package.
+            target = (PKG_STATIC / "fonts" / rel[11:]).resolve()
+            root = (PKG_STATIC / "fonts").resolve()
+        elif rel.startswith("docs/"):
             target = (DOCS / rel[5:]).resolve()
             root = DOCS.resolve()
         elif rel.startswith("assets/"):
@@ -498,16 +585,16 @@ class App:
         data = target.read_bytes()
         ext = target.suffix.lower()
         mime = MIME.get(ext) or mimetypes.guess_type(str(target))[0] or "application/octet-stream"
-        await self._raw(writer, 200, data, mime)
+        await self._raw(writer, 200, data, mime, head=head)
 
     async def _json(self, writer: asyncio.StreamWriter, code: int, obj: Any) -> None:
         raw = json.dumps(obj, ensure_ascii=False, default=str).encode("utf-8")
         await self._raw(writer, code, raw, "application/json; charset=utf-8")
 
-    async def _raw(self, writer: asyncio.StreamWriter, code: int, body: bytes, mime: str) -> None:
+    async def _raw(self, writer: asyncio.StreamWriter, code: int, body: bytes, mime: str, head: bool = False) -> None:
         reason = REASONS.get(code, "OK")
-        extra = "Access-Control-Allow-Origin: *\r\nAccess-Control-Allow-Headers: *\r\nAccess-Control-Allow-Methods: *\r\n"
-        head = (
+        extra = ""
+        header = (
             f"HTTP/1.1 {code} {reason}\r\n"
             f"Content-Type: {mime}\r\n"
             f"Content-Length: {len(body)}\r\n"
@@ -516,7 +603,7 @@ class App:
             "Connection: close\r\n"
             "\r\n"
         )
-        writer.write(head.encode() + body)
+        writer.write(header.encode() + (b"" if head else body))
         await writer.drain()
         writer.close()
         try:
@@ -555,30 +642,18 @@ def _is_loopback(host: str) -> bool:
     return host in LOOPBACK
 
 
-def normalize_token(token: str | None) -> str | None:
-    if token is None:
-        return None
-    stripped = token.strip()
-    return stripped or None
-
-
-def require_bind_token(host: str, token: str | None) -> None:
-    """Refuse to start on a non-loopback bind when no token was provided.
-
-    There is no built-in token. Callers must pass --token or ROBOACT_TOKEN.
-    """
-    if not _is_loopback(host) and not normalize_token(token):
+def require_loopback_host(host: str) -> None:
+    if not _is_loopback(host):
         raise SystemExit(
-            "非本机 --host 必须带 --token（也可设环境变量 ROBOACT_TOKEN）。"
-            "没有令牌时只能绑定回环地址（127.0.0.1 / localhost / ::1）。"
+            f"roboact binds loopback only (127.0.0.1 / ::1 / localhost); got {host!r}. "
+            "From another computer use SSH port forwarding: "
+            "ssh -L 17465:127.0.0.1:17465 <controller>"
         )
 
 
-async def serve(host: str, port: int, db_path: str, test_mode: bool = False, token: str | None = None) -> None:
-    token = normalize_token(token)
-    require_bind_token(host, token)
-    require_token = (not _is_loopback(host)) or bool(token)
-    app = App(db_path, test_mode=test_mode, token=token, require_token=require_token)
+async def serve(host: str, port: int, db_path: str, test_mode: bool = False) -> None:
+    require_loopback_host(host)
+    app = App(db_path, test_mode=test_mode, port=port)
     await app.start()
     server = await asyncio.start_server(lambda r, w: _client(app, r, w), host, port)
     sockets = ", ".join(str(s.getsockname()) for s in server.sockets or [])
@@ -587,26 +662,19 @@ async def serve(host: str, port: int, db_path: str, test_mode: bool = False, tok
         await server.serve_forever()
 
 
-def resolve_token(cli_token: str | None) -> str | None:
-    if cli_token is not None:
-        return normalize_token(cli_token)
-    return normalize_token(os.environ.get("ROBOACT_TOKEN"))
-
-
 def main(argv: list[str] | None = None) -> None:
     p = argparse.ArgumentParser(description="Roboact")
-    p.add_argument("--host", default=os.environ.get("ROBOACT_HOST", "127.0.0.1"))
+    p.add_argument(
+        "--host",
+        default=os.environ.get("ROBOACT_HOST", "127.0.0.1"),
+        help="Loopback only: 127.0.0.1, ::1, or localhost.",
+    )
     p.add_argument("--port", type=int, default=int(os.environ.get("ROBOACT_PORT", "7465")))
     p.add_argument("--db", default=os.environ.get("ROBOACT_DB", "data/roboact.db"))
-    p.add_argument(
-        "--token",
-        default=None,
-        help="访问令牌。绑定非回环地址时必须提供。也可通过环境变量 ROBOACT_TOKEN 传入。没有默认值。",
-    )
     args = p.parse_args(argv)
     test_mode = os.environ.get("ROBOACT_TEST") == "1"
     try:
-        asyncio.run(serve(args.host, args.port, args.db, test_mode=test_mode, token=resolve_token(args.token)))
+        asyncio.run(serve(args.host, args.port, args.db, test_mode=test_mode))
     except KeyboardInterrupt:
         sys.exit(0)
 

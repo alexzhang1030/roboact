@@ -48,7 +48,7 @@ def test_a38_deadline_precondition_failed_no_goal(tmp_path):
         go_recs = _go_steps(store, rid)
         assert len(go_recs) == 1
         assert go_recs[0]["error"]["type"] == "precondition_failed"
-        assert "前提条件没满足" in (go_recs[0]["error"].get("message") or "")
+        assert go_recs[0]["error"].get("message") == "precondition_failed"
 
     asyncio.run(go())
 

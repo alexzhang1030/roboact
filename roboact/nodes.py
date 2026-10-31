@@ -78,7 +78,9 @@ class NodeType:
     fixture: ClassVar[bool] = False
     from_adapter: ClassVar[bool] = False
     adapter_id: ClassVar[str] = ""
-    group: ClassVar[str] = "流程控制"
+    group: ClassVar[str] = "control"
+    name: ClassVar[str] = ""
+    labels: ClassVar[dict[str, str]] = {}
     action_desc: ClassVar[ActionDescriptor | None] = None
 
     def __init__(self) -> None:
@@ -568,6 +570,8 @@ def make_action_node(desc: ActionDescriptor, adapter: Adapter) -> type[NodeType]
     class ActionNode(NodeType):
         type_id = desc.id
         title = desc.title
+        name = desc.name or desc.id
+        labels = desc.labels or {"en": desc.name or desc.id, "zh-CN": desc.title}
         Inputs = in_model
         Outputs = out_model
         Params = in_model
@@ -605,7 +609,7 @@ def make_action_node(desc: ActionDescriptor, adapter: Adapter) -> type[NodeType]
                     raise PreconditionFailed(result.message, result.measured)
                 if result.message == "wait_aborted":
                     raise WaitAborted("user")
-                raise RuntimeError(result.message or "动作失败")
+                raise RuntimeError(result.message or "action_failed")
             return out_model.model_validate(result.outputs)
 
         def mock(self, inputs, params):
@@ -675,6 +679,8 @@ def as_public(cls: type[NodeType], adapter: Any = None) -> dict[str, Any]:
         "type": cls.type_id,
         "title": cls.title,
         "label": cls.title,
+        "name": cls.name or cls.type_id,
+        "labels": cls.labels or {"en": cls.name or cls.type_id, "zh-CN": cls.title},
         "side_effect": cls.side_effect.value,
         "shows_write_mark": cls.side_effect in EXTERNAL_SIDES,
         "side_effect_note": cls.side_effect_note,

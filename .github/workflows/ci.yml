@@ -13,6 +13,8 @@ jobs:
           python-version: "3.12"
       - name: Vendor hash check
         run: python scripts/check_manifest.py
+      - name: Private IPv4 scan (git ls-files only)
+        run: python scripts/check_private_ip.py
       - name: Tamper must fail
         run: |
           f=web/vendor/vue-flow-minimap.css

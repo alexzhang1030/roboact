@@ -98,7 +98,7 @@ export function fromFlow(flow, nodeTypes) {
       position: { x: n.x || 0, y: n.y || 0 },
       data: {
         nodeType: n.type,
-        title: spec ? spec.label : n.type,
+        title: n.title || '',
         params: n.params || (spec && spec.default_params) || {},
         breakpoints: n.breakpoints || {},
       },

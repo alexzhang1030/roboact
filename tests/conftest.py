@@ -61,47 +61,10 @@ def server(tmp_path):
     else:
         proc.kill()
         raise RuntimeError("server did not start")
-    yield {"base": base, "port": port, "proc": proc}
-    proc.terminate()
+    info = {"base": base, "port": port, "proc": proc, "db": str(db)}
+    yield info
+    info["proc"].terminate()
     try:
-        proc.wait(timeout=3)
+        info["proc"].wait(timeout=3)
     except subprocess.TimeoutExpired:
-        proc.kill()
-
-
-@pytest.fixture
-def token_server(tmp_path):
-    import uuid
-    port = free_port()
-    db = tmp_path / "tok.db"
-    tok = uuid.uuid4().hex
-    env = {**os.environ, "ROBOACT_TEST": "1", "PYTHONPATH": str(ROOT)}
-    env.pop("ROBOACT_TOKEN", None)
-    proc = subprocess.Popen(
-        [sys.executable, "-m", "roboact", "--host", "127.0.0.1", "--port", str(port), "--db", str(db), "--token", tok],
-        cwd=str(ROOT),
-        env=env,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-    )
-    base = f"http://127.0.0.1:{port}"
-    t0 = time.time()
-    import urllib.request
-    while time.time() - t0 < 8:
-        if proc.poll() is not None:
-            out = proc.stdout.read().decode() if proc.stdout else ""
-            raise RuntimeError("server exited: " + out)
-        try:
-            urllib.request.urlopen(base + "/", timeout=0.3)
-            break
-        except Exception:
-            time.sleep(0.05)
-    else:
-        proc.kill()
-        raise RuntimeError("token server did not start")
-    yield {"base": base, "port": port, "proc": proc, "token": tok}
-    proc.terminate()
-    try:
-        proc.wait(timeout=3)
-    except subprocess.TimeoutExpired:
-        proc.kill()
+        info["proc"].kill()

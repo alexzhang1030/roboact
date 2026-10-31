@@ -66,7 +66,7 @@ def test_a24_controller_expiry_stops_goal():
             "fake_set_pose", {"x": 1.0, "y": 0.0, "z": 0.0}, deadline=time.time() + 0.12,
         )
         assert result.success is False
-        assert "超时" in (result.message or "")
+        assert result.message == "timeout"
 
     asyncio.run(go())
 
@@ -384,40 +384,14 @@ def test_a36_images_stay_out_of_sqlite(tmp_path):
     asyncio.run(go())
 
 
-def test_a37_non_loopback_requires_token(tmp_path):
-    from roboact.server import App, require_bind_token
+def test_loopback_only_bind():
+    from roboact.server import require_loopback_host
 
-    async def go():
-        tok = uuid.uuid4().hex
-        app = App(str(tmp_path / "auth.db"), token=tok, require_token=True)
-
-        class W:
-            def __init__(self) -> None:
-                self.buf = b""
-
-            def write(self, b: bytes) -> None:
-                self.buf += b
-
-            async def drain(self) -> None:
-                return
-
-            def close(self) -> None:
-                return
-
-            async def wait_closed(self) -> None:
-                return
-
-        w = W()
-        await app.handle("GET", "/api/bootstrap", {}, b"", w)
-        assert b"401" in w.buf
-        w2 = W()
-        await app.handle("GET", "/api/bootstrap", {"x-roboact-token": tok}, b"", w2)
-        assert b"200" in w2.buf
-        try:
-            require_bind_token("0.0.0.0", None)
-            raise AssertionError("should require token")
-        except SystemExit:
-            pass
-        require_bind_token("127.0.0.1", None)
-
-    asyncio.run(go())
+    require_loopback_host("127.0.0.1")
+    require_loopback_host("localhost")
+    require_loopback_host("::1")
+    try:
+        require_loopback_host("0.0.0.0")
+        raise AssertionError("non-loopback must exit")
+    except SystemExit:
+        pass

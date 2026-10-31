@@ -69,7 +69,18 @@
       "license_file": "vendor/licenses/MIT-vue-flow.txt"
     },
     {
-      "file": "web/vendor/fonts/JetBrainsMono-Regular.woff2",
+      "file": "roboact/static/fonts/InterVariable.woff2",
+      "package": "Inter",
+      "version": "4.1",
+      "source_url": "https://github.com/rsms/inter/releases/download/v4.1/Inter-4.1.zip#web/InterVariable.woff2",
+      "conversion": "none（从 Inter 4.1 官方 zip 取出 woff2，未改动）",
+      "bytes": 352240,
+      "sha256": "693b77d4f32ee9b8bfc995589b5fad5e99adf2832738661f5402f9978429a8e3",
+      "license": "OFL-1.1",
+      "license_file": "vendor/licenses/OFL-1.1-inter.txt"
+    },
+    {
+      "file": "roboact/static/fonts/JetBrainsMono-Regular.woff2",
       "package": "JetBrains Mono",
       "version": "2.304",
       "source_url": "https://github.com/JetBrains/JetBrainsMono/releases/download/v2.304/JetBrainsMono-2.304.zip#fonts/webfonts/JetBrainsMono-Regular.woff2",
@@ -80,11 +91,33 @@
       "license_file": "vendor/licenses/OFL-1.1-jetbrains-mono.txt"
     },
     {
-      "file": "web/vendor/fonts/OFL.txt",
+      "file": "roboact/static/fonts/JetBrainsMono-Medium.woff2",
+      "package": "JetBrains Mono",
+      "version": "2.304",
+      "source_url": "https://github.com/JetBrains/JetBrainsMono/releases/download/v2.304/JetBrainsMono-2.304.zip#fonts/webfonts/JetBrainsMono-Medium.woff2",
+      "conversion": "none（从官方 zip 取出 woff2，未改动）",
+      "bytes": 93824,
+      "sha256": "086c48dfbea9ddaff1320f7e09399b8e2924e88ce67453721255db3bdbb5a353",
+      "license": "OFL-1.1",
+      "license_file": "vendor/licenses/OFL-1.1-jetbrains-mono.txt"
+    },
+    {
+      "file": "roboact/static/fonts/Inter-LICENSE.txt",
+      "package": "Inter",
+      "version": "4.1",
+      "source_url": "https://github.com/rsms/inter/releases/download/v4.1/Inter-4.1.zip#LICENSE.txt",
+      "conversion": "none（官方 OFL 许可文本，未改动）",
+      "bytes": 4380,
+      "sha256": "262481e844521b326f5ecd053e59b98c8b2da78c8ee1bdbb6e8174305e54935a",
+      "license": "OFL-1.1",
+      "license_file": "vendor/licenses/OFL-1.1-inter.txt"
+    },
+    {
+      "file": "roboact/static/fonts/JetBrainsMono-OFL.txt",
       "package": "JetBrains Mono",
       "version": "2.304",
       "source_url": "https://github.com/JetBrains/JetBrainsMono/releases/download/v2.304/JetBrainsMono-2.304.zip#OFL.txt",
-      "conversion": "none（从官方 zip 取出 OFL 许可文本，未改动）",
+      "conversion": "none（官方 OFL 许可文本，未改动）",
       "bytes": 4399,
       "sha256": "30f0c136e3c88e422d0791acd97238870f9054a9729bc34cf2ff0d4ed8cac4ad",
       "license": "OFL-1.1",

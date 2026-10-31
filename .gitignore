@@ -8,6 +8,8 @@ data/*.db-*
 data/*.db-journal
 *.egg-info/
 .playwright/
+.playwright-mcp/
+artifacts/
 .cache/
 uploads/
 agent-tools/

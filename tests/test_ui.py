@@ -72,7 +72,8 @@ def test_breakpoint_flow_ui(server):
         )
         page.wait_for_selector('.fn[data-status="paused"]', timeout=5000)
         assert page.locator('.fn[data-status="paused"]').count() >= 1
-        assert "已暂停" in page.locator('.fn[data-status="paused"] .fn-st-word').first.inner_text()
+        word = page.locator('.fn[data-status="paused"] .fn-st-word').first.inner_text()
+        assert "Paused" in word or "已暂停" in word, word
         assert blocked == []
         br.close()
     finally:
@@ -89,9 +90,9 @@ def test_grayscale_states_distinct(server):
         page.wait_for_function("window.__ready === true", timeout=20000)
         page.wait_for_timeout(300)
         words = page.locator(".fn-st-word").all_inner_texts()
-        assert any("完成" in w for w in words)
-        assert any("暂停" in w for w in words)
-        assert any("出错" in w for w in words)
+        assert any("Done" in w or "完成" in w for w in words)
+        assert any("Paused" in w or "暂停" in w for w in words)
+        assert any("Error" in w or "出错" in w for w in words)
         kinds = page.eval_on_selector_all(".ico", "els => els.map(e => e.getAttribute('data-kind'))")
         assert set(kinds) >= {"done", "paused", "error"}
         # screenshot each icon, convert to grayscale, compare occupancy grids

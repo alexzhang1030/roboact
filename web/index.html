@@ -1,19 +1,51 @@
 <!doctype html>
-<html lang="zh">
+<html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Roboact</title>
 <script>
 (function () {
+  function detectLang() {
+    try {
+      var list = navigator.languages || [navigator.language]
+      var first = (list && list[0]) || ''
+      if (String(first).toLowerCase().indexOf('zh') === 0) return 'zh-CN'
+    } catch (e) {}
+    return 'en'
+  }
   try {
-    var stored = localStorage.getItem('roboact-theme')
-    var theme = (stored === 'dark' || stored === 'light')
+    var stored = localStorage.getItem('roboact.theme')
+    if (stored !== 'light' && stored !== 'dark' && stored !== 'system') {
+      var legacy = localStorage.getItem('roboact-theme')
+      stored = (legacy === 'light' || legacy === 'dark') ? legacy : 'system'
+    }
+    var theme = stored === 'light' || stored === 'dark'
       ? stored
       : (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light')
     document.documentElement.dataset.theme = theme
+    document.documentElement.dataset.themeMode = stored
+
+    var langMode = localStorage.getItem('roboact.lang')
+    if (langMode !== 'en' && langMode !== 'zh-CN' && langMode !== 'system') langMode = 'system'
+    var lang = (langMode === 'en' || langMode === 'zh-CN') ? langMode : detectLang()
+    document.documentElement.lang = lang
+    document.documentElement.dataset.lang = lang
+    document.documentElement.dataset.langMode = langMode
+
+    var motionMode = localStorage.getItem('roboact.motion')
+    if (motionMode !== 'reduce' && motionMode !== 'full' && motionMode !== 'system') motionMode = 'system'
+    var reduce = motionMode === 'reduce' || (motionMode === 'system' && window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches)
+    document.documentElement.dataset.motion = reduce ? 'reduce' : 'full'
+    document.documentElement.dataset.motionMode = motionMode
   } catch (e) {
     document.documentElement.dataset.theme = 'light'
+    document.documentElement.dataset.themeMode = 'system'
+    document.documentElement.lang = 'en'
+    document.documentElement.dataset.lang = 'en'
+    document.documentElement.dataset.langMode = 'system'
+    document.documentElement.dataset.motion = 'full'
+    document.documentElement.dataset.motionMode = 'system'
   }
 })()
 </script>

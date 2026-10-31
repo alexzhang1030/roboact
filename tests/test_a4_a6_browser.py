@@ -110,7 +110,7 @@ def test_a5_pause_latency_frames_in_browser(server):
                       n += 1
                       const el = document.querySelector('.run-word')
                       const w = el ? (el.textContent || '') : ''
-                      if (w.indexOf('\\u5df2\\u6682\\u505c') === 0) resolve(n)
+                      if (w.indexOf('Paused') === 0 || w.indexOf('\\u5df2\\u6682\\u505c') === 0) resolve(n)
                       else if (n > 180) resolve(n)
                       else requestAnimationFrame(loop)
                     }
@@ -224,14 +224,14 @@ def test_a6_reconnect_and_half_open_page_lost(server):
         cut_t0 = time.monotonic()
         proxy.cut()
         page.wait_for_function(
-            "() => document.body.innerText.includes('重连中')",
+            "() => { const t = document.body.innerText; return t.includes('Reconnecting') || t.includes('\\u91cd\\u8fde\\u4e2d') }",
             timeout=8000,
         )
         time.sleep(1.6)
         proxy.restore()
         cut_dt = time.monotonic() - cut_t0
         page.wait_for_function(
-            "() => document.body.innerText.includes('已连接')",
+            "() => { const t = document.body.innerText; return t.includes('Connected') || t.includes('\\u5df2\\u8fde\\u63a5') }",
             timeout=15000,
         )
         _wait_run(page, "completed", "paused", "error", "stopped", timeout=120000)

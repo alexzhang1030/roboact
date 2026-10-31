@@ -253,13 +253,13 @@ def test_adapter_lost_pauses(tmp_path):
     asyncio.run(go())
 
 
-def test_non_loopback_requires_token(tmp_path):
-    from roboact.server import require_bind_token
+def test_loopback_only_bind():
+    from roboact.server import require_loopback_host
 
-    require_bind_token("127.0.0.1", None)
+    require_loopback_host("127.0.0.1")
     try:
-        require_bind_token("0.0.0.0", None)
-        raise AssertionError("should require token")
+        require_loopback_host("0.0.0.0")
+        raise AssertionError("non-loopback must exit")
     except SystemExit:
         pass
 

@@ -139,7 +139,7 @@ def _font_urls(urls: list[str]) -> list[str]:
 
 
 def test_prd195_prefers_dark_then_persists_light(server):
-    """19.5 (a)(b): system dark → first load dark; toggle light → reload still light."""
+    """19.5 (a)(b): system dark → first load dark; pick 浅色 → reload still light."""
     p, _path = _launch()
     try:
         br = _browser(p)
@@ -150,22 +150,24 @@ def test_prd195_prefers_dark_then_persists_light(server):
         assert _theme_of(page) == "dark"
         page.wait_for_function("window.__ready === true", timeout=20000)
         assert _theme_of(page) == "dark"
-        assert page.evaluate("() => localStorage.getItem('roboact-theme')") in (None, "dark")
+        stored = page.evaluate("() => localStorage.getItem('roboact.theme')")
+        assert stored in (None, "system")
+        assert page.evaluate("() => document.documentElement.dataset.themeMode") in ("system", "")
         assert _css_vars(page)["bg"] == DARK_CSS["bg"]
-        assert page.locator(".top .right button").filter(has_text="浅色").count() == 1
-
-        page.locator(".top .right button").filter(has_text="浅色").click()
+        last = page.evaluate("() => document.querySelector('.top .right') && document.querySelector('.top .right').lastElementChild && document.querySelector('.top .right').lastElementChild.className")
+        assert "theme-wrap" in (last or "")
+        page.locator('[data-testid="theme-btn"]').click()
+        page.locator('[data-theme-mode="light"]').click()
         page.wait_for_function("() => document.documentElement.dataset.theme === 'light'")
-        assert page.evaluate("() => localStorage.getItem('roboact-theme')") == "light"
+        assert page.evaluate("() => localStorage.getItem('roboact.theme')") == "light"
         assert _css_vars(page)["bg"] == LIGHT_CSS["bg"]
 
         page.reload(wait_until="domcontentloaded")
         assert _theme_of(page) == "light"
         page.wait_for_function("window.__ready === true", timeout=20000)
         assert _theme_of(page) == "light"
-        assert page.evaluate("() => localStorage.getItem('roboact-theme')") == "light"
+        assert page.evaluate("() => localStorage.getItem('roboact.theme')") == "light"
         assert _css_vars(page)["bg"] == LIGHT_CSS["bg"]
-        assert page.locator(".top .right button").filter(has_text="深色").count() == 1
         assert blocked == []
         assert _external_hosts(seen) == []
         br.close()
@@ -185,9 +187,11 @@ def test_prd195_grayscale_six_states_both_themes(server):
         for theme in ("light", "dark"):
             page.evaluate(
                 """(theme) => {
-                  document.documentElement.dataset.theme = theme
-                  localStorage.setItem('roboact-theme', theme)
-                  if (window.__af && window.__af.theme) window.__af.theme.value = theme
+                  if (window.__af && window.__af.setThemeMode) window.__af.setThemeMode(theme)
+                  else {
+                    document.documentElement.dataset.theme = theme
+                    localStorage.setItem('roboact.theme', theme)
+                  }
                 }""",
                 theme,
             )
@@ -203,12 +207,12 @@ def test_prd195_grayscale_six_states_both_themes(server):
                 gray_path.write_bytes(png)
 
             words = page.locator(".gstate-word").all_inner_texts()
-            assert any("出错" == w for w in words)
-            assert any("已暂停 · 断点" == w for w in words)
-            assert any("完成" == w for w in words)
-            assert any("中断 · 结果未知" == w for w in words)
-            assert any("已暂停 · 页面断开" == w for w in words)
-            assert any("已暂停 · 机器人控制器断开" == w for w in words)
+            assert any(w == "Error" for w in words)
+            assert any(w == "Paused · breakpoint" for w in words)
+            assert any(w == "Done" for w in words)
+            assert any(w == "Interrupted · result unknown" for w in words)
+            assert any(w == "Paused · page disconnected" for w in words)
+            assert any(w == "Paused · robot controller lost" for w in words)
 
             grids = {}
             for state in PRD195_STATES:
@@ -252,9 +256,11 @@ def test_prd195_offline_fonts_both_themes(server):
         for theme in ("light", "dark"):
             page.evaluate(
                 """(theme) => {
-                  document.documentElement.dataset.theme = theme
-                  localStorage.setItem('roboact-theme', theme)
-                  if (window.__af && window.__af.theme) window.__af.theme.value = theme
+                  if (window.__af && window.__af.setThemeMode) window.__af.setThemeMode(theme)
+                  else {
+                    document.documentElement.dataset.theme = theme
+                    localStorage.setItem('roboact.theme', theme)
+                  }
                 }""",
                 theme,
             )
@@ -272,19 +278,44 @@ def test_prd195_offline_fonts_both_themes(server):
                   return { ui, mono, check, families, width, uiWidth }
                 }"""
             )
-            assert "system-ui" in info["ui"] or "sans-serif" in info["ui"], info
+            assert "Inter" in info["ui"], info
             assert "JetBrains Mono" in info["mono"], info
             assert info["check"] or any("JetBrains Mono" in f for f in info["families"]), info
+            assert page.evaluate("() => document.fonts.check('13px Inter')") or any(
+                "Inter" in f for f in info["families"]
+            )
             assert info["width"] > 0, info
             assert info["uiWidth"] > 0, info
         fonts = _font_urls(seen)
-        assert fonts, "expected a local JetBrains Mono request"
+        assert fonts, "expected local Inter / JetBrains Mono requests"
         for url in fonts:
             host = urllib.parse.urlparse(url).hostname
             assert host in LOCAL_HOSTS, url
-            assert "JetBrainsMono" in url or "jetbrains" in url.lower() or "vendor/fonts" in url
+            assert "/static/fonts/" in url, url
+            assert any(n in url for n in ("InterVariable", "JetBrainsMono"))
         assert blocked == []
         assert _external_hosts(seen) == []
+        br.close()
+    finally:
+        p.stop()
+
+
+def test_prd195_follow_system_tracks_prefers(server):
+    """§17: 跟随系统 listens to prefers-color-scheme."""
+    p, _path = _launch()
+    try:
+        br = _browser(p)
+        ctx = br.new_context(viewport={"width": 1280, "height": 800}, color_scheme="dark")
+        page, blocked, seen, _errs = _wired_page(ctx, server["base"])
+        _goto_ready(page, server["base"] + "/")
+        page.evaluate("() => window.__af.setThemeMode('system')")
+        page.wait_for_function("() => document.documentElement.dataset.theme === 'dark'")
+        page.emulate_media(color_scheme="light")
+        page.wait_for_function("() => document.documentElement.dataset.theme === 'light'", timeout=5000)
+        assert page.evaluate("() => localStorage.getItem('roboact.theme')") == "system"
+        page.emulate_media(color_scheme="dark")
+        page.wait_for_function("() => document.documentElement.dataset.theme === 'dark'", timeout=5000)
+        assert blocked == []
         br.close()
     finally:
         p.stop()
@@ -301,9 +332,11 @@ def test_prd195_live_contrast_operator_adapter_disabled_edge_grid(server):
         for theme, expected in (("light", LIGHT_CSS), ("dark", DARK_CSS)):
             page.evaluate(
                 """(theme) => {
-                  document.documentElement.dataset.theme = theme
-                  localStorage.setItem('roboact-theme', theme)
-                  if (window.__af && window.__af.theme) window.__af.theme.value = theme
+                  if (window.__af && window.__af.setThemeMode) window.__af.setThemeMode(theme)
+                  else {
+                    document.documentElement.dataset.theme = theme
+                    localStorage.setItem('roboact.theme', theme)
+                  }
                 }""",
                 theme,
             )

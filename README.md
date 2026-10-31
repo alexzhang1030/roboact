@@ -2,105 +2,128 @@
 
 # Roboact
 
-离线、零构建的机器人流程画布：把适配器交出的原子动作连成可循环的流程，用断点、单步、人工确认和运行记录调试。画布编排的是具身智能体（机器人），不是聊天 LLM。
+Offline, zero-build robot flow canvas. Wire the atomic actions an adapter exposes into a loopable flow, then debug with breakpoints, single-step, human confirm, and a run log. The canvas orchestrates an embodied agent (a robot), not a chat LLM.
 
-- 后端：Python asyncio。运行记录默认 SQLite（`Store` 接口；测试可用内存实现）
-- 前端：Vue 3 + Vue Flow 1.48.2，**零构建**（原生 ES 模块 + import map）
-- 适配器：同一套接口挡住 SDK / ROS 2。v1 只带 `FakeAdapter`（`target=sim`）
-- **离线**：前端、图标、字体在仓库里；Python 依赖用自带 wheel
+- Backend: Python asyncio. Run records default to SQLite (`Store`; tests may use the in-memory implementation).
+- Frontend: Vue 3 + Vue Flow 1.48.2, **zero build** (native ES modules + import map).
+- Adapter: one interface in front of an SDK or ROS 2. v1 ships `FakeAdapter` only (`target=sim`).
+- **Offline**: frontend, icons, and fonts live in the repo; Python deps are local wheels. Latin UI and digits use Inter; code, parameter values, times, and step counts use JetBrains Mono (both in `roboact/static/fonts/`, SIL OFL 1.1). CJK falls back to system PingFang SC / Microsoft YaHei / Noto Sans CJK SC — not bundled.
 
-规格（现行）：[PRD v1.4.4](docs/prd.md)、[exec-model v0.2.1](docs/exec-model.md)、[system-design](docs/system-design.md)、[UI spec](docs/ui-spec.md)、[Rams 设计图](docs/design/)、[图](docs/diagrams/)。历史稿：`docs/prd-v1.md`、`docs/exec-model-v0.md`、`docs/ui-spec-v0.md`、`docs/system-design-v0.md`。Rams 若改 ui-spec §10/§11（字号行高、颜色、CJK 字体），以新稿为准。
+Licence is [MIT](LICENSE) (`Copyright (c) 2026 alexzhang1030`). This repo is not published to PyPI and has no publish config.
 
-本仓库不发布到 PyPI，也不带发布配置。许可是 [MIT](LICENSE)。
+Specs in this tree: [PRD v1.4.4](docs/prd.md), [exec-model v0.2.1](docs/exec-model.md), [system-design](docs/system-design.md), [UI spec](docs/ui-spec.md) (**§17 is the current font and theme spec**), [Rams design sheets](docs/design/), [diagrams](docs/diagrams/). History: `docs/prd-v1.md`, `docs/exec-model-v0.md`, `docs/ui-spec-v0.md`, `docs/system-design-v0.md`. Project context for agents lives in [`.agents/docs/`](.agents/docs/), not `docs/decisions/`.
 
-## 离线安装并启动
+## Install and run (offline)
 
-需要 **CPython 3.12、linux x86_64**（仓库里的 `pydantic-core` wheel 按这个编的）。
+Needs **CPython 3.12, linux x86_64** (the vendored `pydantic-core` wheel is built for that).
 
 ```bash
-pip install --no-index --find-links vendor/wheels -r requirements.txt && python -m roboact
+pip install --no-index --find-links vendor/wheels -r requirements.txt
+python -m roboact
 ```
 
-浏览器打开 <http://127.0.0.1:7465>。不需要 Node，没有 `npm`，没有打包步骤。
+Open <http://127.0.0.1:7465>. No Node, no `npm`, no bundle step.
 
 ```bash
 python -m roboact --host 127.0.0.1 --port 7465 --db data/roboact.db
 ```
 
-默认绑 `127.0.0.1`。`--token` **没有默认值**（代码、示例和文档里都不写死令牌）。若 `--host` 不是本机回环，必须带 `--token`，否则进程拒绝启动。也可把令牌放进环境变量 `ROBOACT_TOKEN`（同样没有内置值）。每个 HTTP/SSE 请求用 `X-Roboact-Token` / `Authorization: Bearer` / `?token=` 带上，否则 401。401 时界面只显示「访问令牌」和「连接」，没有账号登录页。
+The process binds **loopback only** (`127.0.0.1`, `::1`, or `localhost`). Any other `--host` exits with an error. There is no access token and no login screen (authentication is deferred; see `.agents/docs/auth-and-network.md`).
 
-默认：总步数上限 **1000**，节点超时 60 s（作为绝对 deadline 传给适配器；Python 侧再守一次），适配器心跳 3 s，页面断开暂停 10 s，SSE 重连 2 s，SQLite `busy_timeout` 5000 ms。
+To open the UI from another computer, forward a local port over SSH:
 
-## 怎么用
+```bash
+ssh -L 17465:127.0.0.1:17465 <controller>
+```
 
-1. 打开是一张无限画布。左侧按适配器名分组列出动作，加上开始、输出、条件、合并、人工确认、常量（没有循环节点；环用回边加条件）。
-2. 顶栏是流程名、适配器名；只有 `target=real` 时才显示红框「真机」。没有仿真/真机切换。
-3. 连线时类型不同的端口会拦住。参数在右侧。节点左缘执行前断点，右缘执行后断点。
-4. 顶栏三个按钮位固定不挪：**运行 / 暂停 / 继续**、**单步**、**停止**。运行中第一格是「暂停」，第三格「停止」可用。点暂停后先显示「暂停中…」，收到 `paused` 再变成「继续」。**F5** 运行/继续，**F6** 暂停，**F10** 单步，**Shift+F5** 停止。停止不是急停。
-5. 运行中的节点：有进度显示「运行中 · 40%」或最新反馈；没有则显示「运行中 · 12 s」。图像只出现在右侧输出页，不进画布缩略图，日志只记尺寸/时间/字节。
-6. 适配器动作列表版本写进流程。对不上就拦运行；动作没了标「动作已不存在」。缺必填说明字段、或适配器报了 `side_effect=write` 的动作不生成节点，面板列出缺的字段。右侧对 `expiry=adapter_only` 显示「到期只靠 adapter」。
-7. 停止不可取消的阻塞动作：等它做完，运行日志记 `not cancelled`。取消被拒：节点继续跑，显示「取消被拒」。
-8. 服务重启后运行保持暂停。崩溃时正在执行的 `motion` 节点是「中断 · 结果未知」，**不会自动重跑**。先读回机器人状态，再选「重做这一步」或「当作已做完」。测试用 `write` 节点继续时带原幂等键重试。
-9. 适配器 3 s 不可达 → 已暂停 · 机器人控制器断开（红，「继续」要等适配器回来）。后端心跳停了，适配器基类自己取消在飞目标。页面 SSE 10 s 没人连 → 已暂停 · 页面断开（琥珀，重连后可继续；不取消正在跑的节点）。
+then open <http://127.0.0.1:17465> on your machine.
 
-副作用取值：`none | read | motion | write`。`motion` 是会让机器人动的动作（PRD v1.4.4 与 exec-model v0.2.1 一致；缺省按 `motion`）。`write` 只给手写测试节点（`append_note` / `demo_notes.db`），不进产品节点面板。动作说明可带可选的 `precondition_wait_s`：发目标前 adapter 在这段时间里自己重读 `read_state`，条件一成立马上发；到点仍不满足记 `precondition_failed`、不发目标。没写这个字段就只查一次。读的间隔由写 adapter 的人定，不写进执行器。无论读几次，这一步只有一条运行记录。
+HTTP requests whose `Host` is not `127.0.0.1`, `localhost`, or `[::1]` (with the bind port) are rejected. WebSocket and SSE handshakes require `Origin` to be the page’s own origin. Command endpoints accept only `Content-Type: application/json`.
 
-## 测
+Defaults: step limit **1000**, node timeout 60 s (absolute deadline given to the adapter; Python also enforces it), adapter heartbeat 3 s, page-disconnect pause 10 s, SSE retry 2 s, SQLite `busy_timeout` 5000 ms. Those values live on the server. The browser stores only display prefs (`roboact.theme`, `roboact.lang`, `roboact.motion`, canvas zoom/position, panel widths, log filters).
+
+## How to use it
+
+1. First paint is an infinite canvas. The left palette lists adapter actions grouped by adapter, plus Start, Output, Condition, Merge, Human confirm, Constant. There is no loop node; loops are a back-edge plus a condition.
+2. The top bar shows the flow name and adapter name. A red **REAL** tag appears only when `target=real`. There is no sim/real toggle.
+3. Ports of different types refuse to connect. Parameters sit on the right. A breakpoint before a node is the left rim; after is the right rim.
+4. The three control slots stay put: **Run / Pause / Continue**, **Step**, **Stop**. While a run is going the first slot is Pause and Stop is enabled. After Pause the slot reads **Pausing…** until the server says `paused`, then **Continue**. **F5** run/continue, **F6** pause, **F10** step, **Shift+F5** stop. Stop is not e-stop. The far-right control is appearance (half-filled circle): follow system (default), light, dark, stored as `roboact.theme`. Language sits next to it (`roboact.lang`). First load follows `navigator.languages` (first `zh*` → Chinese, else English) and `prefers-color-scheme`. Manual picks persist; a second tab follows via the `storage` event.
+5. A running node shows **Running · 40%** or the latest feedback; otherwise **Running · 12 s**. Images appear only on the right Output tab, never as canvas thumbnails. The log stores size / time / bytes.
+6. The adapter action-list version is stored on the flow. A mismatch blocks Run; a missing action is marked **Action no longer exists**. Actions that omit required descriptor fields, or that declare `side_effect=write`, are not turned into nodes. The panel lists what was rejected. `expiry=adapter_only` shows **Expiry is adapter-only**.
+7. Stop on a non-cancellable blocking action waits for it to finish; the log records `not cancelled`. Cancel rejected: the node keeps running and shows **Cancel rejected**.
+8. After a service restart the run stays paused. A `motion` node that was in flight is **Interrupted · result unknown** and does **not** rerun by itself. Read the robot back, then **Redo this step** or **Mark done**. Test `write` nodes retry with the same idempotency key.
+9. Adapter silent for 3 s → **Paused · robot controller lost** (red; Continue waits for the adapter). The adapter base cancels in-flight goals when its own heartbeat dies. Page SSE gone for 10 s → **Paused · page disconnected** (amber; Continue after reconnect; the current node is not cancelled).
+
+Side effects: `none | read | motion | write`. `motion` moves the robot (PRD v1.4.4 / exec-model v0.2.1; default if omitted). `write` is only for handwritten test nodes (`append_note` / `demo_notes.db`), not the product palette. An action may set optional `precondition_wait_s`: the adapter re-reads `read_state` for that window and sends the goal as soon as the condition holds; if it never holds the step is `precondition_failed` and no goal is sent. One run record per step either way.
+
+Storage, SSE, the HTTP API, and exported flows carry **codes only**. The UI maps codes to text for the active locale. Adapter action titles use `labels[locale]`, then `name`, then `id` — never a blank title. Units and operator-typed names, notes, and values are not translated. A missing Chinese key falls back to English, never to the key name.
+
+## Tests
 
 ```bash
 pip install -r requirements-dev.txt
-python -m playwright install chromium   # 若本机没有 Chrome
+python -m playwright install chromium   # if this machine has no Chrome
 pytest -q
 ```
 
-CI 会重算 `vendor-manifest.json` 里每个文件的 sha256，并且要求每条都有 SPDX `license` 和 `vendor/licenses/` 下的原文，缺了就不让过。
+CI recomputes the sha256 of every file in `vendor-manifest.json` and requires an SPDX `license` plus the text under `vendor/licenses/`. It also scans **exactly** `git ls-files` for private IPv4 addresses (`10/8`, `192.168/16`, `172.16–31`); `127.0.0.1` and `0.0.0.0` are allowed.
 
-`append_note` / `demo_notes.db` 不在产品路径上，只作为执行器/幂等测试夹具（A18、A20）。产品写副作用走 FakeAdapter 内存。
+`append_note` / `demo_notes.db` stay off the product path. They exist so executor / idempotency tests (A18, A20) have a write side effect. Product writes go through FakeAdapter memory.
 
-## 验收状态
+## Acceptance
 
-只把**浏览器里对着真实后端**测过的项标成通过。只在服务端队列或 `SseHub` 上量过的，不算通过。
+Only items exercised **in a browser against the real backend** are marked pass. Server-queue or `SseHub` measurements alone do not count.
 
-| 项 | 状态 | 依据 |
+| Item | Status | Evidence |
 |---|---|---|
-| A4 / PRD 19.1 推送合并 | **pass** | `test_a4_sse_batching_500_nodes_browser`：Chromium + 真实 SSE，500 节点跑完，批次/秒 ≤ 10，画布终态与后端一致。服务端 `test_batch_rate_at_most_10_per_second` 只作对照，不单独算通过。 |
-| A5 / PRD 19.2 暂停延迟 | **pass** | `test_a5_pause_latency_frames_in_browser`：500 节点运行中点暂停，从点击起数 `requestAnimationFrame` 到顶栏「已暂停」，5 次均 ≤ 20 帧。服务端 `test_pause_event_immediate_a5` 不单独算通过。 |
-| A6 重连 + 页面断开 | **pass** | `test_a6_reconnect_and_half_open_page_lost`：TCP 代理真切断后重连，事件序号不回退、画布对齐后端；半开（停转发、不发 FIN/RST）后后端以 `operator_lost` 暂停，半开后不再派发新的 motion。服务端 `replay_after` / A33 不单独算通过。 |
-| PRD 19 画布性能 | **pass** | 浏览器 `test_prd19_canvas_performance_500_nodes`（平移/状态洪水 p95 ≤ 33 ms）加上 A4 的真实 SSE 500 节点。 |
-| PRD 19.2 停下不等窗口 | **pass** | 同 A5：`test_a5_pause_latency_frames_in_browser`。 |
-| PRD 19.4 等站稳 | **pass** | FakeAdapter：`test_prd194_wait_then_send_when_stable`、`test_prd194_timeout_precondition_failed_no_goal`、`test_prd194_no_wait_fails_on_first_read`。 |
-| PRD 19.5 浅色和深色 | **pass** | `test_prd195_prefers_dark_then_persists_light`：系统深色首次为深色，切浅色后刷新仍浅色。`test_prd195_grayscale_six_states_both_themes`：两套灰度图上出错、断点、完成、中断 · 结果未知、页面断开、机器人控制器断开可辨。`test_prd195_offline_fonts_both_themes`：断网字体仍渲染，无外网字体请求。`test_prd195_live_contrast_operator_adapter_disabled_edge_grid` 与 `test_contrast_ui_spec`：两侧主题下 amber / red / 禁用按钮 / 连线 / 点阵对比度。 |
+| A4 / PRD 19.1 push merge | **pass** | `test_a4_sse_batching_500_nodes_browser`: Chromium + real SSE, 500 nodes finish, batches/s ≤ 10, canvas matches backend. Server `test_batch_rate_at_most_10_per_second` is a control only. |
+| A5 / PRD 19.2 pause latency | **pass** | `test_a5_pause_latency_frames_in_browser`: pause a 500-node run; rAF frames from the click until the top-bar Paused word, 5 reps, all ≤ 20. Server `test_pause_event_immediate_a5` is a control only. |
+| A6 reconnect + page lost | **pass** | `test_a6_reconnect_and_half_open_page_lost`: real TCP cut then restore (event ids do not go backwards, canvas matches backend); half-open (stop forwarding, no FIN/RST) → `operator_lost`, no new motion. Server `replay_after` / A33 are controls only. |
+| PRD 19 canvas performance | **pass** | Browser `test_prd19_canvas_performance_500_nodes` (pan / status flood p95 ≤ 33 ms) plus A4’s real SSE 500-node run. |
+| PRD 19.2 stop without waiting for the window | **pass** | Same as A5. |
+| PRD 19.4 wait until stable | **pass** | FakeAdapter: `test_prd194_wait_then_send_when_stable`, `test_prd194_timeout_precondition_failed_no_goal`, `test_prd194_no_wait_fails_on_first_read`. |
+| PRD 19.5 light and dark | **pass** | `test_prd195_prefers_dark_then_persists_light`: system dark first-loads dark; pick light and reload stays light. `test_prd195_follow_system_tracks_prefers`. `test_prd195_grayscale_six_states_both_themes`. `test_prd195_offline_fonts_both_themes`: offline load of `/static/fonts/` Inter / JetBrains Mono, no remote font request. Contrast: `test_contrast_ui_spec` (uses `docs/design/contrast.py`). |
+| Locale + settings | **pass** | `test_i18n` (catalog keys match; no hard-coded CJK in `web/` outside catalogs). `test_prd196_*` (navigator language, persist, English overflow, clear storage resets display prefs not timeouts). `test_prd198_codes_survive_language_switch`. |
+| A40 / loopback | **pass** | `test_a40_host_origin_content_type` (`Host: evil.example` → 403, `Content-Type: text/plain` → 415, foreign Origin WS → 403/400). `test_non_loopback_host_flag_exits`. `test_loopback_only_bind`. |
+| A39 authentication | **deferred** | Alex 2026-10-31. No tokens. See `.agents/docs/auth-and-network.md`. |
 
-## 接真机前检查（R1–R8，v1 不测）
+## Before a real robot (R1–R8, N/A in v1)
 
-v1 只用 `FakeAdapter`（`target=sim`）。下面这些在接真机前必须过，现在标 **N/A**。出处见 [exec-model](docs/exec-model.md) 第 13.1 节。
+v1 uses `FakeAdapter` (`target=sim`). These must pass before a real robot. Source: [exec-model](docs/exec-model.md) §13.1.
 
-| 编号 | 测什么 | v1 | 通过条件 |
+| Id | What | v1 | Pass when |
 |---|---|---|---|
-| R1 | Spot 类 E-Stop 端点 `timeout` 配成 9 s，停止签到 | N/A | 9 s 后进入 SETTLE_THEN_CUT（坐下）；要有厂商出处 |
-| R2 | 话题式速度控制停发指令（仅 ros2_controllers 一类） | N/A | 默认 `cmd_vel_timeout` 0.5 s 后速度置零；四足换成自己的出处 |
-| R3 | 硬件急停后复位 | N/A | 画布运行保持暂停，不自动继续（ISO 13850 4.1.1.2） |
-| R4 | 停发指令后狗怎么做 | N/A | 和厂商文档一致；接真机前必须有出处 |
-| R5 | 控制器断电后狗怎么做；断电时硬件急停仍可用 | N/A | 同上 |
-| R6 | 夹爪断电后能不能夹住 | N/A | `cancel.after` 和 `read_state` 按原文写 |
-| R7 | 「已站稳」能判断 | N/A | 接真机前确认稳定性可检测：blocking 动作只在机器人稳住后返回，**或** `read_state` 有表示站稳的字段；两条都要有厂商出处。都没有就不能接真机，也不能用 `precondition_wait_s` |
-| R8 | 重复 A6 真 TCP 切断 | N/A | 接真机前在真机网络里再用 TCP 代理做一次半开切断（不发 FIN/RST），确认 `operator_lost` 暂停出现在约 10 s 内。没暂停就不能接真机：`motion` 会在没人看着时继续跑 |
+| R1 | Spot-class E-Stop endpoint `timeout` = 9 s, stop check-in | N/A | After 9 s enter SETTLE_THEN_CUT (sit); vendor citation required |
+| R2 | Topic velocity control stops publishing (ros2_controllers class) | N/A | Default `cmd_vel_timeout` 0.5 s then zero velocity; quadruped uses its own citation |
+| R3 | Reset after hardware e-stop | N/A | Canvas run stays paused, does not auto-continue (ISO 13850 4.1.1.2) |
+| R4 | What the dog does after command stream stops | N/A | Matches vendor docs; citation required before a real robot |
+| R5 | What the dog does after controller power loss; hardware e-stop still works | N/A | Same |
+| R6 | Gripper still holds after power loss | N/A | `cancel.after` and `read_state` from the vendor text |
+| R7 | “Settled” is decidable | N/A | Blocking actions return only after the robot is stable, **or** `read_state` has a settled field; both need a vendor citation. Without that, no real robot and no `precondition_wait_s` |
+| R8 | Repeat A6 on a real TCP cut | N/A | On the real-robot network, half-open cut (no FIN/RST) must produce `operator_lost` in about 10 s. Without that pause, `motion` keeps going with nobody watching |
 
-## 仓库怎么摆
+## Layout
 
 ```
-LICENSE             MIT（Copyright (c) 2026 alexzhang1030）
-roboact/            Python 包（适配器、节点注册表、图、执行器、Store、HTTP+SSE）
-web/                静态前端，由后端直接托管
-web/vendor/         Vue / Vue Flow / JetBrains Mono / 图标（未改动的原文件）
-assets/logo.svg     品牌标志（favicon 同源）
-docs/prd.md         PRD v1.4.4（现行）
+LICENSE                 MIT (Copyright (c) 2026 alexzhang1030)
+AGENTS.md               Project rules + PCR block
+.agents/docs/           Project Context Records (map in README.md)
+roboact/                Python package (adapter, nodes, graph, executor, Store, HTTP+SSE)
+roboact/static/fonts/   Inter + JetBrains Mono woff2 and OFL files (ship with the package)
+web/                    Static frontend, served by the backend
+web/i18n/               en.js and zh-CN.js catalogs (ES modules, no build)
+web/vendor/             Vue / Vue Flow / icons (unmodified upstream files)
+assets/logo.svg         Brand mark (favicon is the same drawing)
+docs/prd.md             PRD v1.4.4 (current product doc in this tree)
 docs/system-design.md
-docs/design/        Rams 12 张设计图（含 r-waiting）
-docs/diagrams/      部署/时序/状态图源文件 + PNG
-vendor/wheels/      运行时 Python wheel
-vendor/licenses/    第三方许可原文
+docs/ui-spec.md         §17 fonts and themes
+docs/design/            Rams light + `-dark` sheets
+docs/design/contrast.py WCAG helpers used by contrast tests
+docs/diagrams/          Deploy / sequence / state sources + PNG
+vendor/wheels/          Runtime Python wheels
+vendor/licenses/        Third-party licence texts
 vendor-manifest.json
-tests/
 scripts/check_manifest.py
+scripts/check_private_ip.py
+tests/
 ```

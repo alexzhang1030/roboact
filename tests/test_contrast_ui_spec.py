@@ -5,45 +5,26 @@ together — this file reads both and fails when they drift.
 """
 from __future__ import annotations
 
+import importlib.util
 import re
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 CSS = (ROOT / "web" / "css" / "app.css").read_text(encoding="utf-8")
 SPEC = (ROOT / "docs" / "ui-spec.md").read_text(encoding="utf-8")
+_spec = importlib.util.spec_from_file_location("design_contrast", ROOT / "docs" / "design" / "contrast.py")
+_mod = importlib.util.module_from_spec(_spec)
+assert _spec.loader is not None
+_spec.loader.exec_module(_mod)
+contrast_ratio = _mod.contrast_ratio
+meets = _mod.meets
+relative_luminance = _mod.relative_luminance
 
 # Text ≥ 4.5:1; state borders / icons / edges ≥ 3.0:1 (WCAG 2.2 non-text).
 TEXT_MIN = 4.5
 NONTEXT_MIN = 3.0
 # Grid is a 1px decorative dot field. §10 lists the colour, not a 3:1 claim.
 GRID_MIN = 1.05
-
-
-def _hex_rgb(h: str) -> tuple[float, float, float]:
-    h = h.lstrip("#")
-    if len(h) == 3:
-        h = "".join(c * 2 for c in h)
-    return int(h[0:2], 16) / 255, int(h[2:4], 16) / 255, int(h[4:6], 16) / 255
-
-
-def _lin(c: float) -> float:
-    return c / 12.92 if c <= 0.04045 else ((c + 0.055) / 1.055) ** 2.4
-
-
-def relative_luminance(hex_color: str) -> float:
-    r, g, b = _hex_rgb(hex_color)
-    return 0.2126 * _lin(r) + 0.7152 * _lin(g) + 0.0722 * _lin(b)
-
-
-def contrast_ratio(a: str, b: str) -> float:
-    la, lb = relative_luminance(a), relative_luminance(b)
-    lighter, darker = (la, lb) if la >= lb else (lb, la)
-    return (lighter + 0.05) / (darker + 0.05)
-
-
-def meets(ratio: float, minimum: float) -> bool:
-    # Rams' table rounds to two decimals (light amber on bg is published 4.50).
-    return round(ratio, 2) >= minimum
 
 
 def parse_css_color(value: str) -> str:
@@ -108,7 +89,7 @@ def _assert_state_and_chrome(name: str, palette: dict[str, str]) -> None:
 
 
 def test_css_matches_uispec_section10():
-    needed = ("bg", "grid", "surface", "text", "muted", "border", "edge", "blue", "green", "red", "amber")
+    needed = ("bg", "grid", "surface", "text", "muted", "border", "edge", "blue", "green", "red", "amber", "control")
     for key in needed:
         assert LIGHT_SPEC[key] == LIGHT_CSS[key], f"light --{key}: spec {LIGHT_SPEC[key]} css {LIGHT_CSS[key]}"
         assert DARK_SPEC[key] == DARK_CSS[key], f"dark --{key}: spec {DARK_SPEC[key]} css {DARK_CSS[key]}"

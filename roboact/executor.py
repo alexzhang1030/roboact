@@ -564,7 +564,7 @@ class Executor:
                         rnd = (ctrl.node_state.get(ctrl.current_nid) or {}).get("round") or 0
                         self._set_node(
                             ctrl, ctrl.current_nid, "cancel_rejected", rnd, ctrl.steps_used,
-                            error_summary="取消被拒", word="取消被拒",
+                            error_summary="cancel_rejected",
                         )
                     return {"status": "running", "cancel": "rejected"}
                 ctrl.stop_flag = True
@@ -680,7 +680,7 @@ class Executor:
                     from_adapter = bool(getattr(get_type(node["type"]), "from_adapter", False))
                 new_status = "interrupted_unknown" if side in ("write", "motion") else "interrupted"
                 self.store.update_step(ctrl.run_id, rec["step"], status=new_status, ended_at=now_iso(),
-                                       error={"type": "crash", "message": "执行到一半服务中断"})
+                                       error={"type": "crash", "message": "crash"})
                 # Never auto-retry. Write fixtures keep the idempotency key so a later
                 # human continue can retry once; motion nodes only read state / goal status.
                 if side == "write" and not from_adapter:
@@ -981,10 +981,10 @@ class Executor:
         if start_phase == "waiting_precondition":
             self._set_node(
                 ctrl, nid, "running", rnd, step,
-                word="运行中 · 等待前提条件", phase=start_phase, wait_s=0, wait_max_s=ctrl.wait_max_s,
+                phase=start_phase, wait_s=0, wait_max_s=ctrl.wait_max_s,
             )
         else:
-            self._set_node(ctrl, nid, "running", rnd, step, word="运行中")
+            self._set_node(ctrl, nid, "running", rnd, step)
 
         outputs: dict[str, Any] = {}
         err = None
@@ -996,14 +996,9 @@ class Executor:
         async def on_progress(p: Progress) -> None:
             nonlocal saw_progress
             saw_progress = True
-            word = None
-            if p.text:
-                word = f"运行中 · {p.text}"
-            elif p.percent is not None:
-                word = f"运行中 · {int(p.percent)}%"
             self._set_node(
                 ctrl, nid, "running", rnd, step,
-                word=word, progress=p.percent, feedback=p.text,
+                progress=p.percent, feedback=p.text,
             )
 
         elapsed_task: asyncio.Task | None = None
@@ -1016,14 +1011,14 @@ class Executor:
                         secs = int(time.monotonic() - (ctrl.wait_started or ctrl.current_started))
                         self._set_node(
                             ctrl, nid, "running", rnd, step,
-                            word="运行中 · 等待前提条件", phase="waiting_precondition",
+                            phase="waiting_precondition",
                             wait_s=secs, wait_max_s=ctrl.wait_max_s,
                         )
                         continue
                     if saw_progress:
                         continue
                     secs = int(time.monotonic() - ctrl.current_started)
-                    self._set_node(ctrl, nid, "running", rnd, step, word=f"运行中 · {secs} s", elapsed_s=secs)
+                    self._set_node(ctrl, nid, "running", rnd, step, elapsed_s=secs)
             except asyncio.CancelledError:
                 return
 
@@ -1046,12 +1041,12 @@ class Executor:
                         ctrl.wait_started = time.monotonic()
                         self._set_node(
                             ctrl, nid, "running", rnd, step,
-                            word="运行中 · 等待前提条件", phase=phase,
+                            phase=phase,
                             wait_s=0, wait_max_s=ctrl.wait_max_s,
                         )
                     elif phase == "sent":
                         ctrl.current_started = time.monotonic()
-                        self._set_node(ctrl, nid, "running", rnd, step, word="运行中", phase=phase)
+                        self._set_node(ctrl, nid, "running", rnd, step, phase=phase)
 
                 ctx = RunContext(
                     ctrl.run_id, step, rnd, idem, self.data_dir, self.adapter,
@@ -1070,13 +1065,13 @@ class Executor:
                 err = None
             elif side == "write":
                 status = "interrupted_unknown"
-                err = {"type": "timeout", "message": f"超时（{int(timeout)} s），外部可能已写入"}
+                err = {"type": "timeout", "message": "timeout", "timeout_s": int(timeout)}
             elif side == "motion":
                 status = "interrupted_unknown"
-                err = {"type": "timeout", "message": f"超时（{int(timeout)} s）"}
+                err = {"type": "timeout", "message": "timeout", "timeout_s": int(timeout)}
             else:
                 status = "error"
-                err = {"type": "timeout", "message": f"超时（{int(timeout)} s）"}
+                err = {"type": "timeout", "message": "timeout", "timeout_s": int(timeout)}
         except CrashBetweenWriteAndKey:
             self.store.update_run(ctrl.run_id, status="running")
             ctrl.abandoned = True
@@ -1153,17 +1148,16 @@ class Executor:
             if side == "write":
                 ctrl.retry_keys[nid] = idem
                 ctrl.retry_of[nid] = step
-                await self._pause(ctrl, "write_timeout", nid, "after", inputs, rnd, message="写入超时")
+                await self._pause(ctrl, "write_timeout", nid, "after", inputs, rnd, message="write_timeout")
             else:
-                await self._pause(ctrl, "motion_timeout", nid, "before", inputs, rnd, message="动作超时")
+                await self._pause(ctrl, "motion_timeout", nid, "before", inputs, rnd, message="motion_timeout")
             return
         if status in ("error", "interrupted_unknown"):
             self._set_node(ctrl, nid, "error" if status == "error" else status, rnd, step, duration_ms=dt, error_summary=(err or {}).get("message"), side_effect_mode=mode)
             ctrl.error = err
             self._finish(ctrl, "error")
             return
-        extra = " · 模拟" if mode == "mock" else ""
-        self._set_node(ctrl, nid, "done", rnd, step, duration_ms=dt, side_effect_mode=mode, extra=extra)
+        self._set_node(ctrl, nid, "done", rnd, step, duration_ms=dt, side_effect_mode=mode)
         if self._hit_bp(ctrl, nid, "after", rnd, inputs):
             await self._pause(ctrl, "breakpoint", nid, "after", inputs, rnd)
 
