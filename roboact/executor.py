@@ -1994,7 +1994,6 @@ class Executor:
             if cur != "cancel_rejected":
                 self._set_node(ctrl, node_id, state, rnd, ctrl.steps_used)
         self.store.update_run(ctrl.run_id, status="paused", pause=ctrl.pause)
-        self.hub.flush_now(ctrl.run_id)
         self.hub.emit(
             ctrl.run_id,
             "paused",
@@ -2005,6 +2004,7 @@ class Executor:
                 "paused_at_ms": ctrl.last_paused_at_ms,
             },
         )
+        self.hub.flush_now(ctrl.run_id)
         if reason == "storage_error":
             self.hub.emit(ctrl.run_id, "storage_error", {"message": message or "", "at": now_iso()})
         ctrl.resume.clear()

@@ -658,14 +658,28 @@ const App = defineComponent({
       if (es) { es.close(); es = null }
       conn.value = 'ok'
       startBeat(runId)
+      let pendingNodes = null
+      let nodesTimer = null
+      const flushNodes = () => {
+        if (nodesTimer) { clearTimeout(nodesTimer); nodesTimer = null }
+        const ev = pendingNodes
+        pendingNodes = null
+        if (ev) applyNodesEvent(ev)
+      }
       es = openEvents(runId, null, {
         snapshot: (ev) => {
           conn.value = 'ok'
+          flushNodes()
           run.value = normalizeRun(ev)
           applyNodeStates(ev.nodes)
           applyPauseReason(ev.pause)
         },
-        nodes: (ev) => { conn.value = 'ok'; applyNodesEvent(ev) },
+        nodes: (ev) => {
+          conn.value = 'ok'
+          pendingNodes = ev
+          if (nodesTimer) return
+          nodesTimer = setTimeout(() => { nodesTimer = null; flushNodes() }, 0)
+        },
         paused: (ev) => {
           conn.value = 'ok'
           pausePending.value = false
@@ -680,6 +694,7 @@ const App = defineComponent({
           if (run.value) run.value = { ...run.value, status: 'running', pause: null }
         },
         run_finished: (ev) => {
+          flushNodes()
           storageErr.value = ''
           pausePending.value = false
           if (run.value) run.value = { ...run.value, status: ev.status, steps_used: ev.steps_used, error: ev.error, pause: null }
