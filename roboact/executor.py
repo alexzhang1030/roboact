@@ -1236,6 +1236,7 @@ class Executor:
                 step,
                 progress=p.percent,
                 feedback=p.text,
+                feedback_params=p.params or None,
             )
 
         elapsed_task: asyncio.Task | None = None
@@ -1854,6 +1855,7 @@ class Executor:
                 "word": extra.get("word"),
                 "progress": extra.get("progress"),
                 "feedback": extra.get("feedback"),
+                "feedback_params": extra.get("feedback_params"),
                 "elapsed_s": extra.get("elapsed_s"),
                 "recovery": extra.get("recovery"),
                 "phase": extra.get("phase"),
