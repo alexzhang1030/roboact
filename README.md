@@ -9,7 +9,7 @@
 - 适配器：同一套接口挡住 SDK / ROS 2。v1 只带 `FakeAdapter`（`target=sim`）
 - **离线**：前端、图标、字体在仓库里；Python 依赖用自带 wheel
 
-规格（现行）：[PRD v1.4.3](docs/prd.md)、[exec-model v0.2.1](docs/exec-model.md)、[system-design](docs/system-design.md)、[UI spec](docs/ui-spec.md)、[Rams 设计图](docs/design/)、[图](docs/diagrams/)。历史稿：`docs/prd-v1.md`、`docs/exec-model-v0.md`、`docs/ui-spec-v0.md`、`docs/system-design-v0.md`。
+规格（现行）：[PRD v1.4.4](docs/prd.md)、[exec-model v0.2.1](docs/exec-model.md)、[system-design](docs/system-design.md)、[UI spec](docs/ui-spec.md)、[Rams 设计图](docs/design/)、[图](docs/diagrams/)。历史稿：`docs/prd-v1.md`、`docs/exec-model-v0.md`、`docs/ui-spec-v0.md`、`docs/system-design-v0.md`。Rams 若改 ui-spec §10/§11（字号行高、颜色、CJK 字体），以新稿为准。
 
 本仓库不发布到 PyPI，也不带发布配置。许可是 [MIT](LICENSE)。
 
@@ -43,7 +43,7 @@ python -m roboact --host 127.0.0.1 --port 7465 --db data/roboact.db
 8. 服务重启后运行保持暂停。崩溃时正在执行的 `motion` 节点是「中断 · 结果未知」，**不会自动重跑**。先读回机器人状态，再选「重做这一步」或「当作已做完」。测试用 `write` 节点继续时带原幂等键重试。
 9. 适配器 3 s 不可达 → 已暂停 · 机器人控制器断开（红，「继续」要等适配器回来）。后端心跳停了，适配器基类自己取消在飞目标。页面 SSE 10 s 没人连 → 已暂停 · 页面断开（琥珀，重连后可继续；不取消正在跑的节点）。
 
-副作用取值：`none | read | motion | write`。`motion` 是会让机器人动的动作（PRD v1.4.3 与 exec-model v0.2.1 一致；缺省按 `motion`）。`write` 只给手写测试节点（`append_note` / `demo_notes.db`），不进产品节点面板。动作说明可带可选的 `precondition_wait_s`：发目标前 adapter 在这段时间里自己重读 `read_state`，条件一成立马上发；到点仍不满足记 `precondition_failed`、不发目标。没写这个字段就只查一次。读的间隔由写 adapter 的人定，不写进执行器。无论读几次，这一步只有一条运行记录。
+副作用取值：`none | read | motion | write`。`motion` 是会让机器人动的动作（PRD v1.4.4 与 exec-model v0.2.1 一致；缺省按 `motion`）。`write` 只给手写测试节点（`append_note` / `demo_notes.db`），不进产品节点面板。动作说明可带可选的 `precondition_wait_s`：发目标前 adapter 在这段时间里自己重读 `read_state`，条件一成立马上发；到点仍不满足记 `precondition_failed`、不发目标。没写这个字段就只查一次。读的间隔由写 adapter 的人定，不写进执行器。无论读几次，这一步只有一条运行记录。
 
 ## 测
 
@@ -69,6 +69,7 @@ CI 会重算 `vendor-manifest.json` 里每个文件的 sha256，并且要求每�
 | PRD 19 画布性能 | **pass** | 浏览器 `test_prd19_canvas_performance_500_nodes`（平移/状态洪水 p95 ≤ 33 ms）加上 A4 的真实 SSE 500 节点。 |
 | PRD 19.2 停下不等窗口 | **pass** | 同 A5：`test_a5_pause_latency_frames_in_browser`。 |
 | PRD 19.4 等站稳 | **pass** | FakeAdapter：`test_prd194_wait_then_send_when_stable`、`test_prd194_timeout_precondition_failed_no_goal`、`test_prd194_no_wait_fails_on_first_read`。 |
+| PRD 19.5 浅色和深色 | **pass** | `test_prd195_prefers_dark_then_persists_light`：系统深色首次为深色，切浅色后刷新仍浅色。`test_prd195_grayscale_six_states_both_themes`：两套灰度图上出错、断点、完成、中断 · 结果未知、页面断开、机器人控制器断开可辨。`test_prd195_offline_fonts_both_themes`：断网字体仍渲染，无外网字体请求。`test_prd195_live_contrast_operator_adapter_disabled_edge_grid` 与 `test_contrast_ui_spec`：两侧主题下 amber / red / 禁用按钮 / 连线 / 点阵对比度。 |
 
 ## 接真机前检查（R1–R8，v1 不测）
 
@@ -93,7 +94,7 @@ roboact/            Python 包（适配器、节点注册表、图、执行器�
 web/                静态前端，由后端直接托管
 web/vendor/         Vue / Vue Flow / JetBrains Mono / 图标（未改动的原文件）
 assets/logo.svg     品牌标志（favicon 同源）
-docs/prd.md         PRD v1.4.3（现行）
+docs/prd.md         PRD v1.4.4（现行）
 docs/system-design.md
 docs/design/        Rams 12 张设计图（含 r-waiting）
 docs/diagrams/      部署/时序/状态图源文件 + PNG

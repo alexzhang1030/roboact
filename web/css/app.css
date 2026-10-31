@@ -57,7 +57,7 @@ button, input, select, textarea { font: inherit; color: inherit; }
 button { height: 28px; border-radius: 4px; border: 1px solid var(--border); background: var(--surface); padding: 0 12px; cursor: pointer; }
 button.primary { background: var(--blue); color: var(--surface); border-color: var(--blue); }
 button:disabled { opacity: 1; color: var(--muted); cursor: default; background: var(--bg); border-color: var(--border); }
-button.primary:disabled { background: var(--border); border-color: var(--border); color: var(--muted); }
+button.primary:disabled { background: var(--bg); border-color: var(--border); color: var(--muted); }
 .kbd { font-size: 12px; color: var(--muted); }
 button.primary .kbd { color: inherit; }
 input, select, textarea { border: 1px solid var(--border); border-radius: 4px; background: var(--surface); padding: 4px 8px; }
@@ -319,6 +319,25 @@ label { display: block; color: var(--muted); font-size: 12px; margin: 8px 0 4px;
 .confirm-box { padding: 12px 12px 0; border-bottom: 1px solid var(--border); }
 .confirm-box .note-in { width: 100%; }
 .idem-note { color: var(--muted); font-size: 12px; margin: 8px 0 0; }
+
+.gallery-states {
+  display: flex; flex-wrap: wrap; gap: 8px; padding: 8px 12px;
+  border-bottom: 1px solid var(--border); background: var(--surface);
+}
+.gstate {
+  display: inline-flex; align-items: center; gap: 4px;
+  height: 28px; padding: 0 8px; border: 1px solid var(--border); border-radius: 4px;
+  background: var(--bg); font-family: var(--mono); font-size: 12px; color: var(--text);
+}
+.gstate[data-state="error"],
+.gstate[data-state="adapter_lost"] { color: var(--red); border-color: var(--red); }
+.gstate[data-state="paused"],
+.gstate[data-state="unknown"],
+.gstate[data-state="operator_lost"] { color: var(--amber); border-color: var(--amber); }
+.gstate[data-state="done"] { color: var(--green); }
+.gstate[data-state="operator_lost"] { box-shadow: inset 3px 0 0 var(--amber); }
+.gstate[data-state="adapter_lost"] { box-shadow: inset 3px 0 0 var(--red); }
+.gstate-word { font-family: var(--mono); }
 
 @media (max-width: 800px) {
   .left { display: none; }

@@ -27,13 +27,27 @@ function stressGraph(n) {
   return { nodes, edges }
 }
 
+const GALLERY_STATES = [
+  { id: 'error', kind: 'error', icon: 'state-error', word: '出错' },
+  { id: 'paused', kind: 'paused', icon: 'state-paused', word: '已暂停 · 断点' },
+  { id: 'done', kind: 'done', icon: 'state-done', word: '完成' },
+  { id: 'unknown', kind: 'unknown', icon: 'state-unknown', word: '中断 · 结果未知' },
+  { id: 'operator_lost', kind: 'paused', icon: '', word: '已暂停 · 页面断开' },
+  { id: 'adapter_lost', kind: 'error', icon: '', word: '已暂停 · 机器人控制器断开' },
+]
+
 function galleryGraph() {
-  const mk = (id, x, status, title) => ({
+  const mk = (id, x, title, breakpoints = {}) => ({
     id, type: 'agent', position: { x, y: 80 },
-    data: { nodeType: 'constant', title, params: { value: id, value_type: 'string' }, breakpoints: {} },
+    data: { nodeType: 'constant', title, params: { value: id, value_type: 'string' }, breakpoints },
   })
   return {
-    nodes: [mk('done', 40, 'done', '完成节点'), mk('paused', 320, 'paused', '暂停节点'), mk('error', 600, 'error', '出错节点')],
+    nodes: [
+      mk('done', 40, '完成节点'),
+      mk('paused', 300, '断点节点', { before: { enabled: true } }),
+      mk('error', 560, '出错节点'),
+      mk('unknown', 820, '中断 · 结果未知'),
+    ],
     edges: [],
   }
 }
@@ -866,6 +880,7 @@ const App = defineComponent({
         nodeStatus.done = { status: 'done', duration_ms: 1200 }
         nodeStatus.paused = { status: 'paused', phase: 'before' }
         nodeStatus.error = { status: 'error', error: '超时' }
+        nodeStatus.unknown = { status: 'interrupted_unknown', error_summary: '外部可能已写入' }
         vf.onNodesInitialized(() => { window.__ready = true })
         return
       }
@@ -897,6 +912,7 @@ const App = defineComponent({
       runWord, runWordKind, banners, mismatch, mismatchFade, selectedUnknown, selectedWait, writeTimeoutHint, selectedCancelRejected,
       needToken, tokenInput, tokenErr, connectWithToken, adapterLost, uiLost, operatorLost,
       rejectedActions, needsReadback, readback, readingState, resolveMotion,
+      isGallery: GALLERY, galleryStates: GALLERY_STATES,
       addNode, onPaletteDrag, onDrop, toggleBp, setBpRound, removeSelected, makeGroup, scheduleSave,
       onConnect, onNodeDragStop, onNodesChange, onPaneClick, onCanvasDbl,
       doRun, cmd, rerunNew, downloadFlow, uploadFlow, doCompare, onRightDown, updateParam,
@@ -935,6 +951,12 @@ const App = defineComponent({
         <button @click="downloadFlow">保存文件</button>
         <label style="margin:0">打开<input type="file" accept="application/json" style="display:none" @change="uploadFlow"></label>
       </div>
+    </div>
+    <div v-if="isGallery" class="gallery-states" data-testid="prd195-states">
+      <span class="gstate" v-for="s in galleryStates" :key="s.id" :data-state="s.id" :data-kind="s.kind">
+        <span v-if="s.icon" class="ico" :data-kind="s.kind" :style="{ '--ico': 'url(/vendor/icons/' + s.icon + '.svg)' }"></span>
+        <span class="gstate-word">{{ s.word }}</span>
+      </span>
     </div>
     <div class="banners">
       <div class="banner" v-for="b in banners" :key="b.id" :class="b.kind">
