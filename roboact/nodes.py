@@ -10,7 +10,7 @@ from typing import Any, ClassVar
 from pydantic import BaseModel, ConfigDict, Field, create_model
 
 from . import NODE_TIMEOUT_S
-from .adapter import ActionDescriptor, Adapter, ActionResult, CancelResult, PreconditionFailed, Progress
+from .adapter import ActionDescriptor, Adapter, ActionResult, CancelResult, PreconditionFailed, Progress, WaitAborted
 from .util import compare, dump, get_path, sha256_text
 
 
@@ -46,6 +46,8 @@ class RunContext:
         adapter: Any = None,
         decision: str | None = None,
         on_progress: Any = None,
+        on_phase: Any = None,
+        should_abort: Any = None,
     ):
         self.run_id = run_id
         self.step = step
@@ -56,6 +58,8 @@ class RunContext:
         self.tools = adapter  # leftover name used by older fixtures
         self.decision = decision
         self.on_progress = on_progress
+        self.on_phase = on_phase
+        self.should_abort = should_abort
 
 
 class NodeType:
@@ -588,18 +592,19 @@ def make_action_node(desc: ActionDescriptor, adapter: Adapter) -> type[NodeType]
                     await ctx.on_progress(p)
 
             bound = ctx.adapter if ctx.adapter is not None else adapter
-            timeout_s = float(getattr(type(self), "timeout_s", None) or desc.timeout_s or NODE_TIMEOUT_S)
-            deadline = time.time() + timeout_s
             exec_task = asyncio.create_task(bound.execute(
-                desc.id, raw, on_progress=_prog, idem_key=ctx.idempotency_key, deadline=deadline,
+                desc.id, raw, on_progress=_prog, idem_key=ctx.idempotency_key, deadline=None,
+                on_phase=ctx.on_phase, should_abort=ctx.should_abort,
             ))
             await asyncio.sleep(0)
             self._handle = bound.handle_by_idem(ctx.idempotency_key) if hasattr(bound, "handle_by_idem") else None
             result: ActionResult = await exec_task
             self._handle = bound.handle_by_idem(ctx.idempotency_key) if hasattr(bound, "handle_by_idem") else self._handle
             if not result.success:
-                if result.message == "precondition_failed":
+                if result.message == "precondition_failed" or (result.message or "").startswith("前提条件"):
                     raise PreconditionFailed(result.message, result.measured)
+                if result.message == "wait_aborted":
+                    raise WaitAborted("user")
                 raise RuntimeError(result.message or "动作失败")
             return out_model.model_validate(result.outputs)
 

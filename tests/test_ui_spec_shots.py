@@ -1,4 +1,4 @@
-"""One Playwright pass: each screen/state in docs/ui-spec-v0.md → artifacts."""
+"""One Playwright pass: each ui-spec screen/state in light and dark."""
 from __future__ import annotations
 
 from pathlib import Path
@@ -14,9 +14,9 @@ pw = pytest.importorskip("playwright.sync_api")
 ART = Path("/opt/cursor/artifacts")
 
 
-def _shot(page, name: str) -> None:
+def _shot(page, screen: str, state: str, theme: str) -> None:
     ART.mkdir(parents=True, exist_ok=True)
-    page.screenshot(path=str(ART / f"{name}.png"), full_page=True)
+    page.screenshot(path=str(ART / f"uispec-{screen}-{state}-{theme}.png"), full_page=True)
 
 
 def _open(br, base, path="/"):
@@ -24,6 +24,18 @@ def _open(br, base, path="/"):
     page.goto(base + path, wait_until="domcontentloaded")
     page.wait_for_function("window.__ready === true", timeout=60000)
     return page
+
+
+def _theme(page, theme: str) -> None:
+    page.evaluate(
+        """(theme) => {
+          document.documentElement.dataset.theme = theme
+          localStorage.setItem('roboact-theme', theme)
+          if (window.__af && window.__af.theme) window.__af.theme.value = theme
+        }""",
+        theme,
+    )
+    page.wait_for_timeout(60)
 
 
 def _set_run(page, status, reason=None):
@@ -35,7 +47,23 @@ def _set_run(page, status, reason=None):
         }""",
         {"status": status, "reason": reason},
     )
-    page.wait_for_timeout(80)
+    page.wait_for_timeout(50)
+
+
+def _set_node(page, nid, payload):
+    page.evaluate(
+        """({nid, payload}) => {
+          if (window.__af.nodeStatus) window.__af.nodeStatus[nid] = payload
+        }""",
+        {"nid": nid, "payload": payload},
+    )
+    page.wait_for_timeout(40)
+
+
+def _both(page, screen, state):
+    for theme in ("light", "dark"):
+        _theme(page, theme)
+        _shot(page, screen, state, theme)
 
 
 def test_ui_spec_screenshots_one_pass(server, token_server):
@@ -43,15 +71,10 @@ def test_ui_spec_screenshots_one_pass(server, token_server):
     p, path = _launch()
     try:
         br = p.chromium.launch(executable_path=chrome_path() or path, args=["--no-sandbox"])
-
         page = _open(br, server["base"])
         page.wait_for_timeout(200)
-        _shot(page, "uispec_layout_idle")
 
-        page.locator(".top .right button", has_text="深色").click()
-        page.wait_for_timeout(80)
-        _shot(page, "uispec_layout_dark")
-        page.locator(".top .right button", has_text="浅色").click()
+        _both(page, "canvas", "idle")
 
         page.evaluate("() => window.__af.toggleBp('start', 'before')")
         page.locator(".ctrls button.primary").click()
@@ -59,7 +82,7 @@ def test_ui_spec_screenshots_one_pass(server, token_server):
             "() => window.__af.run.value && window.__af.run.value.status === 'paused'",
             timeout=15000,
         )
-        _shot(page, "uispec_layout_paused_breakpoint")
+        _both(page, "canvas", "paused-breakpoint")
 
         page.evaluate("() => window.__af.cmd('step')")
         try:
@@ -70,47 +93,67 @@ def test_ui_spec_screenshots_one_pass(server, token_server):
                 }""",
                 timeout=8000,
             )
-            _shot(page, "uispec_layout_paused_step")
         except Exception:
             _set_run(page, "paused", "step_done")
-            _shot(page, "uispec_layout_paused_step")
+        _both(page, "canvas", "paused-step")
 
         _set_run(page, "running")
-        _shot(page, "uispec_layout_running")
-        page.evaluate("() => { if (window.__af.pausePending) window.__af.pausePending.value = true }")
-        page.wait_for_timeout(50)
-        _shot(page, "uispec_layout_pause_pending")
-        page.evaluate("() => { if (window.__af.pausePending) window.__af.pausePending.value = false }")
-        _set_run(page, "paused", "user")
-        _shot(page, "uispec_layout_paused_user")
-        _set_run(page, "stopped")
-        _shot(page, "uispec_layout_stopped")
-        _set_run(page, "completed")
-        _shot(page, "uispec_layout_completed")
+        _both(page, "canvas", "running")
 
-        for name, status, reason in (
-            ("uispec_pause_operator_lost", "paused", "operator_lost"),
-            ("uispec_pause_adapter_lost", "paused", "adapter_lost"),
-            ("uispec_pause_motion_timeout", "paused", "motion_timeout"),
-            ("uispec_pause_write_timeout", "paused", "write_timeout"),
-            ("uispec_pause_restart", "paused", "restart"),
-            ("uispec_pause_storage_error", "paused", "storage_error"),
-            ("uispec_layout_waiting_approval", "paused", "approval"),
-            ("uispec_layout_step_limit", "step_limit", None),
-            ("uispec_layout_error", "error", None),
+        page.evaluate("() => { if (window.__af.pausePending) window.__af.pausePending.value = true }")
+        page.wait_for_timeout(40)
+        _both(page, "canvas", "pause-pending")
+        page.evaluate("() => { if (window.__af.pausePending) window.__af.pausePending.value = false }")
+
+        _set_run(page, "paused", "user")
+        _both(page, "canvas", "paused-user")
+        _set_run(page, "stopped")
+        _both(page, "canvas", "stopped")
+        _set_run(page, "completed")
+        _both(page, "canvas", "completed")
+        _set_run(page, "error")
+        _both(page, "canvas", "error")
+        _set_run(page, "step_limit")
+        _both(page, "canvas", "step-limit")
+
+        for state, status, reason in (
+            ("paused-operator-lost", "paused", "operator_lost"),
+            ("paused-adapter-lost", "paused", "adapter_lost"),
+            ("paused-motion-timeout", "paused", "motion_timeout"),
+            ("paused-write-timeout", "paused", "write_timeout"),
+            ("paused-restart", "paused", "restart"),
+            ("paused-storage-error", "paused", "storage_error"),
+            ("waiting-approval", "paused", "approval"),
         ):
             _set_run(page, status, reason)
-            _shot(page, name)
+            _both(page, "canvas", state)
 
-        page.evaluate(
-            """() => {
-              if (window.__af.nodeStatus) {
-                window.__af.nodeStatus.go = { status: 'action_missing', state: 'action_missing', word: '动作已不存在' }
-              }
-            }"""
-        )
-        page.wait_for_timeout(80)
-        _shot(page, "uispec_node_action_missing")
+        _set_run(page, "running")
+        page.evaluate("() => { if (window.__af.selected) window.__af.selected.value = 'go'; if (window.__af.tab) window.__af.tab.value = 'rec' }")
+        _set_node(page, "go", {
+            "status": "running",
+            "state": "running",
+            "word": "运行中 · 等待前提条件",
+            "phase": "waiting_precondition",
+            "wait_s": 3,
+            "wait_max_s": 8,
+        })
+        _both(page, "canvas", "waiting")
+
+        _set_node(page, "go", {"status": "action_missing", "state": "action_missing", "word": "动作已不存在"})
+        _both(page, "node", "action-missing")
+
+        _set_node(page, "go", {"status": "cancel_rejected", "state": "cancel_rejected", "word": "取消被拒"})
+        _set_run(page, "running")
+        _both(page, "node", "cancel-rejected")
+
+        _set_node(page, "go", {
+            "status": "interrupted_unknown",
+            "state": "interrupted_unknown",
+            "word": "中断 · 结果未知",
+        })
+        _set_run(page, "paused", "motion_timeout")
+        _both(page, "node", "unknown")
 
         _set_run(page, "paused", "user")
         page.evaluate(
@@ -119,23 +162,19 @@ def test_ui_spec_screenshots_one_pass(server, token_server):
               if (r) window.__af.run.value = { ...r, flow_version: 1, status: 'paused' }
             }"""
         )
-        _shot(page, "uispec_banner_version_lock")
+        _both(page, "banner", "version-lock")
 
         page.evaluate(
             """() => {
-              const nodes = document.querySelectorAll('.right span')
-              for (const n of nodes) {
-                if (n.textContent && n.textContent.indexOf('已连接') >= 0) {
-                  n.textContent = n.textContent.replace('已连接', '重连中')
-                }
-              }
+              if (window.__af.conn) window.__af.conn.value = 'retry'
             }"""
         )
-        _shot(page, "uispec_conn_reconnecting")
+        _both(page, "conn", "reconnecting")
+        page.evaluate("""() => { if (window.__af.conn) window.__af.conn.value = 'ok' }""")
 
         page2 = _open(br, server["base"], "/?gallery=1")
-        page2.wait_for_timeout(200)
-        _shot(page2, "uispec_screen_gallery_states")
+        page2.wait_for_timeout(160)
+        _both(page2, "screen", "gallery")
         page2.close()
 
         confirm = {
@@ -144,7 +183,7 @@ def test_ui_spec_screenshots_one_pass(server, token_server):
                 {"id": "start", "type": "start", "x": 40, "y": 80, "params": {"data": {"v": 1}}},
                 {"id": "hc", "type": "human_confirm", "x": 300, "y": 80, "params": {"prompt": "请确认"}},
                 {"id": "yes", "type": "echo", "x": 560, "y": 40, "params": {}},
-                {"id": "out", "type": "output", "x": 800, "y": 40, "params": {}},
+                {"id": "out", "type": "output", "x": 80, "y": 40, "params": {}},
             ],
             "edges": [
                 {"id": "e0", "source": "start", "source_port": "data", "target": "hc", "target_port": "value", "kind": "data"},
@@ -167,7 +206,7 @@ def test_ui_spec_screenshots_one_pass(server, token_server):
                 }""",
                 timeout=8000,
             )
-            _shot(page3, "uispec_layout_waiting_approval")
+            _both(page3, "canvas", "waiting-approval-live")
             page3.close()
         except Exception:
             pass
@@ -176,11 +215,15 @@ def test_ui_spec_screenshots_one_pass(server, token_server):
         page4.goto(token_server["base"] + "/", wait_until="domcontentloaded")
         page4.wait_for_function("window.__ready === true", timeout=20000)
         page4.wait_for_selector(".token-gate", timeout=8000)
-        _shot(page4, "uispec_screen_token_gate")
+        _both(page4, "screen", "token-gate")
         page4.close()
 
         br.close()
     finally:
         p.stop()
-    names = sorted(p.name for p in ART.glob("uispec_*.png"))
+    names = sorted(p.name for p in ART.glob("uispec-*-light.png"))
+    darks = sorted(p.name for p in ART.glob("uispec-*-dark.png"))
+    assert any("waiting" in n for n in names), names
     assert len(names) >= 12, names
+    assert len(darks) >= 12, darks
+    assert len(names) == len(darks)

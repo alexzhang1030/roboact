@@ -131,6 +131,14 @@ class PreconditionFailed(Exception):
         self.state = state or {}
 
 
+class WaitAborted(Exception):
+    """Wait stopped before send (stop / pause / page or adapter lost)."""
+
+    def __init__(self, reason: str = "user"):
+        super().__init__(reason)
+        self.reason = reason
+
+
 class Adapter:
     """Controller-specific implementation. The canvas never sees SDK vs ROS 2."""
 
@@ -300,7 +308,11 @@ class Adapter:
                 return False
         return True
 
-    async def await_preconditions(self, desc: ActionDescriptor) -> tuple[bool, dict[str, Any] | None]:
+    async def await_preconditions(
+        self,
+        desc: ActionDescriptor,
+        should_abort: Callable[[], str | None] | None = None,
+    ) -> tuple[bool, dict[str, Any] | None]:
         """Re-read read_state until preconditions hold or the wait window ends.
 
         No `precondition_wait_s` means one read (current behaviour). The poll
@@ -316,6 +328,11 @@ class Adapter:
         deadline = t0 if wait_s is None else t0 + float(wait_s)
         last: dict[str, Any] | None = None
         while True:
+            if should_abort:
+                reason = should_abort()
+                if reason:
+                    self.last_precondition_wait_s = time.monotonic() - t0
+                    raise WaitAborted(reason)
             last = await self.read_state(desc.id)
             self.last_precondition_state = last
             if self.preconditions_hold(desc, last):
@@ -330,7 +347,17 @@ class Adapter:
             if remain <= 0:
                 self.last_precondition_wait_s = time.monotonic() - t0
                 return False, last
-            await asyncio.sleep(min(interval, remain))
+            slept = 0.0
+            slice_s = min(interval, remain)
+            while slept < slice_s:
+                if should_abort:
+                    reason = should_abort()
+                    if reason:
+                        self.last_precondition_wait_s = time.monotonic() - t0
+                        raise WaitAborted(reason)
+                hop = min(0.05, slice_s - slept)
+                await asyncio.sleep(hop)
+                slept += hop
 
     async def execute(
         self,
@@ -339,15 +366,29 @@ class Adapter:
         on_progress: ProgressFn | None = None,
         idem_key: str | None = None,
         deadline: float | None = None,
+        on_phase: Callable[[str], None | Awaitable[None]] | None = None,
+        should_abort: Callable[[], str | None] | None = None,
     ) -> ActionResult:
         desc = self.descriptor(action_id)
-        ok, last = await self.await_preconditions(desc)
+        need_wait = any(p.check for p in desc.preconditions) or desc.precondition_wait_s is not None
+        if need_wait and on_phase:
+            out = on_phase("waiting_precondition")
+            if asyncio.iscoroutine(out):
+                await out
+        ok, last = await self.await_preconditions(desc, should_abort=should_abort)
         if not ok:
+            waited = self.last_precondition_wait_s or 0
             return ActionResult(
                 success=False,
-                message="precondition_failed",
+                message=f"前提条件没满足（等了 {int(round(waited))} s）",
                 measured=dict(last or {}),
             )
+        if on_phase:
+            out = on_phase("sent")
+            if asyncio.iscoroutine(out):
+                await out
+        if deadline is None:
+            deadline = time.time() + float(desc.timeout_s or 60)
         handle = ExecuteHandle(action_id, idem_key, desc.cancel.cancellable, desc.cancel.post_cancel)
         handle.deadline = deadline
         handle.return_mode = "goal_progress" if desc.return_mode in ("goal_progress", "async") else desc.return_mode

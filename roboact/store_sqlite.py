@@ -39,6 +39,7 @@ CREATE TABLE IF NOT EXISTS steps (
   config_hash TEXT, upstream_hashes_json TEXT, input_sha256 TEXT,
   side_effect TEXT, side_effect_mode TEXT,
   idem_key TEXT, retry_of INTEGER,
+  phase TEXT,
   PRIMARY KEY (run_id, step));
 CREATE INDEX IF NOT EXISTS steps_by_node ON steps (run_id, node_id, round);
 CREATE TABLE IF NOT EXISTS pending (
@@ -71,7 +72,14 @@ class SqliteStore:
         self._lock = threading.Lock()
         self.conn.executescript(SCHEMA)
         self.conn.commit()
+        self._migrate()
         self.fail_next_commit = False
+
+    def _migrate(self) -> None:
+        cols = {r[1] for r in self.conn.execute("PRAGMA table_info(steps)").fetchall()}
+        if "phase" not in cols:
+            self.conn.execute("ALTER TABLE steps ADD COLUMN phase TEXT")
+            self.conn.commit()
 
     def close(self) -> None:
         self.conn.close()
@@ -271,8 +279,8 @@ class SqliteStore:
         self.execute(
             """INSERT INTO steps(run_id,step,node_id,round,status,input_json,input_source,input_ref_json,edited_json,
                output_json,error_json,started_at,ended_at,duration_ms,config_hash,upstream_hashes_json,input_sha256,
-               side_effect,side_effect_mode,idem_key,retry_of)
-               VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+               side_effect,side_effect_mode,idem_key,retry_of,phase)
+               VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (
                 rec["run_id"], rec["step"], rec["node_id"], rec["round"], rec["status"],
                 dump(rec.get("input")), rec.get("input_source"), dump(rec.get("input_ref")),
@@ -280,8 +288,12 @@ class SqliteStore:
                 rec.get("started_at") or now_iso(), rec.get("ended_at"), rec.get("duration_ms"),
                 rec.get("config_hash"), dump(rec.get("upstream_hashes")), rec.get("input_sha256"),
                 rec.get("side_effect"), rec.get("side_effect_mode"), rec.get("idem_key"), rec.get("retry_of"),
+                rec.get("phase"),
             ),
         )
+
+    def delete_step(self, run_id: str, step: int) -> None:
+        self.execute("DELETE FROM steps WHERE run_id=? AND step=?", (run_id, step))
 
     def update_step(self, run_id: str, step: int, **fields: Any) -> None:
         mapping = {"input": "input_json", "output": "output_json", "error": "error_json", "edited": "edited_json", "upstream_hashes": "upstream_hashes_json"}

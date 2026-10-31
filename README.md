@@ -9,7 +9,7 @@
 - 适配器：同一套接口挡住 SDK / ROS 2。v1 只带 `FakeAdapter`（`target=sim`）
 - **离线**：前端、图标、字体在仓库里；Python 依赖用自带 wheel
 
-规格（现行）：[PRD v1.4.3](docs/prd.md)、[exec-model v0.2.1](docs/exec-model.md)、[UI spec](docs/ui-spec.md)、[Rams 设计图](docs/design/)。历史稿：`docs/prd-v1.md`、`docs/exec-model-v0.md`、`docs/ui-spec-v0.md`、`docs/system-design-v0.md`。
+规格（现行）：[PRD v1.4.3](docs/prd.md)、[exec-model v0.2.1](docs/exec-model.md)、[system-design](docs/system-design.md)、[UI spec](docs/ui-spec.md)、[Rams 设计图](docs/design/)、[图](docs/diagrams/)。历史稿：`docs/prd-v1.md`、`docs/exec-model-v0.md`、`docs/ui-spec-v0.md`、`docs/system-design-v0.md`。
 
 本仓库不发布到 PyPI，也不带发布配置。许可是 [MIT](LICENSE)。
 
@@ -94,7 +94,9 @@ web/                静态前端，由后端直接托管
 web/vendor/         Vue / Vue Flow / JetBrains Mono / 图标（未改动的原文件）
 assets/logo.svg     品牌标志（favicon 同源）
 docs/prd.md         PRD v1.4.3（现行）
-docs/design/        Rams 11 张设计图（PNG + HTML）
+docs/system-design.md
+docs/design/        Rams 12 张设计图（含 r-waiting）
+docs/diagrams/      部署/时序/状态图源文件 + PNG
 vendor/wheels/      运行时 Python wheel
 vendor/licenses/    第三方许可原文
 vendor-manifest.json

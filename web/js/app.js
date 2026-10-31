@@ -186,6 +186,12 @@ const App = defineComponent({
       if (versionWarn.value) list.push({ id: 'version', at: bannerClock.version, kind: 'neutral', text: '画布已改，这次运行仍按 v' + run.value.flow_version + '。', actions: 'version' })
       return list.sort((a, b) => b.at - a.at).slice(0, 2)
     })
+    const selectedWait = computed(() => {
+      const s = selected.value && nodeStatus[selected.value]
+      if (!s) return null
+      if (s.phase === 'waiting_precondition' || (s.word && String(s.word).includes('等待前提条件'))) return s
+      return null
+    })
     const selectedUnknown = computed(() => {
       const s = selected.value && nodeStatus[selected.value]
       return !!(s && (s.status === 'interrupted_unknown' || s.state === 'interrupted_unknown'))
@@ -878,7 +884,7 @@ const App = defineComponent({
     })
     onUnmounted(() => { window.removeEventListener('keydown', onKeyDown); if (es) es.close(); stopBeat(); stopAdapterPoll() })
 
-    window.__af = { nodes, edges, run, adapter, doRun, cmd, toggleBp, vf, nodeStatus, decide, pausePending, slot1Label, slot1Disabled, slot2Disabled, banners, mismatch, pauseRun, runWord, runWordKind, needToken, adapterLost, uiLost, operatorLost, rejectedActions, resolveMotion }
+    window.__af = { nodes, edges, run, adapter, doRun, cmd, toggleBp, vf, nodeStatus, decide, pausePending, slot1Label, slot1Disabled, slot2Disabled, banners, mismatch, pauseRun, runWord, runWordKind, needToken, adapterLost, uiLost, operatorLost, rejectedActions, resolveMotion, theme, selected, tab, toggleTheme }
 
     return {
       nodeTypesList, tools, adapter, meta, nodes, edges, groups, leftOpen, rightW, tab, selected, selectedNode,
@@ -888,7 +894,7 @@ const App = defineComponent({
       deadlineAdapterOnly, outputImages, isReal, crashRecovery, selectedSpec,
       lodLow, nodeTypes: { agent: FlowNode }, edgeTypes: { loop: LoopEdge },
       slot1Label, slot1Disabled, slot2Disabled, slot3Disabled, slot1Action, pauseRun,
-      runWord, runWordKind, banners, mismatch, mismatchFade, selectedUnknown, writeTimeoutHint, selectedCancelRejected,
+      runWord, runWordKind, banners, mismatch, mismatchFade, selectedUnknown, selectedWait, writeTimeoutHint, selectedCancelRejected,
       needToken, tokenInput, tokenErr, connectWithToken, adapterLost, uiLost, operatorLost,
       rejectedActions, needsReadback, readback, readingState, resolveMotion,
       addNode, onPaletteDrag, onDrop, toggleBp, setBpRound, removeSelected, makeGroup, scheduleSave,
@@ -1073,12 +1079,13 @@ const App = defineComponent({
               </div>
             </template>
             <template v-if="tab==='rec'">
+              <p v-if="selectedWait" class="kv">已等 {{ selectedWait.wait_s ?? 0 }} s / 上限 {{ selectedWait.wait_max_s ?? '—' }} s</p>
               <div v-for="r in nodeRecords" :key="r.step" class="kv" style="margin-bottom:8px;border-bottom:1px solid var(--border);padding-bottom:8px">
                 步 {{ r.step }} · 第 {{ r.round }} 轮 · {{ r.status }} · {{ r.duration_ms }} ms
                 <div>入 {{ JSON.stringify(r.inputs) }}</div>
                 <div>出 {{ JSON.stringify(r.outputs) }}</div>
               </div>
-              <p v-if="!nodeRecords.length" style="color:var(--muted)">还没有运行记录。</p>
+              <p v-if="!nodeRecords.length && !selectedWait" style="color:var(--muted)">还没有运行记录。</p>
             </template>
           </div>
         </template>
@@ -1087,7 +1094,7 @@ const App = defineComponent({
             <h3>这次运行</h3>
             <p v-if="!run" style="color:var(--muted)">还没有运行。点顶栏「运行」或按 F5。</p>
             <template v-else>
-              <p>状态 {{ run.status }} · 开始后步数 {{ run.steps_used || run.global_step || run.step || 0 }}</p>
+              <p class="kv">状态 {{ run.status }} · 开始后步数 {{ run.steps_used || run.global_step || run.step || 0 }}</p>
               <p v-if="run.error" style="color:var(--red)">{{ run.error.message || run.error }}</p>
               <p v-if="run.status==='step_limit'">停在步数上限。最后一步见记录。</p>
               <h3>出错的节点</h3>

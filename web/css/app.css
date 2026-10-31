@@ -17,10 +17,6 @@
   --red: #C62828;
   --amber: #9A6700;
   --shadow: 0 1px 2px rgb(0 0 0 / .06);
-  --hair: #E6E6E1;
-  --surface2: #FAFAF8;
-  --redsoft: #FBEAEA;
-  --ambersoft: #FBF3E0;
   --top: 44px;
   --left: 220px;
   --right: 360px;
@@ -41,10 +37,6 @@
   --red: #F06A6A;
   --amber: #D4A72C;
   --shadow: none;
-  --hair: #2E2E2B;
-  --surface2: #232321;
-  --redsoft: #3A2222;
-  --ambersoft: #3A3020;
 }
 
 * { box-sizing: border-box; }
@@ -63,10 +55,10 @@ html, body, #app { margin: 0; height: 100%; background: var(--bg); color: var(--
 .token-err { margin: 0; color: var(--red); font-size: 12px; }
 button, input, select, textarea { font: inherit; color: inherit; }
 button { height: 28px; border-radius: 4px; border: 1px solid var(--border); background: var(--surface); padding: 0 12px; cursor: pointer; }
-button.primary { background: var(--blue); color: #fff; border-color: var(--blue); }
-button:disabled { opacity: 1; color: var(--muted); cursor: default; background: var(--surface2); border-color: var(--hair); }
+button.primary { background: var(--blue); color: var(--surface); border-color: var(--blue); }
+button:disabled { opacity: 1; color: var(--muted); cursor: default; background: var(--bg); border-color: var(--border); }
 button.primary:disabled { background: var(--border); border-color: var(--border); color: var(--muted); }
-.kbd { font-size: 11px; color: var(--muted); font-family: var(--mono); }
+.kbd { font-size: 12px; color: var(--muted); }
 button.primary .kbd { color: inherit; }
 input, select, textarea { border: 1px solid var(--border); border-radius: 4px; background: var(--surface); padding: 4px 8px; }
 textarea { width: 100%; min-height: 80px; font-family: var(--mono); font-size: 12px; }
@@ -75,7 +67,7 @@ label { display: block; color: var(--muted); font-size: 12px; margin: 8px 0 4px;
 .shell { display: flex; flex-direction: column; height: 100%; }
 .top {
   height: var(--top); flex: none; display: flex; align-items: center; gap: 12px;
-  padding: 0 12px; border-bottom: 1px solid var(--hair); background: var(--surface);
+  padding: 0 12px; border-bottom: 1px solid var(--border); background: var(--surface);
   position: relative;
 }
 .top .name { font-size: 14px; font-weight: 600; border: none; background: transparent; padding: 0; min-width: 80px; }
@@ -206,11 +198,12 @@ label { display: block; color: var(--muted); font-size: 12px; margin: 8px 0 4px;
 .fn-title {
   height: 32px; display: flex; align-items: center; gap: 6px;
   padding: 0 12px; font-size: 14px; font-weight: 600;
-  border-bottom: 1px solid var(--hair);
+  border-bottom: 1px solid var(--border);
 }
 .fn-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .fn-side { color: var(--muted); font-size: 12px; flex: none; }
 .fn-st { display: flex; align-items: center; gap: 4px; font-size: 12px; font-weight: 400; color: var(--muted); flex: none; }
+.fn-st-word { font-family: var(--mono); }
 .fn[data-status="running"] .fn-st { color: var(--blue); }
 .fn[data-status="paused"] .fn-st,
 .fn[data-status="awaiting"] .fn-st,
@@ -231,11 +224,11 @@ label { display: block; color: var(--muted); font-size: 12px; margin: 8px 0 4px;
 .vue-flow[data-flood="idle"] .ico { --ico: url("/vendor/icons/state-idle.svg"); }
 .fn-err {
   height: 24px; padding: 0 12px; font-size: 12px; color: var(--red);
-  background: var(--redsoft);
+  background: var(--surface);
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   display: flex; align-items: center; gap: 6px;
 }
-.fn-err.amber { color: var(--amber); background: var(--ambersoft); }
+.fn-err.amber { color: var(--amber); background: var(--surface); }
 .fn-ports { padding: 0 0 4px; }
 .fn-port {
   height: 24px; display: flex; align-items: center; padding: 0 12px;
@@ -273,7 +266,7 @@ label { display: block; color: var(--muted); font-size: 12px; margin: 8px 0 4px;
 .bp.on .dot { background: var(--red); }
 .bp.cond .dot { box-shadow: inset 0 0 0 2px var(--red); background: var(--red); }
 .bp.cond .dot::after {
-  content: ""; position: absolute; left: 1px; right: 1px; top: 4px; height: 2px; background: #fff;
+  content: ""; position: absolute; left: 1px; right: 1px; top: 4px; height: 2px; background: var(--surface);
 }
 
 .ico {

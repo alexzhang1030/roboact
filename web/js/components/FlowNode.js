@@ -84,6 +84,9 @@ export default markRaw(defineComponent({
       if (s.status === 'cancel_rejected') return '取消被拒'
       if (s.status === 'action_missing') return '动作已不存在'
       if (s.status === 'running') {
+        if (s.phase === 'waiting_precondition' || (s.word && String(s.word).includes('等待前提条件'))) {
+          return '运行中 · 等待前提条件'
+        }
         if (s.feedback) return '运行中 · ' + s.feedback
         if (s.progress != null && s.progress !== '') return '运行中 · ' + Math.round(s.progress) + '%'
         if (s.elapsed_s != null) return '运行中 · ' + Math.round(s.elapsed_s) + ' s'

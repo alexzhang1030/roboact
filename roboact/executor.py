@@ -19,7 +19,7 @@ from .graph import (
     types_compatible,
     connected_types,
 )
-from .adapter import ActionResult, Adapter, CancelResult, CrashBetweenWriteAndKey, Progress, image_summary
+from .adapter import ActionResult, Adapter, CancelResult, CrashBetweenWriteAndKey, Progress, WaitAborted, image_summary
 from .nodes import (
     EXTERNAL_SIDES,
     NodeType,
@@ -97,6 +97,9 @@ class RunCtrl:
     done_counts: dict[str, int] = field(default_factory=dict)
     influencing: dict[str, set[str]] | None = None
     hash_cache: dict[str, str] = field(default_factory=dict)
+    step_phase: str | None = None
+    wait_started: float = 0.0
+    wait_max_s: float | None = None
 
     @property
     def paused_node(self) -> str | None:
@@ -537,6 +540,9 @@ class Executor:
             if ctrl.status in TERMINAL:
                 raise ApiError(409, "already_finished", "这次运行已经结束。")
             self.store.add_command(run_id, client_id, "stop", None, "200")
+            if ctrl.step_phase == "waiting_precondition":
+                ctrl.stop_flag = True
+                return {"status": "stopping"}
             if ctrl.status == "paused":
                 ctrl.stop_flag = True
                 self._finish(ctrl, "stopped")
@@ -659,7 +665,14 @@ class Executor:
             mid_action = False
             mid_action_adapter = False
             recovery: dict[str, Any] | None = None
+            waiting_nid = None
             for rec in self.store.running_steps(ctrl.run_id):
+                if rec.get("phase") == "waiting_precondition":
+                    self.store.unconsume_items(ctrl.run_id, rec["step"])
+                    self.store.delete_step(ctrl.run_id, rec["step"])
+                    self._set_node(ctrl, rec["node_id"], "queued", rec.get("round") or 0, None)
+                    waiting_nid = rec["node_id"]
+                    continue
                 node = node_map(ctrl.flow).get(rec["node_id"]) or {}
                 side = self._side(node, rec.get("input") or {})
                 from_adapter = False
@@ -686,7 +699,7 @@ class Executor:
                 if from_adapter:
                     mid_action_adapter = True
             old_pause = row.get("pause") or {}
-            node_id = crashed_nid or old_pause.get("node_id")
+            node_id = crashed_nid or waiting_nid or old_pause.get("node_id")
             when = old_pause.get("when") or "before"
             reason = "restart"
             ctrl.recovery = recovery
@@ -938,6 +951,10 @@ class Executor:
                 h = config_hash(node_i)
                 ctrl.hash_cache[i] = h
             fps[i] = h
+        desc = getattr(cls, "action_desc", None)
+        start_phase = None
+        if desc is not None and (desc.precondition_wait_s is not None or any(p.check for p in desc.preconditions)):
+            start_phase = "waiting_precondition"
         try:
             self.store.add_step({
                 "run_id": ctrl.run_id, "step": step, "node_id": nid, "round": rnd, "status": "running",
@@ -945,6 +962,7 @@ class Executor:
                 "config_hash": config_hash(node), "upstream_hashes": fps, "input_sha256": sha256_text(dump(inputs)),
                 "side_effect": side, "side_effect_mode": mode, "idem_key": idem, "retry_of": retry_of,
                 "edited": {"original": ctrl.edits.get("original")} if ctrl.edits and ctrl.edits.get("used") else None,
+                "phase": start_phase,
             })
             self.store.consume_items(ctrl.run_id, item_ids, step)
             self.store.update_run(ctrl.run_id, steps_used=step)
@@ -957,7 +975,16 @@ class Executor:
         ctrl.current_inst = inst
         ctrl.current_nid = nid
         ctrl.current_started = time.monotonic()
-        self._set_node(ctrl, nid, "running", rnd, step, word="运行中")
+        ctrl.step_phase = start_phase
+        ctrl.wait_started = time.monotonic()
+        ctrl.wait_max_s = float(desc.precondition_wait_s) if desc and desc.precondition_wait_s is not None else None
+        if start_phase == "waiting_precondition":
+            self._set_node(
+                ctrl, nid, "running", rnd, step,
+                word="运行中 · 等待前提条件", phase=start_phase, wait_s=0, wait_max_s=ctrl.wait_max_s,
+            )
+        else:
+            self._set_node(ctrl, nid, "running", rnd, step, word="运行中")
 
         outputs: dict[str, Any] = {}
         err = None
@@ -985,6 +1012,14 @@ class Executor:
             try:
                 while True:
                     await asyncio.sleep(1)
+                    if ctrl.step_phase == "waiting_precondition":
+                        secs = int(time.monotonic() - (ctrl.wait_started or ctrl.current_started))
+                        self._set_node(
+                            ctrl, nid, "running", rnd, step,
+                            word="运行中 · 等待前提条件", phase="waiting_precondition",
+                            wait_s=secs, wait_max_s=ctrl.wait_max_s,
+                        )
+                        continue
                     if saw_progress:
                         continue
                     secs = int(time.monotonic() - ctrl.current_started)
@@ -1004,11 +1039,27 @@ class Executor:
                 comment = (ctrl.decision or {}).get("comment") if node["type"] == "human_confirm" else None
                 if node["type"] == "human_confirm":
                     ctrl.decision = None
+                async def on_phase(phase: str) -> None:
+                    ctrl.step_phase = phase
+                    self.store.update_step(ctrl.run_id, step, phase=phase)
+                    if phase == "waiting_precondition":
+                        ctrl.wait_started = time.monotonic()
+                        self._set_node(
+                            ctrl, nid, "running", rnd, step,
+                            word="运行中 · 等待前提条件", phase=phase,
+                            wait_s=0, wait_max_s=ctrl.wait_max_s,
+                        )
+                    elif phase == "sent":
+                        ctrl.current_started = time.monotonic()
+                        self._set_node(ctrl, nid, "running", rnd, step, word="运行中", phase=phase)
+
                 ctx = RunContext(
                     ctrl.run_id, step, rnd, idem, self.data_dir, self.adapter,
                     decision=decision, on_progress=on_progress,
+                    on_phase=on_phase, should_abort=lambda: self._wait_abort_reason(ctrl),
                 )
-                async with asyncio.timeout(timeout):
+                wait_budget = float(desc.precondition_wait_s or 0) if desc else 0.0
+                async with asyncio.timeout(float(timeout) + wait_budget + 0.5):
                     out_m = await inst.run(_coerce_inputs(inst, inputs), parse_params(node["type"], node.get("params")), ctx)
                 outputs = dump_outputs(out_m)
                 if comment:
@@ -1031,6 +1082,25 @@ class Executor:
             ctrl.abandoned = True
             self.runs.pop(ctrl.run_id, None)
             return
+        except WaitAborted as e:
+            if elapsed_task:
+                elapsed_task.cancel()
+            ctrl.current_inst = None
+            if e.reason == "stop" or ctrl.stop_flag:
+                status = "stopped"
+                err = None
+                ctrl.step_phase = None
+            else:
+                self._revert_waiting_step(ctrl, step, item_ids)
+                ctrl.step_phase = None
+                reason = e.reason if e.reason in ("user", "operator_lost", "adapter_lost") else "user"
+                if reason == "adapter_lost":
+                    ctrl.adapter_lost_flag = False
+                if reason == "user":
+                    ctrl.user_pause = False
+                self._set_node(ctrl, nid, "queued", rnd, None)
+                await self._pause(ctrl, reason, nid, "before", inputs, rnd, skip_readback=True)
+                return
         except Exception as e:
             if ctrl.stop_flag:
                 status = "stopped"
@@ -1056,6 +1126,7 @@ class Executor:
             ctrl.abandoned = True
             self.runs.pop(ctrl.run_id, None)
             return
+        ctrl.step_phase = None
         stored = image_summary(outputs)
         if outputs:
             bucket = self.images.setdefault(ctrl.run_id, {})
@@ -1302,7 +1373,25 @@ class Executor:
             "message": message,
         }
 
-    async def _pause(self, ctrl: RunCtrl, reason: str, node_id: str | None, when: str, inputs: dict | None, rnd: int, message: str | None = None) -> None:
+    def _wait_abort_reason(self, ctrl: RunCtrl) -> str | None:
+        if ctrl.stop_flag:
+            return "stop"
+        if ctrl.adapter_lost_flag:
+            return "adapter_lost"
+        if self._ui_lost(ctrl):
+            return "operator_lost"
+        if ctrl.user_pause:
+            return "user"
+        return None
+
+    def _revert_waiting_step(self, ctrl: RunCtrl, step: int, item_ids: list[int]) -> None:
+        self.store.unconsume_items(ctrl.run_id, step)
+        self.store.delete_step(ctrl.run_id, step)
+        if ctrl.steps_used == step:
+            ctrl.steps_used = max(0, step - 1)
+            self.store.update_run(ctrl.run_id, steps_used=ctrl.steps_used)
+
+    async def _pause(self, ctrl: RunCtrl, reason: str, node_id: str | None, when: str, inputs: dict | None, rnd: int, message: str | None = None, skip_readback: bool = False) -> None:
         ctrl.status = "paused"
         ctrl.pause = self._make_pause(ctrl, reason, node_id, when, inputs, rnd, message)
         ctrl.last_paused_at_mono = time.monotonic()
@@ -1320,7 +1409,7 @@ class Executor:
         }.get(reason)
         if reason in ("write_timeout", "motion_timeout"):
             state = None
-        if reason in ("motion_timeout", "adapter_lost") and node_id:
+        if not skip_readback and reason in ("motion_timeout", "adapter_lost") and node_id:
             ctrl.pause["readback"] = await self._read_robot(ctrl, node_id)
         if node_id and state:
             self._set_node(ctrl, node_id, state, rnd, ctrl.steps_used)
@@ -1358,6 +1447,8 @@ class Executor:
             "word": extra.get("word"), "progress": extra.get("progress"),
             "feedback": extra.get("feedback"), "elapsed_s": extra.get("elapsed_s"),
             "recovery": extra.get("recovery"),
+            "phase": extra.get("phase"), "wait_s": extra.get("wait_s"),
+            "wait_max_s": extra.get("wait_max_s"),
         })
 
     def snapshot(self, run_id: str) -> dict[str, Any]:
