@@ -88,7 +88,7 @@ v1 只用 `FakeAdapter`（`target=sim`）。下面这些在接真机前必须过
 ## 仓库怎么摆
 
 ```
-LICENSE             MIT（Copyright (c) 2026 Alex Zhang (alexzhang1030)）
+LICENSE             MIT（Copyright (c) 2026 alexzhang1030）
 roboact/            Python 包（适配器、节点注册表、图、执行器、Store、HTTP+SSE）
 web/                静态前端，由后端直接托管
 web/vendor/         Vue / Vue Flow / JetBrains Mono / 图标（未改动的原文件）
