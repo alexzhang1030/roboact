@@ -148,6 +148,17 @@ Hardware
 - LAN access later: `--host` and tokens ship together.
 - A40 (exec-model v0.2.3 §0.2): `Host` `127.0.0.1`/`localhost`/`[::1]`; same `Origin`; `Content-Type: application/json`.
 
+### Flow file (import / export) — added 2026-10-31 at Alex's request
+
+- Export the current flow as JSON or YAML; the user picks the format. JSON is the canonical format; YAML holds the same data.
+- Import a `.json`, `.yaml` or `.yml` flow file. Import only loads the flow onto the canvas and never starts a run.
+- The file contains the file format version, the flow name, nodes (type, params, position), edges (data and control), breakpoints, and the name and action-list version of the adapter it was built against.
+- The file never contains run records, cached outputs, pinned inputs, UI text, UI settings, secrets or the server address. Status values are stored as codes only.
+- Import checks the format version, the schema, and that every action exists in the current adapter's action list. If anything fails, nothing is loaded and the error names the file line or JSON path.
+- If the adapter name or action-list version differs, the flow loads read-only and shows what differs; running it needs an explicit confirmation.
+- YAML is parsed on the server with a safe loader (no custom tags, no object construction). The browser does not parse YAML.
+- Import never overwrites an existing flow; it creates a new one, and a name clash gets a suffix.
+
 ## 4. Acceptance criteria
 
 1. Offline, Python-only machine runs the app; no build; requests only to 127.0.0.1. Steps: acceptance.md#1
@@ -216,6 +227,8 @@ Hardware
 
 19.10 `scripts/check.sh` passes on clean clone and aarch64; failures block merge except 19. Steps: acceptance.md#19.10
 
+20. Flow file: export then import gives an identical flow; JSON and YAML exports of one flow load to the same flow; bad or mismatched files are refused or loaded read-only as specified. Steps: acceptance.md#20
+
 A6: failing (see 5). A38: 19.4. A40: 19.9. R1–R6 include two checks; Steps: acceptance.md#r1-r6
 
 ## 5. Risks and open questions
@@ -233,3 +246,4 @@ A6: failing (see 5). A38: 19.4. A40: 19.9. R1–R6 include two checks; Steps: ac
 - Rams: English status words and buttons in the zh table; verify English fits nodes and top bar.
 - Tedrake: once vendor known, cite stop, controller power-loss and gripper power-loss behavior (adapter acceptance, not blocking v1).
 - Tedrake: confirm control nodes; `node-list-v0.md` obsolete (9 nodes kept for executor tests).
+- Flow file (added 2026-10-31): Torvalds, which YAML library and whether it is vendored; Thompson, a file size limit and whether imported `motion` params need extra review; Alex, whether exported files should be diff-friendly for git (stable key order, no positions).

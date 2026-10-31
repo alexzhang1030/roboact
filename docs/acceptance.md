@@ -202,3 +202,17 @@ Version 1.5 (2026-10-31). Companion to `prd-en-v1.5.md` section 4. exec-model = 
 ## Pre-real-robot checks (part of R1–R6)
 1. Cut the page connection for real through a TCP proxy. Pass: server pauses within about 10 s.
 2. Confirm "stable" is detectable: blocking actions return only once stable, or `read_state` has a stable field; at least one, with a cited source. Neither: do not connect a real robot.
+
+<a id="20"></a>
+## 20 Flow file import / export
+
+1. Build a flow with at least one loop, one breakpoint, one control node and one `motion` node.
+2. Export it as JSON, import the file: nodes, params, positions, edges, breakpoints and adapter fields match the original; exporting again gives a byte-identical file.
+3. Export the same flow as YAML and import it: the loaded flow equals the one from step 2.
+4. Check both files contain no run records, cached outputs, pinned inputs, UI text, UI settings or server address.
+5. Import a file with a wrong format version, a schema error, and an unknown action, one at a time: each is refused, nothing is loaded, and the message names the line or JSON path.
+6. Import a file whose action-list version differs: it loads read-only with the differences listed; Run is disabled until the user confirms.
+7. Import a YAML file containing a custom tag (for example `!!python/object`): refused, nothing constructed.
+8. Import a file whose flow name already exists: a new flow is created with a suffix; the existing one is unchanged.
+9. Importing never starts a run: the run list has no new entry.
+
