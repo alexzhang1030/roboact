@@ -263,6 +263,8 @@ export default {
   'status.summary.result_unknown': 'Result unknown. Read back before continuing.',
   'status.summary.waiting_precondition': 'Waiting for precondition',
   'flow.export': 'Export…',
+  'flow.export_json': 'Export JSON…',
+  'flow.export_yaml': 'Export YAML…',
   'flow.import': 'Import…',
   'flow.export_format': 'Export as',
   'flow.format_json': 'JSON',

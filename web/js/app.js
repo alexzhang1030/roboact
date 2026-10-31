@@ -1244,9 +1244,9 @@ const App = defineComponent({
           <input v-if="nameEditing" class="name" v-model="meta.name" @change="finishNameEdit" @blur="finishNameEdit" @keydown.enter.prevent="finishNameEdit" />
           <button v-else type="button" class="name-btn" data-testid="flow-export" :title="t('flow.export_format')" :aria-expanded="exportOpen ? 'true' : 'false'" aria-haspopup="menu" @click="onNameClick" @dblclick="startNameEdit">{{ flowNameLabel }}</button>
           <div class="menu theme-menu" v-if="exportOpen" role="menu">
-            <div class="menu-label">{{ t('flow.export') }}</div>
-            <button type="button" role="menuitem" data-testid="export-json" @click="exportFlow('json')">{{ t('flow.format_json') }}</button>
-            <button type="button" role="menuitem" data-testid="export-yaml" @click="exportFlow('yaml')">{{ t('flow.format_yaml') }}</button>
+            <button type="button" role="menuitem" data-testid="export-json" @click="exportFlow('json')">{{ t('flow.export_json') }}</button>
+            <button type="button" role="menuitem" data-testid="export-yaml" @click="exportFlow('yaml')">{{ t('flow.export_yaml') }}</button>
+            <div class="menu-sep" role="separator"></div>
             <label class="file-open" role="menuitem">{{ t('flow.import') }}<input type="file" accept=".json,.yaml,.yml,application/json,text/yaml" style="display:none" data-testid="flow-import" @change="importFlow"></label>
           </div>
         </div>
