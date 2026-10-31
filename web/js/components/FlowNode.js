@@ -123,7 +123,7 @@ export default markRaw(defineComponent({
       if (s.shows_write_mark != null) return !!s.shows_write_mark
       return s.side_effect === 'write' || s.side_effect === 'motion'
     })
-    const rows = computed(() => Math.max(ins.value.length, outs.value.length, 1))
+    const rows = computed(() => Math.max(ins.value.length, outs.value.length))
     const bpBefore = computed(() => (props.data.breakpoints || {}).before || {})
     const bpAfter = computed(() => (props.data.breakpoints || {}).after || {})
     const srcOf = (port) => (portSources.value || portSources)[props.id + ':' + port]
@@ -163,7 +163,7 @@ export default markRaw(defineComponent({
       </span>
     </div>
     <div class="fn-err" v-if="summary" :class="{ amber: kind === 'unknown' }" :title="summary" data-testid="node-summary">{{ summary }}</div>
-    <div class="fn-ports">
+    <div class="fn-ports" v-if="rows">
       <div class="fn-port" v-for="n in rows" :key="n" :class="{ 'port-missing': portMissing(ins[n-1]) }">
         <template v-if="ins[n-1]">
           <Handle type="target" :position="Position.Left" :id="ins[n-1].name"
