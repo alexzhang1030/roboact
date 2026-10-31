@@ -17,7 +17,7 @@ from .adapter import (
     image_summary,
 )
 from .errors import ApiError
-from .flow_file import inspect_run
+from .flow_file import inspect_run, inspect_values, is_imported, unlock_valid
 from .graph import (
     connected_types,
     cycle_exit_details,
@@ -177,7 +177,7 @@ class Executor:
             raise ApiError(
                 400,
                 "invalid_graph",
-                "找不到这个流程版本。",
+                "flow version not found",
                 {"flow_id": flow_id, "flow_version": flow_version},
             )
         graph = copy.deepcopy(graph)
@@ -198,11 +198,11 @@ class Executor:
         allowed = None
         if kind == "node":
             if not node_id:
-                raise ApiError(400, "invalid_graph", "单节点运行需要 node_id")
+                raise ApiError(400, "invalid_graph", "node run needs node_id")
             allowed = {node_id}
         elif kind == "group":
             if not node_ids:
-                raise ApiError(400, "invalid_graph", "分组运行需要 node_ids")
+                raise ApiError(400, "invalid_graph", "group run needs node_ids")
             allowed = set(node_ids)
 
         run_id = new_id("rn_")
@@ -274,10 +274,10 @@ class Executor:
     ) -> str:
         graph = self.store.get_version(flow_id, flow_version)
         if graph is None:
-            raise ApiError(400, "invalid_graph", "找不到这个流程版本。")
+            raise ApiError(400, "invalid_graph", "flow version not found")
         nodes = node_map(graph)
         if node_id not in nodes:
-            raise ApiError(400, "invalid_graph", f"找不到节点 {node_id}")
+            raise ApiError(400, "invalid_graph", f"node not found: {node_id}")
         node = nodes[node_id]
         if side_effects == "real" or (
             known_type(node["type"])
@@ -319,7 +319,7 @@ class Executor:
     ) -> tuple[str, dict[str, Any]]:
         graph = self.store.get_version(flow_id, flow_version)
         if graph is None:
-            raise ApiError(400, "invalid_graph", "找不到这个流程版本。")
+            raise ApiError(400, "invalid_graph", "flow version not found")
         allowed = set(node_ids)
         echo: dict[str, Any] = {}
         seed: list[dict] = []
@@ -368,10 +368,10 @@ class Executor:
     ) -> str:
         parent = self.store.get_run(parent_id)
         if not parent:
-            raise ApiError(404, "not_found", "找不到原运行")
+            raise ApiError(404, "not_found", "source run not found")
         rec = self.store.get_step(parent_id, step)
         if not rec:
-            raise ApiError(400, "invalid_graph", f"找不到第 {step} 步")
+            raise ApiError(400, "invalid_graph", f"step {step} not found")
         pending = self.store.pending_before(parent_id, step)
         seed = [
             {
@@ -423,7 +423,7 @@ class Executor:
                         raise ApiError(
                             400,
                             "loop_without_exit",
-                            "这个环没有条件判断节点作出口。",
+                            "this loop has no condition node as an exit",
                             {"node_ids": d["node_ids"]},
                         )
             return
@@ -440,14 +440,26 @@ class Executor:
     def _check_adapter(self, graph: dict[str, Any]) -> None:
         if not getattr(self.adapter, "connected", True):
             raise ApiError(
-                409, "adapter_disconnected", "未连上机器人控制器。流程可以打开，但不能运行。"
+                409,
+                "adapter_disconnected",
+                "robot controller is not connected. the flow can open, but cannot run",
             )
+        if not is_imported(graph):
+            saved = graph.get("action_list_version")
+            current = getattr(self.adapter, "action_list_version", None)
+            if saved and current and saved != current:
+                raise ApiError(
+                    409,
+                    "action_list_mismatch",
+                    "adapter action list changed; cannot run this flow version",
+                    {"saved": saved, "current": current},
+                )
         blockers = inspect_run(graph, self.adapter)
         if blockers.action_gone:
             raise ApiError(
                 409,
                 "action_missing",
-                "有节点的动作已不存在。",
+                "an action on this flow no longer exists",
                 {"nodes": blockers.action_gone, "node_ids": blockers.action_gone},
             )
         if blockers.missing_input:
@@ -473,7 +485,7 @@ class Executor:
                 f"{err['node']}: {err['param']} is outside this robot's limits",
                 {"errors": blockers.limit_errors},
             )
-        if blockers.mismatches and not graph.get("mismatch_unlocked"):
+        if is_imported(graph) and blockers.mismatches and not unlock_valid(graph, self.adapter):
             raise ApiError(
                 409,
                 "run_locked",
@@ -481,19 +493,40 @@ class Executor:
                 {"mismatches": blockers.mismatches},
             )
 
+    def _raise_value_blockers(self, blockers: Any) -> None:
+        if blockers.type_errors:
+            err = blockers.type_errors[0]
+            raise ApiError(
+                409,
+                "param_type_mismatch",
+                f"{err['node']}: {err['param']} must be {err['type']}",
+                {"errors": blockers.type_errors},
+            )
+        if blockers.limit_errors:
+            err = blockers.limit_errors[0]
+            raise ApiError(
+                409,
+                "param_out_of_limit",
+                f"{err['node']}: {err['param']} is outside this robot's limits",
+                {"errors": blockers.limit_errors},
+            )
+
     def _validate_graph(self, graph: dict[str, Any]) -> None:
         missing = [n for n in graph.get("nodes") or [] if not known_type(n["type"])]
         for n in missing:
             # marked by the caller via node_state if a run already exists
             raise ApiError(
-                409, "action_missing", f"动作已不存在：{n.get('type')}", {"node_id": n.get("id")}
+                409,
+                "action_missing",
+                f"action no longer exists: {n.get('type')}",
+                {"node_id": n.get("id")},
             )
         for n in graph.get("nodes") or []:
             try:
                 get_type(n["type"])
             except KeyError as e:
                 raise ApiError(
-                    409, "action_missing", "动作已不存在。", {"node_id": n.get("id")}
+                    409, "action_missing", "action no longer exists", {"node_id": n.get("id")}
                 ) from e
             try:
                 parse_params(n["type"], n.get("params"))
@@ -501,13 +534,13 @@ class Executor:
                 raise ApiError(
                     400,
                     "invalid_graph",
-                    f"节点 {n.get('id')} 参数无效：{e}",
+                    f"invalid params on node {n.get('id')}: {e}",
                     {"node_id": n.get("id")},
                 ) from e
         for e in graph.get("edges") or []:
             src_t, dst_t = connected_types(graph, e)
             if not types_compatible(src_t, dst_t):
-                raise ApiError(400, "invalid_graph", "连线两端端口类型不同。", {"edge": e})
+                raise ApiError(400, "invalid_graph", "edge port types do not match", {"edge": e})
 
     def _check_confirm(self, node: dict[str, Any], confirm: str | None) -> None:
         cls = get_type(node["type"])
@@ -515,15 +548,15 @@ class Executor:
             cls.side_effect == SideEffect.motion
             and getattr(self.adapter, "target", "sim") == "real"
         ):
-            text = cls.confirm_text or "将让机器人执行这个动作。"
+            text = cls.confirm_text or "this will run the action on the robot"
             if confirm != text:
-                raise ApiError(422, "confirm_required", "真机重跑会动的节点需要确认。")
+                raise ApiError(422, "confirm_required", "real motion rerun needs confirmation")
             return
         text = cls.confirm_text
         if not text:
             return
         if confirm != text:
-            raise ApiError(422, "invalid_graph", "真执行需要确认文字与节点声明一致。")
+            raise ApiError(422, "invalid_graph", "real run confirm text must match the node")
 
     def _resolve_node_input(
         self, flow_id: str, node: dict[str, Any], spec: dict | None
@@ -541,7 +574,7 @@ class Executor:
         if kind == "record":
             rec = self.store.get_step(spec["run_id"], spec["step"])
             if not rec:
-                raise ApiError(400, "invalid_graph", "找不到那条运行记录")
+                raise ApiError(400, "invalid_graph", "run record not found")
             return dict(rec.get("input") or {}), "cache"
         # default: last successful record of this node
         for run in self.store.list_runs(flow_id):
@@ -600,7 +633,7 @@ class Executor:
             if ctrl.status == "paused":
                 return {"status": "paused"}
             if ctrl.status in TERMINAL:
-                raise ApiError(409, "already_finished", "这次运行已经结束。")
+                raise ApiError(409, "already_finished", "this run has already finished")
             ctrl.user_pause = True
             self.store.add_command(run_id, client_id, "pause", None, "202")
             return {"status": "running"}
@@ -619,34 +652,38 @@ class Executor:
         async with ctrl.cmd_lock:
             waiting = (ctrl.pause or {}).get("reason") == "approval"
             if waiting and mode != "approve":
-                raise ApiError(409, "awaiting_approval", "这一步在等人工确认，先通过或驳回。")
+                raise ApiError(409, "awaiting_approval", "this step is waiting for confirmation")
             if not ctrl.pause or ctrl.pause.get("pause_id") != pause_id:
                 raise ApiError(
                     409,
                     "pause_mismatch",
-                    "另一个页面已经继续了这次运行。",
+                    "another page already continued this run",
                     {"pause_id": (ctrl.pause or {}).get("pause_id") or ctrl.last_used_pause_id},
                 )
             if ctrl.status != "paused":
-                raise ApiError(409, "not_paused", "这次运行当前没有停住。")
+                raise ApiError(409, "not_paused", "this run is not paused")
             reason = ctrl.pause.get("reason")
             side = self._paused_side(ctrl)
             if reason in MOTION_RESOLVE_REASONS and side == "motion":
                 rb = (ctrl.pause or {}).get("readback") or {}
                 if not readback_id or readback_id != rb.get("readback_id"):
                     raise ApiError(
-                        409, "readback_required", "先读回机器人状态，再选重做或当作已做完。"
+                        409, "readback_required", "read robot state first, then retry or mark done"
                     )
                 if resolution == "mark_done":
                     self._apply_mark_done(ctrl, edits)
                 elif resolution != "retry":
-                    raise ApiError(409, "readback_required", "需要 resolution=retry 或 mark_done")
+                    raise ApiError(
+                        409, "readback_required", "resolution must be retry or mark_done"
+                    )
             if edits and not (
                 reason in MOTION_RESOLVE_REASONS and side == "motion" and resolution == "mark_done"
             ):
                 self._apply_edits(ctrl, edits)
             if reason == "adapter_lost" and not getattr(self.adapter, "connected", True):
-                raise ApiError(409, "adapter_disconnected", "机器人控制器仍未连上，不能继续。")
+                raise ApiError(
+                    409, "adapter_disconnected", "robot controller is still disconnected"
+                )
             if reason in (
                 "breakpoint",
                 "restart",
@@ -694,7 +731,7 @@ class Executor:
         ctrl = self._need(run_id)
         async with ctrl.cmd_lock:
             if ctrl.status in TERMINAL:
-                raise ApiError(409, "already_finished", "这次运行已经结束。")
+                raise ApiError(409, "already_finished", "this run has already finished")
             self.store.add_command(run_id, client_id, "stop", None, "200")
             if ctrl.step_phase == "waiting_precondition":
                 ctrl.stop_flag = True
@@ -766,13 +803,13 @@ class Executor:
         ctrl = self._need(run_id)
         async with ctrl.cmd_lock:
             if not ctrl.pause or ctrl.pause.get("pause_id") != pause_id:
-                raise ApiError(409, "pause_mismatch", "另一个页面已经处理了这次确认。")
+                raise ApiError(409, "pause_mismatch", "another page already handled this confirm")
             if ctrl.status != "paused":
-                raise ApiError(409, "not_paused", "这次运行当前没有停住。")
+                raise ApiError(409, "not_paused", "this run is not paused")
             if ctrl.pause.get("reason") != "approval":
-                raise ApiError(409, "not_paused", "当前不是在等待确认。")
+                raise ApiError(409, "not_paused", "this run is not waiting for confirmation")
             if decision not in ("approve", "reject"):
-                raise ApiError(422, "invalid_graph", "decision 必须是 approve 或 reject")
+                raise ApiError(422, "invalid_graph", "decision must be approve or reject")
             ctrl.decision = {
                 "decision": decision,
                 "comment": comment,
@@ -798,13 +835,15 @@ class Executor:
             try:
                 parse_inputs(node.get("type") or "echo", edits["inputs"], node.get("params"))
             except Exception as e:
-                raise ApiError(422, "invalid_graph", f"改的输入无效：{e}") from e
+                raise ApiError(422, "invalid_graph", f"invalid edited inputs: {e}") from e
             ctrl.edits = {"inputs": edits["inputs"], "original": pause.get("inputs")}
         elif when == "after" and edits.get("outputs") is not None:
             if known_type(node.get("type") or ""):
                 cls = get_type(node["type"])
                 if cls.side_effect == SideEffect.motion:
-                    raise ApiError(422, "motion_output_readonly", "动作节点的输出不能改。")
+                    raise ApiError(
+                        422, "motion_output_readonly", "motion node outputs are read-only"
+                    )
             step = pause.get("step")
             if not isinstance(step, int):
                 ctrl.edits = None
@@ -888,9 +927,9 @@ class Executor:
                     new_status,
                     rec["round"],
                     rec["step"],
-                    error_summary="中断 · 结果未知"
+                    error_summary="Interrupted · result unknown"
                     if new_status == "interrupted_unknown"
-                    else "中断",
+                    else "Interrupted",
                     recovery=recovery,
                 )
                 crashed_nid = rec["node_id"]
@@ -1056,6 +1095,16 @@ class Executor:
                 node = node_map(ctrl.flow)[nid]
                 nxt_round = self._next_round(ctrl, nid)
                 peeked, item_ids = self._peek_inputs(ctrl, nid)
+                known = dict(node.get("params") or {})
+                known.update({k: v for k, v in peeked.items() if v is not None})
+                self._raise_value_blockers(
+                    inspect_values(
+                        str(node.get("type") or ""),
+                        known,
+                        self.adapter,
+                        str(node.get("title") or nid),
+                    )
+                )
                 if ctrl.edits and ctrl.edits.get("inputs") is not None:
                     peeked = ctrl.edits["inputs"]
                     original = ctrl.edits.get("original")
@@ -1874,7 +1923,7 @@ class Executor:
         ctrl = self.runs.get(run_id)
         row = self.store.get_run(run_id)
         if not row:
-            raise ApiError(404, "not_found", "找不到运行")
+            raise ApiError(404, "not_found", "run not found")
         latest = self.store.get_flow_meta(row["flow_id"])
         nodes = dict(ctrl.node_state) if ctrl else {}
         if not nodes:
@@ -2028,7 +2077,7 @@ class Executor:
                     val,
                     rec["step"],
                 )
-        self._set_node(ctrl, nid, "done", rec["round"], rec["step"], extra=" · 人工确认")
+        self._set_node(ctrl, nid, "done", rec["round"], rec["step"], extra=" · human confirm")
 
     def image_at(self, run_id: str, step: int, port: str) -> dict[str, Any] | None:
         bucket = self.images.get(run_id) or {}
@@ -2037,7 +2086,7 @@ class Executor:
     def _need(self, run_id: str) -> RunCtrl:
         ctrl = self.runs.get(run_id)
         if not ctrl:
-            raise ApiError(404, "not_found", f"找不到运行 {run_id}")
+            raise ApiError(404, "not_found", f"run not found: {run_id}")
         return ctrl
 
 

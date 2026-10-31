@@ -1,78 +1,9 @@
 sequenceDiagram
-  autonumber
-  actor U as 用户
-  participant B as 浏览器
-  participant A as HTTP 指令端点
-  participant S as 调度器
-  participant D as runs.db
-  participant AD as adapter（客户端 + 守护进程）
-  participant R as 控制程序
-
-  U->>B: 点「运行」
-  B->>A: POST /api/runs（flow_id, flow_version, client_id）
-  A->>D: 读 flow_versions，锁定这一版（含动作清单版本、动作说明哈希）
-  A->>AD: 当前动作清单 version 和各动作说明
-  alt adapter 没连上
-    A-->>B: 503 adapter_unavailable
-  else 动作不在了或定义变了
-    A-->>B: 409 action_missing / action_changed（节点显示「动作已不存在」）
-  else 环没有出口
-    A-->>B: 400 loop_without_exit
-  else 检查通过
-    A->>D: 写 runs（status=running, adapter_name, adapter_target）和开始节点的 pending
-    A->>S: 启动这次运行的协程
-    A-->>B: 201 run_id, last_event_id
-  end
-  B->>A: GET /api/runs/{run_id}，再订阅 events?after=
-
-  loop 每一步：有就绪节点，且步数没到上限
-    S->>D: T1：写 steps（status=running），pending 标已消费
-    alt 动作节点（motion）
-      S->>AD: send_goal（动作、参数、到期时间 expires_at）
-      AD->>R: 发目标，到期时间换成控制器参数
-      AD-->>S: goal_id（写进 steps）
-      R-->>AD: 反馈（goal_progress 动作）
-      AD-->>S: feedback → 节点「运行中 · 40%」或「运行中 · 12 s」
-      R-->>AD: 结果 + 结束时实测状态
-      AD-->>S: result
-    else 控制、测试节点
-      S->>S: run(inputs, params, ctx)
-    end
-    S->>D: T2：写输出和状态，给每条出线写 pending，写 changes
-    S-->>B: SSE nodes（每 100 ms 最多一条）
-  end
-
-  Note over S: 断点只在节点之间：执行前断点在 T1 之前，执行后断点在 T2 之后
-  S->>D: runs.status=paused, pause_json（pause_id, reason=breakpoint, robot_state）
-  S-->>B: SSE nodes，紧跟 SSE paused
-  U->>B: 点「继续」
-  B->>A: POST /api/runs/{run_id}/continue（pause_id）
-  A-->>B: 200，SSE resumed
-
-  Note over U,R: 停止：动作在执行中
-  U->>B: 点「停止」（停在原地，电机不断电）
-  B->>A: POST /api/runs/{run_id}/stop
-  A-->>B: 202 stop_requested=true
-  S->>AD: cancel(goal_id)
-  AD->>R: 取消目标
-  alt 取消被接受
-    R-->>AD: 目标 CANCELED，读回状态
-    S->>D: steps.status=stopped，cancel_json，runs.status=stopped
-  else 取消被拒
-    R-->>AD: REJECTED
-    S-->>B: SSE cancel_result → 节点「运行中 · 取消被拒」，顶栏「停止被拒」
-    Note over S,R: 不再派发节点；动作自己结束后按结果记，运行 stopped
-  else 没回应或读不到状态
-    S->>D: steps.status=interrupted_unknown，runs.status=stopped
-  end
-
-  Note over S,R: 动作超时：控制器先到期 → error（expired）；60 s 第二道到点 → 调取消、读状态
-  S->>D: steps.status=interrupted_unknown，runs.status=paused（reason=motion_timeout）
-  B->>A: POST /api/runs/{run_id}/continue（没带 readback_id）
-  A-->>B: 409 readback_required
-  B->>A: POST /api/runs/{run_id}/readback → readback_id
-  B->>A: continue（pause_id, readback_id, resolution=retry 或 mark_done）
-
-  Note over B,S: 没有页面连着超过 10 s → 当前节点做完后暂停（operator_lost，「已暂停 · 页面断开」）
-  Note over S,AD: 探测 adapter 3 s 没回应 → 暂停（adapter_lost，「已暂停 · 机器人控制器断开」）
-  S-->>B: SSE run_finished（completed / error / stopped / step_limit）
+  participant U as User
+  participant B as Browser
+  participant S as Server
+  U->>B: Run
+  B->>S: POST /api/runs
+  S-->>B: SSE nodes / paused
+  Note over S: page lost ~10s → operator_lost after current node
+  Note over S: adapter silent ~3s → adapter_lost

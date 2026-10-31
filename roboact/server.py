@@ -12,10 +12,19 @@ from typing import Any
 from urllib.parse import parse_qs, unquote, urlparse
 
 from . import DEFAULT_STEP_LIMIT, SSE_RETRY_MS
-from .adapter import FakeAdapter
+from .adapter import FAKE_NOTE_ACTION, FakeAdapter
+from .catalog import zh
 from .errors import ApiError
 from .executor import Executor
-from .flow_file import FlowFileRejected, export_flow, import_flow, inspect_run
+from .flow_file import (
+    MAX_BODY_BYTES,
+    FlowFileRejected,
+    export_flow,
+    import_flow,
+    inspect_run,
+    make_unlock_record,
+    unlock_valid,
+)
 from .flow_meta import GRAPH_FILE_KEYS
 from .graph import params_changed
 from .nodes import bind_adapter, get_instance, list_specs, rejected_actions
@@ -139,11 +148,14 @@ class App:
         self.ex = Executor(self.store, self.adapter, self.hub, self.data_dir)
         self.test_mode = test_mode
         self.port = port
+        if test_mode:
+            self.adapter.extra_raw_actions.append(FAKE_NOTE_ACTION)
+            bind_adapter(self.adapter)
         self._ensure_flow()
 
     def _demo_graph(self) -> dict[str, Any]:
         return {
-            "name": "假适配器演示",
+            "name": zh("flow.demo"),
             "adapter_id": self.adapter.adapter_id,
             "action_list_version": self.adapter.action_list_version,
             "nodes": [
@@ -203,7 +215,7 @@ class App:
             g = self.store.latest_graph(flows[0]["flow_id"])
             if g:
                 return g
-        return self.store.create_flow("假适配器演示", self._demo_graph())
+        return self.store.create_flow(zh("flow.demo"), self._demo_graph())
 
     def _pick_flow(self, wanted: str | None) -> dict[str, Any]:
         if wanted:
@@ -356,7 +368,7 @@ class App:
             await self._json(writer, 200, {"flows": self.store.list_flows()})
             return
         if route == "/api/flows" and method == "POST":
-            flow = self.store.create_flow((data or {}).get("name") or "未命名流程", data)
+            flow = self.store.create_flow((data or {}).get("name") or zh("flow.untitled"), data)
             await self._json(writer, 200, {"flow": flow})
             return
         if route == "/api/flows/export" and method == "POST":
@@ -388,7 +400,7 @@ class App:
             if method == "GET":
                 flow = self.store.latest_graph(fid)
                 if not flow:
-                    raise ApiError(404, "not_found", "找不到流程")
+                    raise ApiError(404, "not_found", "flow not found")
                 await self._json(
                     writer,
                     200,
@@ -402,10 +414,14 @@ class App:
             old = self.store.latest_graph(fid)
             bump = bool((data or {}).get("bump", True))
             body = dict(data or {})
+            body.pop("mismatch_unlocked", None)
+            body.pop("unlock_record", None)
             if old:
                 for key in GRAPH_FILE_KEYS:
                     if key not in body:
                         body[key] = old.get(key)
+                if old.get("unlock_record") is not None:
+                    body["unlock_record"] = old.get("unlock_record")
             if bump:
                 prev = body.get("revision")
                 if prev is None:
@@ -495,17 +511,17 @@ class App:
             run_id = parts[3]
             if len(parts) >= 5 and parts[4] == "images":
                 if len(parts) < 7:
-                    raise ApiError(404, "not_found", "找不到图像")
+                    raise ApiError(404, "not_found", "image not found")
                 img = self.ex.image_at(run_id, int(parts[5]), parts[6])
                 if not img:
-                    raise ApiError(410, "image_gone", "图像已不在内存里")
+                    raise ApiError(410, "image_gone", "image is no longer in memory")
                 await self._json(writer, 200, img)
                 return
             if len(parts) >= 5 and parts[4] == "steps":
                 if len(parts) >= 6:
                     rec = self.store.get_step(run_id, int(parts[5]))
                     if not rec:
-                        raise ApiError(404, "not_found", "找不到记录")
+                        raise ApiError(404, "not_found", "record not found")
                     await self._json(writer, 200, self.ex.decorate_steps(run_id, [rec])[0])
                     return
                 node_id = query.get("node_id")
@@ -609,7 +625,7 @@ class App:
                     },
                 )
                 return
-            raise ApiError(404, "not_found", "未知动作")
+            raise ApiError(404, "not_found", "unknown action")
         if self.test_mode and route == "/api/test/flood-status" and method == "POST":
             data = data or {}
             run_id = data.get("run_id") or "perf"
@@ -686,13 +702,13 @@ class App:
         if method == "GET":
             await self._static(writer, route)
             return
-        raise ApiError(404, "not_found", "找不到接口")
+        raise ApiError(404, "not_found", "endpoint not found")
 
     async def _export_flow(self, data: dict[str, Any], writer: asyncio.StreamWriter) -> None:
         fid = data.get("flow_id") or self._ensure_flow()["id"]
         graph = self.store.latest_graph(str(fid))
         if not graph:
-            raise ApiError(404, "not_found", "找不到流程")
+            raise ApiError(404, "not_found", "flow not found")
         fmt = str(data.get("format") or "json")
         try:
             text, filename = export_flow(graph, fmt, self.adapter)
@@ -712,7 +728,7 @@ class App:
         if not isinstance(text, str):
             raise ApiError(400, "invalid_graph", "import text must be a string")
         try:
-            graph = import_flow(text, fmt, self.adapter)
+            graph = await asyncio.to_thread(import_flow, text, fmt, self.adapter)
         except FlowFileRejected as e:
             raise ApiError(
                 422,
@@ -742,9 +758,9 @@ class App:
     async def _run_check(self, fid: str, writer: asyncio.StreamWriter) -> None:
         graph = self.store.latest_graph(fid)
         if not graph:
-            raise ApiError(404, "not_found", "找不到流程")
+            raise ApiError(404, "not_found", "flow not found")
         blockers = inspect_run(graph, self.adapter)
-        unlocked = bool(graph.get("mismatch_unlocked"))
+        unlocked = unlock_valid(graph, self.adapter)
         await self._json(
             writer,
             200,
@@ -762,11 +778,13 @@ class App:
     async def _review_enable(self, fid: str, writer: asyncio.StreamWriter) -> None:
         graph = self.store.latest_graph(fid)
         if not graph:
-            raise ApiError(404, "not_found", "找不到流程")
+            raise ApiError(404, "not_found", "flow not found")
         body = dict(graph)
-        body["mismatch_unlocked"] = True
+        body.pop("mismatch_unlocked", None)
+        body["unlock_record"] = make_unlock_record(graph, self.adapter)
         saved = self.store.save_flow(fid, body, bump=False)
         blockers = inspect_run(saved, self.adapter)
+        unlocked = unlock_valid(saved, self.adapter)
         await self._json(
             writer,
             200,
@@ -775,8 +793,8 @@ class App:
                 "action_gone": blockers.action_gone,
                 "missing_input": blockers.missing_input,
                 "mismatches": blockers.mismatches,
-                "mismatch_unlocked": True,
-                "can_run": not blockers.blocks_run(True),
+                "mismatch_unlocked": unlocked,
+                "can_run": not blockers.blocks_run(unlocked),
             },
         )
 
@@ -806,7 +824,10 @@ class App:
                 top = field.split(".")[0]
                 if field and top not in names:
                     raise ApiError(
-                        422, "invalid_graph", "断点条件字段不在输入模型里", {"field": field}
+                        422,
+                        "invalid_graph",
+                        "breakpoint field is not in the input model",
+                        {"field": field},
                     )
             bp = self.store.set_breakpoint(fid, node_id, when, body)
             self.hub.emit(
@@ -818,7 +839,7 @@ class App:
             self.store.delete_breakpoint(fid, node_id, when)
             await self._raw(writer, 204, b"", "text/plain")
             return
-        raise ApiError(404, "not_found", "找不到接口")
+        raise ApiError(404, "not_found", "endpoint not found")
 
     async def _pins(
         self,
@@ -847,7 +868,7 @@ class App:
             self.store.delete_pin(fid, node_id, port)
             await self._raw(writer, 204, b"", "text/plain")
             return
-        raise ApiError(404, "not_found", "找不到接口")
+        raise ApiError(404, "not_found", "endpoint not found")
 
     async def _sse(self, writer: asyncio.StreamWriter, run_id: str, after: int | None) -> None:
         head = (
@@ -948,6 +969,10 @@ class App:
             await writer.wait_closed()
 
 
+class BodyTooLarge(Exception):
+    """HTTP body exceeded MAX_BODY_BYTES while reading."""
+
+
 async def _read_request(reader: asyncio.StreamReader) -> tuple[str, str, dict[str, str], bytes]:
     header_bytes = await reader.readuntil(b"\r\n\r\n")
     head, _ = header_bytes.split(b"\r\n\r\n", 1)
@@ -958,15 +983,60 @@ async def _read_request(reader: asyncio.StreamReader) -> tuple[str, str, dict[st
         if ":" in line:
             k, v = line.split(":", 1)
             headers[k.strip().lower()] = v.strip()
-    n = int(headers.get("content-length") or 0)
-    body = await reader.readexactly(n) if n else b""
-    return method, path, headers, body
+    raw_len = headers.get("content-length")
+    if not raw_len:
+        return method, path, headers, b""
+    try:
+        declared = int(raw_len)
+    except ValueError:
+        declared = 0
+    if declared > MAX_BODY_BYTES:
+        raise BodyTooLarge
+    body = bytearray()
+    remaining = declared
+    while remaining > 0:
+        chunk = await reader.read(min(65536, remaining))
+        if not chunk:
+            break
+        body.extend(chunk)
+        remaining -= len(chunk)
+        if len(body) > MAX_BODY_BYTES:
+            raise BodyTooLarge
+    return method, path, headers, bytes(body)
 
 
 async def _client(app: App, reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
     try:
         method, path, headers, body = await asyncio.wait_for(_read_request(reader), timeout=30)
         await app.handle(method, path, headers, body, writer)
+    except BodyTooLarge:
+        payload = json.dumps(
+            {
+                "error": "import_failed",
+                "message": "File not imported. Fix these errors:",
+                "detail": {
+                    "errors": [
+                        {
+                            "path": "request",
+                            "message": f"request body exceeds {MAX_BODY_BYTES} bytes",
+                        }
+                    ]
+                },
+            },
+            ensure_ascii=False,
+        ).encode("utf-8")
+        head = (
+            "HTTP/1.1 422 Unprocessable Entity\r\n"
+            "Content-Type: application/json; charset=utf-8\r\n"
+            f"Content-Length: {len(payload)}\r\n"
+            "Cache-Control: no-cache\r\n"
+            "Connection: close\r\n"
+            "\r\n"
+        )
+        with contextlib.suppress(Exception):
+            writer.write(head.encode() + payload)
+            await writer.drain()
+            writer.close()
     except Exception:
         with contextlib.suppress(Exception):
             writer.close()

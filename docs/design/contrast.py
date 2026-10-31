@@ -1,4 +1,4 @@
-# WCAG 2.x 对比度：python3 contrast.py 前景 背景
+# WCAG 2.x contrast: python3 contrast.py fg bg
 import sys
 
 

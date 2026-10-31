@@ -18,6 +18,7 @@ from .adapter import (
     Progress,
     WaitAborted,
 )
+from .catalog import en, yes_tokens, zh
 from .util import compare, dump, get_path, sha256_text
 
 
@@ -137,16 +138,16 @@ def _schema(model: type[BaseModel]) -> dict[str, Any]:
 
 class StartParams(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    data: dict[str, Any] = Field(default_factory=dict, title="初始数据")
+    data: dict[str, Any] = Field(default_factory=dict, title="Initial data")
 
 
 class StartOut(BaseModel):
-    data: Any = Field(default=None, json_schema_extra={"port_type": "any"}, title="初始数据")
+    data: Any = Field(default=None, json_schema_extra={"port_type": "any"}, title="Initial data")
 
 
 class StartNode(NodeType):
     type_id = "start"
-    title = "开始"
+    title = en("node.start")
     Inputs = Empty
     Outputs = StartOut
     Params = StartParams
@@ -157,12 +158,12 @@ class StartNode(NodeType):
 
 
 class OutputIn(BaseModel):
-    value: Any = Field(default=None, json_schema_extra={"port_type": "any"}, title="结果")
+    value: Any = Field(default=None, json_schema_extra={"port_type": "any"}, title="Result")
 
 
 class OutputNode(NodeType):
     type_id = "output"
-    title = "输出"
+    title = en("node.output")
     Inputs = OutputIn
     Outputs = Empty
     icon = "node-output"
@@ -173,17 +174,17 @@ class OutputNode(NodeType):
 
 class ConstantParams(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    value: Any = Field(default="", title="值")
-    value_type: str = Field(default="string", title="类型")
+    value: Any = Field(default="", title="Value")
+    value_type: str = Field(default="string", title="Type")
 
 
 class ConstantOut(BaseModel):
-    value: Any = Field(default=None, json_schema_extra={"port_type": "any"}, title="值")
+    value: Any = Field(default=None, json_schema_extra={"port_type": "any"}, title="Value")
 
 
 class ConstantNode(NodeType):
     type_id = "constant"
-    title = "常量"
+    title = en("node.constant")
     Inputs = Empty
     Outputs = ConstantOut
     Params = ConstantParams
@@ -194,7 +195,7 @@ class ConstantNode(NodeType):
         if t == "number":
             val: Any = int(raw) if isinstance(raw, str) and "." not in raw else float(raw)
         elif t == "boolean":
-            val = raw if isinstance(raw, bool) else str(raw).lower() in ("1", "true", "yes", "是")
+            val = raw if isinstance(raw, bool) else str(raw).lower() in yes_tokens()
         elif t == "json":
             val = raw if isinstance(raw, (dict, list)) else json.loads(raw or "{}")
         else:
@@ -203,25 +204,25 @@ class ConstantNode(NodeType):
 
 
 class CondIn(BaseModel):
-    value: Any = Field(default=None, json_schema_extra={"port_type": "any"}, title="输入")
+    value: Any = Field(default=None, json_schema_extra={"port_type": "any"}, title="Input")
 
 
 class CondOut(BaseModel):
-    yes: Any = Field(default=None, json_schema_extra={"port_type": "any"}, title="是")
-    no: Any = Field(default=None, json_schema_extra={"port_type": "any"}, title="否")
+    yes: Any = Field(default=None, json_schema_extra={"port_type": "any"}, title="Yes")
+    no: Any = Field(default=None, json_schema_extra={"port_type": "any"}, title="No")
 
 
 class CondParams(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    field: str = Field(default="", title="字段")
-    op: str = Field(default="eq", title="比较")
-    compare: Any = Field(default="", title="比较值")
-    max_rounds: int | None = Field(default=None, title="最多 N 轮（未启用）")
+    field: str = Field(default="", title="Field")
+    op: str = Field(default="eq", title="Compare")
+    compare: Any = Field(default="", title="Compare to")
+    max_rounds: int | None = Field(default=None, title="Max rounds (off in v1)")
 
 
 class ConditionNode(NodeType):
     type_id = "condition"
-    title = "条件判断"
+    title = en("node.condition")
     Inputs = CondIn
     Outputs = CondOut
     Params = CondParams
@@ -235,16 +236,16 @@ class ConditionNode(NodeType):
 
 class MergeParams(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    ports: list[str] = Field(default_factory=lambda: ["a", "b"], title="输入端口")
+    ports: list[str] = Field(default_factory=lambda: ["a", "b"], title="Input ports")
 
 
 class MergeOut(BaseModel):
-    merged: Any = Field(default=None, json_schema_extra={"port_type": "any"}, title="合并结果")
+    merged: Any = Field(default=None, json_schema_extra={"port_type": "any"}, title="Merged")
 
 
 class MergeNode(NodeType):
     type_id = "merge"
-    title = "合并"
+    title = en("node.merge")
     Inputs = Empty
     Outputs = MergeOut
     Params = MergeParams
@@ -261,25 +262,25 @@ class MergeNode(NodeType):
 
 class ConfirmIn(BaseModel):
     model_config = ConfigDict(extra="allow")
-    value: Any = Field(default=None, json_schema_extra={"port_type": "any"}, title="待确认")
+    value: Any = Field(default=None, json_schema_extra={"port_type": "any"}, title="To confirm")
 
 
 class ConfirmOut(BaseModel):
     pass_: Any = Field(
-        default=None, alias="pass", json_schema_extra={"port_type": "any"}, title="通过"
+        default=None, alias="pass", json_schema_extra={"port_type": "any"}, title="Approved"
     )
-    reject: Any = Field(default=None, json_schema_extra={"port_type": "any"}, title="驳回")
+    reject: Any = Field(default=None, json_schema_extra={"port_type": "any"}, title="Rejected")
     model_config = ConfigDict(populate_by_name=True)
 
 
 class ConfirmParams(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    prompt: str = Field(default="请确认", title="提示")
+    prompt: str = Field(default=zh("confirm.default"), title="Prompt")
 
 
 class ConfirmNode(NodeType):
     type_id = "human_confirm"
-    title = "人工确认"
+    title = en("node.human_confirm")
     Inputs = ConfirmIn
     Outputs = ConfirmOut
     Params = ConfirmParams
@@ -291,28 +292,28 @@ class ConfirmNode(NodeType):
             return ConfirmOut(**{"pass": inputs.value, "reject": None})
         if decision == "reject":
             return ConfirmOut(**{"pass": None, "reject": inputs.value})
-        raise RuntimeError("人工确认尚未决定")
+        raise RuntimeError("human confirm has no decision")
 
 
 # --- test fixtures (not on the palette) ---
 
 
 class EchoIn(BaseModel):
-    value: Any = Field(default=None, json_schema_extra={"port_type": "any"}, title="值")
+    value: Any = Field(default=None, json_schema_extra={"port_type": "any"}, title="Value")
 
 
 class EchoOut(BaseModel):
-    value: Any = Field(default=None, json_schema_extra={"port_type": "any"}, title="值")
+    value: Any = Field(default=None, json_schema_extra={"port_type": "any"}, title="Value")
 
 
 class EchoNode(NodeType):
     type_id = "echo"
-    title = "回显"
+    title = en("node.echo")
     Inputs = EchoIn
     Outputs = EchoOut
     palette = False
     fixture = True
-    group = "测试夹具"
+    group = "test fixture"
     icon = "node-constant"
 
     async def run(self, inputs: EchoIn, params: BaseModel, ctx: RunContext):
@@ -320,21 +321,21 @@ class EchoNode(NodeType):
 
 
 class IncIn(BaseModel):
-    value: Any = Field(default=0, json_schema_extra={"port_type": "any"}, title="值")
+    value: Any = Field(default=0, json_schema_extra={"port_type": "any"}, title="Value")
 
 
 class IncOut(BaseModel):
-    value: Any = Field(default=None, json_schema_extra={"port_type": "any"}, title="值")
+    value: Any = Field(default=None, json_schema_extra={"port_type": "any"}, title="Value")
 
 
 class IncNode(NodeType):
     type_id = "inc"
-    title = "递增"
+    title = en("node.inc")
     Inputs = IncIn
     Outputs = IncOut
     palette = False
     fixture = True
-    group = "测试夹具"
+    group = "test fixture"
     icon = "node-constant"
 
     async def run(self, inputs: IncIn, params: BaseModel, ctx: RunContext):
@@ -352,12 +353,12 @@ class IncNode(NodeType):
 
 class NopNode(NodeType):
     type_id = "nop"
-    title = "空操作"
+    title = en("node.nop")
     Inputs = Empty
     Outputs = Empty
     palette = False
     fixture = True
-    group = "测试夹具"
+    group = "test fixture"
     icon = "node-constant"
 
     async def run(self, inputs: BaseModel, params: BaseModel, ctx: RunContext):
@@ -366,16 +367,16 @@ class NopNode(NodeType):
 
 
 class SleepParams(BaseModel):
-    seconds: float = Field(default=2.0, title="秒")
+    seconds: float = Field(default=2.0, title="seconds")
 
 
 class SleepNode(NodeType):
     type_id = "sleep"
-    title = "等待"
+    title = en("node.sleep")
     Params = SleepParams
     palette = False
     fixture = True
-    group = "测试夹具"
+    group = "test fixture"
     icon = "node-constant"
     timeout_s = 0.2
 
@@ -385,18 +386,18 @@ class SleepNode(NodeType):
 
 
 class FailParams(BaseModel):
-    message: str = Field(default="工具失败（桩）", title="错误")
+    message: str = Field(default="tool failed (stub)", title="Error")
 
 
 class FailNode(NodeType):
     type_id = "fail"
-    title = "失败"
+    title = en("node.fail")
     Inputs = AnyIn
     Outputs = IncOut
     Params = FailParams
     palette = False
     fixture = True
-    group = "测试夹具"
+    group = "test fixture"
     icon = "node-tool"
 
     async def run(self, inputs: BaseModel, params: FailParams, ctx: RunContext):
@@ -404,32 +405,32 @@ class FailNode(NodeType):
 
 
 class ToolIn(BaseModel):
-    args: Any = Field(default=None, json_schema_extra={"port_type": "any"}, title="请求")
-    tool_name: str | None = Field(default=None, title="工具名")
+    args: Any = Field(default=None, json_schema_extra={"port_type": "any"}, title="Request")
+    tool_name: str | None = Field(default=None, title="Tool")
 
 
 class ToolOut(BaseModel):
-    result: Any = Field(default=None, json_schema_extra={"port_type": "any"}, title="结果")
+    result: Any = Field(default=None, json_schema_extra={"port_type": "any"}, title="Result")
 
 
 class ToolParams(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    tool: str = Field(default="clock", title="工具")
-    allowed_tools: list[str] = Field(default_factory=list, title="允许的工具")
+    tool: str = Field(default="clock", title="Tool")
+    allowed_tools: list[str] = Field(default_factory=list, title="Allowed tools")
 
 
 class ToolNode(NodeType):
     """Fixture only. Product nodes come from Adapter.list_actions()."""
 
     type_id = "tool_call"
-    title = "工具调用"
+    title = en("node.tool_call")
     Inputs = ToolIn
     Outputs = ToolOut
     Params = ToolParams
     side_effect = SideEffect.write
     palette = False
     fixture = True
-    group = "测试夹具"
+    group = "test fixture"
     icon = "node-tool"
     timeout_s = NODE_TIMEOUT_S
 
@@ -470,7 +471,7 @@ def register_node_type(cls: type[NodeType]) -> None:
 
 def get_type(type_id: str) -> type[NodeType]:
     if type_id not in REGISTRY:
-        raise KeyError(f"未知节点类型: {type_id}")
+        raise KeyError(f"unknown node type: {type_id}")
     return REGISTRY[type_id]
 
 
@@ -554,7 +555,7 @@ def ingest_action(
             "id": aid,
             "title": title,
             "missing": ["side_effect"],
-            "reason": "side_effect 不能是 write（仅测试节点可用）",
+            "reason": "side_effect cannot be write (test nodes only)",
         }
     if se in (None, ""):
         data["side_effect"] = "motion"
@@ -564,7 +565,7 @@ def ingest_action(
             "id": aid,
             "title": title,
             "missing": ["side_effect"],
-            "reason": f"side_effect 不能是 {se}（适配器只能报 none / read / motion）",
+            "reason": f"side_effect cannot be {se} (adapter may report none / read / motion)",
         }
     if not data.get("title"):
         data["title"] = title
@@ -594,7 +595,7 @@ def ingest_action(
             "id": aid,
             "title": title,
             "missing": missing,
-            "reason": "缺 " + "、".join(missing),
+            "reason": "missing " + ", ".join(missing),
         }
     try:
         desc = (
@@ -670,7 +671,7 @@ def make_action_node(desc: ActionDescriptor, adapter: Adapter) -> type[NodeType]
             )
             if not result.success:
                 if result.message == "precondition_failed" or (result.message or "").startswith(
-                    "前提条件"
+                    "precondition"
                 ):
                     raise PreconditionFailed(result.message, result.measured)
                 if result.message == "wait_aborted":

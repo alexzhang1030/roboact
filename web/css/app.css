@@ -114,8 +114,7 @@ label { display: block; color: var(--muted); font-size: 12px; margin: 8px 0 4px;
 .top .run-word.amber { color: var(--amber); }
 .top .run-word.red { color: var(--red); }
 .top .right {
-  margin-left: auto; display: flex; flex-direction: row; align-items: center; gap: 12px;
-  flex-wrap: nowrap; width: auto; min-width: 0; border: 0; background: transparent;
+  margin-left: auto; display: flex; flex-direction: row; align-items: center; gap: 12px; flex-wrap: nowrap;
   font-family: var(--mono); font-size: 12px; font-variant-numeric: tabular-nums;
 }
 .top .steps.limit { color: var(--amber); }

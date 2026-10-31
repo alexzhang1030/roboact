@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import multiprocessing
 import re
 from dataclasses import dataclass, field
 from io import StringIO
@@ -10,7 +11,8 @@ from typing import Any, Literal
 
 from ruamel.yaml import YAML
 from ruamel.yaml.comments import CommentedMap, CommentedSeq
-from ruamel.yaml.constructor import ConstructorError
+from ruamel.yaml.composer import ComposerError
+from ruamel.yaml.constructor import ConstructorError, DuplicateKeyError
 from ruamel.yaml.events import (
     AliasEvent,
     MappingEndEvent,
@@ -31,9 +33,31 @@ from .nodes import SideEffect, get_instance, get_type, known_type
 SUPPORTED_FORMAT_VERSION = 1
 FORMAT_NAME = "roboact-flow"
 MAX_FILE_BYTES = 5 * 1024 * 1024
+MAX_BODY_BYTES = MAX_FILE_BYTES
 MAX_DEPTH = 64
 MAX_STRING_CHARS = 65536
 JS_MAX_SAFE = 9007199254740991
+YAML_PARSE_TIMEOUT_S = 180.0
+KNOWN_JSON_TYPES = frozenset(
+    {
+        "",
+        "any",
+        "array",
+        "bool",
+        "boolean",
+        "float",
+        "image",
+        "int",
+        "integer",
+        "json",
+        "null",
+        "number",
+        "object",
+        "str",
+        "string",
+        "text",
+    }
+)
 
 BUILTIN_KINDS = frozenset(
     {"start", "output", "constant", "condition", "merge", "human_approval", "action"}
@@ -160,8 +184,22 @@ def parse_and_validate(
 
 
 def parse_json(text: str) -> Any:
+    def no_dup(pairs: list[tuple[Any, Any]]) -> dict[str, Any]:
+        out: dict[str, Any] = {}
+        for key, val in pairs:
+            name = str(key)
+            if name in out:
+                raise FlowFileRejected([FileIssue(name, "duplicate key")])
+            out[name] = val
+        return out
+
+    def no_const(name: str) -> Any:
+        raise FlowFileRejected([FileIssue("", f"JSON constant {name} is not allowed")])
+
     try:
-        return json.loads(text)
+        return json.loads(text, parse_constant=no_const, object_pairs_hook=no_dup)
+    except FlowFileRejected:
+        raise
     except json.JSONDecodeError as e:
         raise FlowFileRejected(
             [FileIssue("", f"JSON parse error at line {e.lineno} column {e.colno}: {e.msg}")]
@@ -169,17 +207,43 @@ def parse_json(text: str) -> Any:
 
 
 def parse_yaml(text: str, *, version: YamlVersion = None) -> Any:
-    _scan_yaml_forbidden(text)
-    yaml = _yaml_safe(version)
-    try:
-        data = yaml.load(StringIO(text))
-    except (ConstructorError, ParserError, ScannerError) as e:
-        mark = getattr(e, "problem_mark", None) or getattr(e, "context_mark", None)
-        where = ""
-        if mark is not None:
-            where = f" at line {mark.line + 1} column {mark.column + 1}"
-        raise FlowFileRejected([FileIssue("", f"YAML parse error{where}: {e}")]) from e
-    return _plain(data)
+    _reject_percent_lines(text)
+    return _parse_yaml_in_process(text, version)
+
+
+def unlock_valid(graph: dict[str, Any], adapter: Adapter) -> bool:
+    """True only for this import + this flow + the robot currently connected."""
+    rec = graph.get("unlock_record")
+    if not isinstance(rec, dict) or not graph.get("file_id"):
+        return False
+    if rec.get("file_id") != graph.get("file_id"):
+        return False
+    robot = adapter.robot()
+    units = adapter.units()
+    return (
+        rec.get("robot_id") == robot.get("id")
+        and rec.get("adapter_name") == adapter.name
+        and rec.get("action_list_version") == adapter.action_list_version
+        and rec.get("units_angle") == units.get("angle")
+        and rec.get("units_length") == units.get("length")
+    )
+
+
+def make_unlock_record(graph: dict[str, Any], adapter: Adapter) -> dict[str, Any]:
+    robot = adapter.robot()
+    units = adapter.units()
+    return {
+        "action_list_version": adapter.action_list_version,
+        "adapter_name": adapter.name,
+        "file_id": graph.get("file_id"),
+        "robot_id": robot.get("id"),
+        "units_angle": units.get("angle"),
+        "units_length": units.get("length"),
+    }
+
+
+def is_imported(graph: dict[str, Any]) -> bool:
+    return bool(graph.get("file_id"))
 
 
 def dump_yaml(doc: dict[str, Any]) -> str:
@@ -298,7 +362,6 @@ def doc_to_graph(doc: dict[str, Any], adapter: Adapter) -> dict[str, Any]:
         "file_robot": flow.get("robot"),
         "file_units": flow.get("units"),
         "groups": [],
-        "mismatch_unlocked": False,
         "name": flow["name"],
         "nodes": nodes,
         "revision": flow["revision"],
@@ -315,35 +378,69 @@ def inspect_run(graph: dict[str, Any], adapter: Adapter) -> RunBlockers:
         if not known_type(typ):
             out.action_gone.append(nid)
             continue
-        cls = get_type(typ)
         params = node.get("params") or {}
+        if not isinstance(params, dict):
+            params = {}
         specs = _param_specs(typ)
         for spec in specs:
             if spec.secret and params.get(spec.name) is None:
                 out.missing_input.append(nid)
                 break
-        for spec in specs:
-            if spec.name not in params:
-                continue
-            val = params[spec.name]
-            if spec.secret and val is None:
-                continue
-            if not _value_matches_type(val, spec.type):
-                out.type_errors.append(
-                    {"node": title or nid, "param": spec.name, "type": spec.type}
-                )
-        if cls.side_effect == SideEffect.motion:
-            for key, val in params.items():
-                if isinstance(val, bool) or not isinstance(val, (int, float)):
-                    continue
-                limits = adapter.joint_limits.get(key) or adapter.velocity_limits.get(key)
-                if limits is None:
-                    continue
-                lo, hi = limits
-                if val < lo or val > hi:
-                    out.limit_errors.append({"node": title or nid, "param": key})
+        inspect_values(typ, params, adapter, title or nid, out)
     out.mismatches = _mismatches(graph, adapter)
     return out
+
+
+def inspect_values(
+    typ: str,
+    values: dict[str, Any],
+    adapter: Adapter,
+    title: str,
+    out: RunBlockers | None = None,
+) -> RunBlockers:
+    """Type / enum / range / motion-limit checks on a known value map (params or linked inputs)."""
+    dest = out or RunBlockers()
+    if not known_type(typ):
+        return dest
+    cls = get_type(typ)
+    specs = {s.name: s for s in _param_specs(typ)}
+    schema = _params_schema(typ)
+    props = schema.get("properties") if isinstance(schema.get("properties"), dict) else {}
+    for key, val in values.items():
+        spec = specs.get(key)
+        if spec is not None and spec.secret and val is None:
+            continue
+        schema_type = ""
+        prop = props.get(key) if isinstance(props, dict) else None
+        if isinstance(prop, dict):
+            raw_t = prop.get("type")
+            if isinstance(raw_t, list):
+                schema_type = str(raw_t[0] if raw_t else "")
+            elif raw_t is not None:
+                schema_type = str(raw_t)
+            enum = prop.get("enum")
+            if isinstance(enum, list) and val not in enum:
+                dest.type_errors.append({"node": title, "param": key, "type": "enum"})
+                continue
+        declared = (spec.type if spec is not None else schema_type) or schema_type
+        if spec is not None and spec.enum is not None and val not in spec.enum:
+            dest.type_errors.append({"node": title, "param": key, "type": "enum"})
+            continue
+        if declared and not _value_matches_type(val, declared):
+            dest.type_errors.append({"node": title, "param": key, "type": declared})
+            continue
+        if (
+            spec is not None
+            and spec.range is not None
+            and isinstance(val, (int, float))
+            and not isinstance(val, bool)
+        ):
+            lo, hi = spec.range
+            if val < lo or val > hi:
+                dest.limit_errors.append({"node": title, "param": key})
+    if cls.side_effect == SideEffect.motion:
+        _collect_motion_limits(values, title, adapter, dest)
+    return dest
 
 
 def _mismatches(graph: dict[str, Any], adapter: Adapter) -> list[dict[str, str]]:
@@ -389,23 +486,100 @@ def _norm_fmt(fmt: str) -> Literal["json", "yaml"]:
 def _yaml_safe(version: YamlVersion = None) -> YAML:
     yaml = YAML(typ="safe", pure=True)
     yaml.version = version or (1, 2)
+    yaml.allow_duplicate_keys = False
     return yaml
+
+
+def _reject_percent_lines(text: str) -> None:
+    for i, line in enumerate(text.splitlines(), 1):
+        if line.startswith("%"):
+            raise FlowFileRejected([FileIssue(f"line {i}", "YAML directives are not allowed")])
+
+
+def _parse_yaml_in_process(text: str, version: YamlVersion) -> Any:
+    ctx = multiprocessing.get_context("fork")
+    q: Any = ctx.Queue()
+    proc = ctx.Process(target=_yaml_process_entry, args=(text, version, q))
+    proc.start()
+    proc.join(YAML_PARSE_TIMEOUT_S)
+    if proc.is_alive():
+        proc.terminate()
+        proc.join(2)
+        if proc.is_alive():
+            proc.kill()
+            proc.join(1)
+        raise FlowFileRejected([FileIssue("", "YAML parse timed out")])
+    if q.empty():
+        raise FlowFileRejected([FileIssue("", "YAML parse failed")])
+    kind, payload = q.get()
+    if kind == "ok":
+        return payload
+    issues = [FileIssue(str(path), str(msg)) for path, msg in payload]
+    raise FlowFileRejected(issues or [FileIssue("", "YAML parse failed")])
+
+
+def _yaml_process_entry(text: str, version: YamlVersion, q: Any) -> None:
+    try:
+        q.put(("ok", _parse_yaml_inner(text, version)))
+    except FlowFileRejected as e:
+        q.put(("rej", [(i.path, i.message) for i in e.issues]))
+    except RecursionError:
+        q.put(("rej", [("", f"nesting exceeds {MAX_DEPTH}")]))
+    except Exception as e:
+        q.put(("rej", [(_exc_loc(e), f"YAML parse error: {type(e).__name__}: {e}")]))
+
+
+def _exc_loc(exc: BaseException) -> str:
+    mark = getattr(exc, "problem_mark", None) or getattr(exc, "context_mark", None)
+    if mark is None:
+        return ""
+    return f"line {mark.line + 1} column {mark.column + 1}"
+
+
+def _parse_yaml_inner(text: str, version: YamlVersion) -> Any:
+    _reject_percent_lines(text)
+    _scan_yaml_forbidden(text)
+    yaml = _yaml_safe(version)
+    try:
+        data = yaml.load(StringIO(text))
+    except RecursionError:
+        raise
+    except (
+        ComposerError,
+        ConstructorError,
+        DuplicateKeyError,
+        ParserError,
+        ScannerError,
+    ) as e:
+        loc = _exc_loc(e)
+        where = f" at {loc}" if loc else ""
+        raise FlowFileRejected([FileIssue(loc, f"YAML parse error{where}: {e}")]) from e
+    except Exception as e:
+        loc = _exc_loc(e)
+        where = f" at {loc}" if loc else ""
+        raise FlowFileRejected(
+            [FileIssue(loc, f"YAML parse error{where}: {type(e).__name__}: {e}")]
+        ) from e
+    try:
+        return _plain(data)
+    except RecursionError as e:
+        raise FlowFileRejected([FileIssue("", f"nesting exceeds {MAX_DEPTH}")]) from e
 
 
 def _scan_yaml_forbidden(text: str) -> None:
     yaml = _yaml_safe()
     try:
         events = list(yaml.parse(StringIO(text)))
-    except (ParserError, ScannerError) as e:
-        mark = getattr(e, "problem_mark", None)
-        where = ""
-        if mark is not None:
-            where = f" at line {mark.line + 1} column {mark.column + 1}"
-        raise FlowFileRejected([FileIssue("", f"YAML parse error{where}: {e}")]) from e
+    except RecursionError:
+        raise
+    except Exception as e:
+        mark = _exc_loc(e)
+        where = f" at {mark}" if mark else ""
+        raise FlowFileRejected([FileIssue(mark, f"YAML parse error{where}: {e}")]) from e
     issues: list[FileIssue] = []
     stack: list[dict[str, Any]] = []
 
-    def loc(ev: Any) -> str:
+    def ev_loc(ev: Any) -> str:
         mark = getattr(ev, "start_mark", None)
         if mark is None:
             return ""
@@ -414,12 +588,12 @@ def _scan_yaml_forbidden(text: str) -> None:
     for ev in events:
         tag = getattr(ev, "tag", None)
         if tag not in CORE_TAGS:
-            issues.append(FileIssue(loc(ev), f"YAML custom tag not allowed: {tag}"))
+            issues.append(FileIssue(ev_loc(ev), f"YAML custom tag not allowed: {tag}"))
         anchor = getattr(ev, "anchor", None)
         if anchor and not isinstance(ev, AliasEvent):
-            issues.append(FileIssue(loc(ev), "YAML anchors are not allowed"))
+            issues.append(FileIssue(ev_loc(ev), "YAML anchors are not allowed"))
         if isinstance(ev, AliasEvent):
-            issues.append(FileIssue(loc(ev), "YAML aliases are not allowed"))
+            issues.append(FileIssue(ev_loc(ev), "YAML aliases are not allowed"))
         if isinstance(ev, MappingStartEvent):
             stack.append({"type": "map", "expect_key": True})
         elif isinstance(ev, SequenceStartEvent):
@@ -432,7 +606,7 @@ def _scan_yaml_forbidden(text: str) -> None:
         elif isinstance(ev, ScalarEvent) and stack and stack[-1]["type"] == "map":
             if stack[-1]["expect_key"]:
                 if ev.value == "<<":
-                    issues.append(FileIssue(loc(ev), "YAML merge keys are not allowed"))
+                    issues.append(FileIssue(ev_loc(ev), "YAML merge keys are not allowed"))
                 stack[-1]["expect_key"] = False
             else:
                 stack[-1]["expect_key"] = True
@@ -725,6 +899,8 @@ def _param_specs(typ: str) -> list[ParamSpec]:
 
 def _value_matches_type(val: Any, declared: str) -> bool:
     kind = (declared or "any").lower()
+    if kind not in KNOWN_JSON_TYPES:
+        return False
     if kind in ("any", ""):
         return True
     if kind in ("string", "str", "text"):
@@ -736,8 +912,41 @@ def _value_matches_type(val: Any, declared: str) -> bool:
     if kind in ("boolean", "bool"):
         return isinstance(val, bool)
     if kind in ("object", "json"):
-        return isinstance(val, (dict, list))
-    return True
+        return isinstance(val, dict)
+    if kind == "array":
+        return isinstance(val, list)
+    if kind == "null":
+        return val is None
+    if kind == "image":
+        return isinstance(val, dict)
+    return False
+
+
+def _params_schema(typ: str) -> dict[str, Any]:
+    try:
+        schema = get_type(typ).Params.model_json_schema()
+    except Exception:
+        return {}
+    return schema
+
+
+def _collect_motion_limits(obj: Any, title: str, adapter: Adapter, out: RunBlockers) -> None:
+    if isinstance(obj, dict):
+        for key, val in obj.items():
+            if isinstance(val, bool):
+                continue
+            if isinstance(val, (int, float)):
+                limits = adapter.joint_limits.get(key) or adapter.velocity_limits.get(key)
+                if limits is None:
+                    continue
+                lo, hi = limits
+                if val < lo or val > hi:
+                    out.limit_errors.append({"node": title, "param": key})
+            else:
+                _collect_motion_limits(val, title, adapter, out)
+    elif isinstance(obj, list):
+        for item in obj:
+            _collect_motion_limits(item, title, adapter, out)
 
 
 def _forbid_keys(

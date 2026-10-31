@@ -91,7 +91,7 @@ def echo_chain_graph(n_nodes: int, name: str = "") -> dict[str, Any]:
         }
     )
     return {
-        "name": name or f"{n_nodes} 节点",
+        "name": name or f"{n_nodes} nodes",
         "nodes": nodes,
         "edges": edges,
         "groups": [],
@@ -99,7 +99,7 @@ def echo_chain_graph(n_nodes: int, name: str = "") -> dict[str, Any]:
     }
 
 
-def motion_graph(name: str = "A6 动作") -> dict[str, Any]:
+def motion_graph(name: str = "A6 motion") -> dict[str, Any]:
     return {
         "name": name,
         "nodes": [

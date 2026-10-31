@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from .adapter import ActionDescriptor, Adapter, CrashBetweenWriteAndKey
+from .catalog import zh
 from .util import now_iso
 
 SIDES = {
@@ -16,13 +17,13 @@ SIDES = {
 }
 
 HINTS = {
-    "read_note": "会读外部：读演示笔记文件",
-    "append_note": "会写外部：往演示笔记追加一行",
-    "clock": "返回当前时间（纯计算）",
+    "read_note": "reads the demo notes file",
+    "append_note": "appends a line to the demo notes file",
+    "clock": "returns the current time",
 }
 
 CONFIRM = {
-    "append_note": "将向演示笔记文件追加一行。",
+    "append_note": "This will append a line to the demo notes file.",
 }
 
 
@@ -109,7 +110,7 @@ class Tools(Adapter):
     """Test-fixture tool host. Same Adapter surface so Executor can ping it."""
 
     adapter_id = "tools"
-    name = "测试夹具"
+    name = "test fixture"
     version = "fixture"
     target = "sim"
     action_list_version = "fixture"
@@ -159,7 +160,7 @@ class Tools(Adapter):
 
     def side(self, name: str) -> str:
         if name not in SIDES:
-            raise ValueError(f"未知工具: {name}")
+            raise ValueError(f"unknown tool: {name}")
         return SIDES[name]
 
     def list_tools(self) -> list[dict[str, Any]]:
@@ -178,7 +179,11 @@ class Tools(Adapter):
             if self.append_delay:
                 await asyncio.sleep(self.append_delay)
             line = str(
-                args.get("line") or args.get("text") or args.get("value") or args.get("内容") or ""
+                args.get("line")
+                or args.get("text")
+                or args.get("value")
+                or args.get(zh("parse.note_content"))
+                or ""
             )
             crash = self.crash_between_write_and_key
             self.crash_between_write_and_key = False
@@ -188,7 +193,7 @@ class Tools(Adapter):
             return result
         if name == "clock":
             return {"now": now_iso()}
-        raise ValueError(f"未知工具: {name}")
+        raise ValueError(f"unknown tool: {name}")
 
     def note_lines(self) -> list[str]:
         if self.ledger.note_lines():

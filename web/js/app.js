@@ -192,6 +192,7 @@ const App = defineComponent({
     const slot1Label = computed(() => { void locale.value; return t(slot1Key.value) })
     const flowBlocked = computed(() => {
       const c = runCheck.value || {}
+      if (c.can_run === false) return true
       if ((c.action_gone || []).length || (c.missing_input || []).length) return true
       if ((c.type_errors || []).length || (c.limit_errors || []).length) return true
       if ((c.mismatches || []).length && !c.mismatch_unlocked) return true
@@ -493,7 +494,21 @@ const App = defineComponent({
     function startAdapterPoll() {
       if (adapterTimer) return
       adapterTimer = setInterval(async () => {
-        try { adapter.value = await get('/api/adapter') } catch (_) {}
+        try {
+          const next = await get('/api/adapter')
+          const prev = adapter.value || {}
+          adapter.value = next
+          const robotChanged = JSON.stringify(prev.robot) !== JSON.stringify(next.robot)
+          const unitsChanged = JSON.stringify(prev.units) !== JSON.stringify(next.units)
+          if (
+            prev.name !== next.name
+            || prev.action_list_version !== next.action_list_version
+            || robotChanged
+            || unitsChanged
+          ) {
+            await refreshRunCheck()
+          }
+        } catch (_) {}
       }, 1500)
     }
     function stopAdapterPoll() {
@@ -502,7 +517,14 @@ const App = defineComponent({
 
     async function refreshRunCheck() {
       if (!meta.value.id) return
-      try { runCheck.value = await get('/api/flows/' + meta.value.id + '/run-check') } catch (_) {}
+      try {
+        runCheck.value = await get('/api/flows/' + meta.value.id + '/run-check')
+      } catch (_) {
+        runCheck.value = {
+          action_gone: [], missing_input: [], mismatches: [], mismatch_unlocked: false,
+          type_errors: [], limit_errors: [], can_run: false,
+        }
+      }
       applyImportMarks()
     }
 
@@ -510,8 +532,12 @@ const App = defineComponent({
       const gone = new Set((runCheck.value && runCheck.value.action_gone) || [])
       const missing = new Set((runCheck.value && runCheck.value.missing_input) || [])
       for (const n of nodes.value) {
+        const cur = nodeStatus[n.id] || {}
         if (gone.has(n.id)) nodeStatus[n.id] = { status: 'action_missing', state: 'action_missing' }
         else if (missing.has(n.id)) nodeStatus[n.id] = { status: 'missing_input', state: 'missing_input' }
+        else if (cur.status === 'action_missing' || cur.status === 'missing_input') {
+          nodeStatus[n.id] = { status: 'idle', state: 'idle' }
+        }
       }
     }
 
@@ -785,7 +811,7 @@ const App = defineComponent({
     async function exportFlow(fmt) {
       exportOpen.value = false
       try {
-        await saveFlow(true)
+        await saveFlow(false)
         const r = await send('/api/flows/export', 'POST', { flow_id: meta.value.id, format: fmt })
         const blob = new Blob([r.text], { type: 'application/octet-stream' })
         const a = document.createElement('a')

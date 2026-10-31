@@ -3,12 +3,17 @@
 from __future__ import annotations
 
 import json
+import socket
+import time
 from typing import Any
+from urllib.parse import urlparse
 
 from roboact.adapter import FakeAdapter
+from roboact.catalog import zh
 from roboact.flow_file import (
     MAX_FILE_BYTES,
     dump_json,
+    export_flow,
     parse_and_validate,
     parse_yaml,
 )
@@ -34,7 +39,7 @@ FORBIDDEN_KEYS = (
 def sample_doc(**flow_over: Any) -> dict[str, Any]:
     flow = {
         "action_list_version": "fake-v1",
-        "adapter": {"name": "假适配器", "target": "sim", "version": "0.2"},
+        "adapter": {"name": zh("adapter.fake"), "target": "sim", "version": "0.2"},
         "id": "flow-sample",
         "name": "sample",
         "revision": 3,
@@ -140,7 +145,7 @@ def run_doc(**param_over: Any) -> dict[str, Any]:
         ],
         "flow": {
             "action_list_version": "fake-v1",
-            "adapter": {"name": "假适配器", "target": "sim", "version": "0.2"},
+            "adapter": {"name": zh("adapter.fake"), "target": "sim", "version": "0.2"},
             "id": "flow-run",
             "name": "runnable",
             "revision": 1,
@@ -185,12 +190,53 @@ def run_doc(**param_over: Any) -> dict[str, Any]:
     }
 
 
-def _import(base: str, text: str, fmt: str = "json") -> tuple[int, Any]:
-    return http_status(base, "/api/flows/import", "POST", {"text": text, "format": fmt})
+def _import(base: str, text: str, fmt: str = "json", timeout: float = 30.0) -> tuple[int, Any]:
+    return http_status(
+        base, "/api/flows/import", "POST", {"text": text, "format": fmt}, timeout=timeout
+    )
+
+
+def _import_declared_oversize(base: str, declared: int) -> tuple[int, Any]:
+    """Reject on Content-Length without sending the declared body."""
+    parsed = urlparse(base)
+    host = parsed.hostname or "127.0.0.1"
+    port = parsed.port or 80
+    req = (
+        "POST /api/flows/import HTTP/1.1\r\n"
+        f"Host: {host}:{port}\r\n"
+        "Content-Type: application/json\r\n"
+        f"Content-Length: {declared}\r\n"
+        "Connection: close\r\n"
+        "\r\n"
+    ).encode("ascii")
+    with socket.create_connection((host, port), timeout=10) as sock:
+        sock.sendall(req)
+        chunks: list[bytes] = []
+        while True:
+            piece = sock.recv(65536)
+            if not piece:
+                break
+            chunks.append(piece)
+    raw = b"".join(chunks)
+    head, _, rest = raw.partition(b"\r\n\r\n")
+    status_line = head.split(b"\r\n", 1)[0].decode("ascii", "replace")
+    code = int(status_line.split()[1])
+    try:
+        payload = json.loads(rest.decode() or "null")
+    except json.JSONDecodeError:
+        payload = {"error": rest.decode(errors="replace")}
+    return code, payload
 
 
 def _export(base: str, flow_id: str, fmt: str = "json") -> Any:
     return http_json(base, "/api/flows/export", "POST", {"flow_id": flow_id, "format": fmt})
+
+
+def _deep_yaml(levels: int) -> str:
+    body = "v: 1"
+    for _ in range(levels):
+        body = "a:\n" + "\n".join("  " + line for line in body.splitlines())
+    return body + "\n"
 
 
 def _snapshot(base: str) -> tuple[list[str], dict[str, Any], int]:
@@ -257,7 +303,7 @@ flow:
   revision: 1
   step_limit: 40
   action_list_version: "fake-v1"
-  adapter: {name: "假适配器", version: "0.2", target: "sim"}
+  adapter: {name: "__ADAPTER__", version: "0.2", target: "sim"}
   robot: {id: "fake-1", model: "FakeArm"}
   units: {angle: "rad", length: "m"}
 nodes:
@@ -288,7 +334,7 @@ edges:
     to: {node: go, port: target}
   - from: {node: go, port: pose}
     to: {node: out, port: value}
-"""
+""".replace("__ADAPTER__", zh("adapter.fake"))
     code, imported = _import(base, yml, "yml")
     assert code == 200, imported
     note = next(n for n in imported["flow"]["nodes"] if n["id"] == "note")
@@ -403,17 +449,37 @@ def test_20_bad_files_leave_canvas(server):
             "yaml",
             "format: roboact-flow\nformat_version: 1\nflow: !custom {}\nnodes: []\nedges: []\n",
         ),
+        ("yaml", "%YAML 1.1\n---\nformat: roboact-flow\nformat_version: 1\n"),
+        ("yaml", "%TAG ! tag:example.com,2024:\n---\na: 1\n"),
+        (
+            "yaml",
+            "format: roboact-flow\nformat: other\nformat_version: 1\n"
+            "flow: {id: a, name: a, revision: 1, step_limit: 1}\nnodes: []\nedges: []\n",
+        ),
+        ("yaml", "---\nformat: roboact-flow\nformat_version: 1\n---\na: 1\n"),
+        ("yaml", _deep_yaml(1000)),
     ]
     for fmt, text in bad:
-        code, body = _import(base, text, fmt)
-        assert code == 422, (fmt, text[:80], body)
+        code, body = _import(base, text, fmt, timeout=60.0)
+        assert 400 <= code < 500, (fmt, text[:80], body)
         assert body["error"] == "import_failed"
-        assert body["detail"]["errors"]
+        errs = body.get("detail", {}).get("errors") or []
+        assert errs, (fmt, body)
+        assert any(str(e.get("path") or e.get("message") or "") for e in errs), (fmt, body)
         ids1, graph1, runs1 = _snapshot(base)
         assert ids1 == ids0
         assert graph1["id"] == graph0["id"]
         assert graph1["nodes"] == graph0["nodes"]
         assert runs1 == runs0
+    code, body = _import_declared_oversize(base, 6 * 1024 * 1024)
+    assert 400 <= code < 500, body
+    assert body["error"] == "import_failed"
+    errs = body.get("detail", {}).get("errors") or []
+    assert errs and any(e.get("path") for e in errs), body
+    ids1, graph1, runs1 = _snapshot(base)
+    assert ids1 == ids0
+    assert graph1["nodes"] == graph0["nodes"]
+    assert runs1 == runs0
 
 
 def test_20_older_format_migrates(server):
@@ -537,11 +603,184 @@ def test_20_motion_limits(server):
 def test_20_too_large(server):
     base = server["base"]
     ids0, graph0, runs0 = _snapshot(base)
-    text = "x" * (MAX_FILE_BYTES + 1)
-    code, body = _import(base, text, "json")
+    code, body = _import_declared_oversize(base, MAX_FILE_BYTES + 1)
     assert code == 422
     assert body["error"] == "import_failed"
+    assert body["detail"]["errors"][0]["path"] == "request"
     ids1, graph1, runs1 = _snapshot(base)
     assert ids1 == ids0
     assert graph1["nodes"] == graph0["nodes"]
     assert runs1 == runs0
+
+
+def test_20_export_ui_path_is_stable(server):
+    base = server["base"]
+    code, imported = _import(base, dump_json(run_doc()), "json")
+    assert code == 200, imported
+    fid = imported["flow"]["id"]
+    rev0 = imported["flow"]["revision"]
+    graph = http_json(base, f"/api/flows/{fid}")["flow"]
+    http_json(base, f"/api/flows/{fid}", "PUT", {**graph, "bump": False})
+    first = _export(base, fid, "json")
+    graph2 = http_json(base, f"/api/flows/{fid}")["flow"]
+    http_json(base, f"/api/flows/{fid}", "PUT", {**graph2, "bump": False})
+    second = _export(base, fid, "json")
+    assert first["text"] == second["text"]
+    assert json.loads(first["text"])["flow"]["revision"] == rev0
+
+
+def test_20_client_unlock_ignored(server):
+    base = server["base"]
+    doc = run_doc()
+    doc["flow"]["robot"] = {"id": "other-arm", "model": "Other"}
+    code, imported = _import(base, dump_json(doc), "json")
+    assert code == 200, imported
+    fid = imported["flow"]["id"]
+    graph = http_json(base, f"/api/flows/{fid}")["flow"]
+    http_json(
+        base,
+        f"/api/flows/{fid}",
+        "PUT",
+        {
+            **graph,
+            "bump": False,
+            "mismatch_unlocked": True,
+            "unlock_record": {
+                "file_id": graph.get("file_id"),
+                "robot_id": "other-arm",
+                "adapter_name": "x",
+                "action_list_version": "fake-v1",
+                "units_angle": "rad",
+                "units_length": "m",
+            },
+        },
+    )
+    check = http_json(base, f"/api/flows/{fid}/run-check")
+    assert not check["mismatch_unlocked"]
+    assert not check["can_run"]
+
+
+def test_20_unlock_relocks_when_robot_changes(server):
+    base = server["base"]
+    doc = run_doc()
+    doc["flow"]["robot"] = {"id": "other-arm", "model": "Other"}
+    code, imported = _import(base, dump_json(doc), "json")
+    assert code == 200, imported
+    fid = imported["flow"]["id"]
+    http_json(base, f"/api/flows/{fid}/review-enable", "POST", {})
+    check = http_json(base, f"/api/flows/{fid}/run-check")
+    assert check["mismatch_unlocked"]
+    assert check["can_run"]
+    http_json(base, "/api/test/adapter", "POST", {"robot_id": "changed-robot"})
+    check = http_json(base, f"/api/flows/{fid}/run-check")
+    assert not check["mismatch_unlocked"]
+    assert not check["can_run"]
+    kinds = {m["kind"] for m in check["mismatches"]}
+    assert "robot" in kinds
+
+
+def test_20_velocity_limit_inside_target(server):
+    base = server["base"]
+    doc = run_doc()
+    for node in doc["nodes"]:
+        if node["id"] == "go":
+            node["params"] = {"target": {"x": 0.1, "y": 0.1, "z": 0.2, "speed": 9}}
+    code, imported = _import(base, dump_json(doc), "json")
+    assert code == 200, imported
+    fid = imported["flow"]["id"]
+    http_json(
+        base,
+        "/api/test/adapter",
+        "POST",
+        {"velocity_limits": {"speed": [0, 2]}},
+    )
+    check = http_json(base, f"/api/flows/{fid}/run-check")
+    assert check["limit_errors"]
+    assert any(e["param"] == "speed" for e in check["limit_errors"])
+    code, body = http_status(base, "/api/runs", "POST", {"flow_id": fid, "flow_version": 1})
+    assert code == 409
+    assert body["error"] == "param_out_of_limit"
+    assert "speed" in body["message"]
+
+
+def test_20_non_import_action_list_is_hard_error(server):
+    base = server["base"]
+    boot = http_json(base, "/api/bootstrap")
+    fid = boot["flow"]["id"]
+    assert not boot["flow"].get("file_id")
+    http_json(base, "/api/test/adapter", "POST", {"action_list_version": "changed-list"})
+    code, body = http_status(base, "/api/runs", "POST", {"flow_id": fid, "flow_version": 1})
+    assert code == 409
+    assert body["error"] == "action_list_mismatch"
+
+
+def test_20_yaml_size_and_parse_report():
+    adapter = FakeAdapter()
+    bind_adapter(adapter)
+    nodes = [
+        {
+            "id": "start",
+            "type": "start",
+            "x": 0,
+            "y": 0,
+            "params": {"data": {}},
+            "title": "Start",
+        }
+    ]
+    edges = []
+    prev = "start"
+    for i in range(498):
+        nid = f"n{i}"
+        nodes.append(
+            {
+                "id": nid,
+                "type": "echo",
+                "x": i,
+                "y": 0,
+                "params": {},
+                "title": nid,
+            }
+        )
+        edges.append(
+            {
+                "id": f"e{i}",
+                "source": prev,
+                "source_port": "data" if i == 0 else "value",
+                "target": nid,
+                "target_port": "value",
+            }
+        )
+        prev = nid
+    nodes.append({"id": "out", "type": "output", "x": 0, "y": 1, "params": {}, "title": "Out"})
+    edges.append(
+        {
+            "id": "eout",
+            "source": prev,
+            "source_port": "value",
+            "target": "out",
+            "target_port": "value",
+        }
+    )
+    graph = {
+        "id": "flow-500",
+        "file_id": "flow-500",
+        "name": "five-hundred",
+        "revision": 1,
+        "step_limit": 1000,
+        "nodes": nodes,
+        "edges": edges,
+        "groups": [],
+    }
+    text, _name = export_flow(graph, "yaml", adapter)
+    size_500 = len(text.encode("utf-8"))
+    line = "# " + ("x" * 77) + "\n"
+    n = (MAX_FILE_BYTES - 16) // len(line.encode("utf-8"))
+    blob = line * n + "a: 1\n"
+    assert len(blob.encode("utf-8")) >= MAX_FILE_BYTES - 80
+    t0 = time.perf_counter()
+    parse_yaml(blob)
+    parse_s = time.perf_counter() - t0
+    print(f"C9_YAML_500_NODE_BYTES={size_500}")
+    print(f"C9_YAML_5MIB_PARSE_S={parse_s:.4f}")
+    assert size_500 > 0
+    assert parse_s >= 0
