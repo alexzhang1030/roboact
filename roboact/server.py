@@ -13,6 +13,7 @@ from urllib.parse import parse_qs, unquote, urlparse
 
 from . import DEFAULT_STEP_LIMIT, SSE_RETRY_MS
 from .adapter import FakeAdapter
+from .catalog import zh
 from .errors import ApiError
 from .executor import Executor
 from .graph import params_changed
@@ -141,7 +142,7 @@ class App:
 
     def _demo_graph(self) -> dict[str, Any]:
         return {
-            "name": "假适配器演示",
+            "name": zh("flow.demo"),
             "adapter_id": self.adapter.adapter_id,
             "action_list_version": self.adapter.action_list_version,
             "nodes": [
@@ -201,7 +202,7 @@ class App:
             g = self.store.latest_graph(flows[0]["flow_id"])
             if g:
                 return g
-        return self.store.create_flow("假适配器演示", self._demo_graph())
+        return self.store.create_flow(zh("flow.demo"), self._demo_graph())
 
     def _pick_flow(self, wanted: str | None) -> dict[str, Any]:
         if wanted:
@@ -354,7 +355,7 @@ class App:
             await self._json(writer, 200, {"flows": self.store.list_flows()})
             return
         if route == "/api/flows" and method == "POST":
-            flow = self.store.create_flow((data or {}).get("name") or "未命名流程", data)
+            flow = self.store.create_flow((data or {}).get("name") or zh("flow.untitled"), data)
             await self._json(writer, 200, {"flow": flow})
             return
         if route.startswith("/api/flows/") and "/breakpoints/" in route:
@@ -368,7 +369,7 @@ class App:
             if method == "GET":
                 flow = self.store.latest_graph(fid)
                 if not flow:
-                    raise ApiError(404, "not_found", "找不到流程")
+                    raise ApiError(404, "not_found", "flow not found")
                 await self._json(
                     writer,
                     200,
@@ -466,17 +467,17 @@ class App:
             run_id = parts[3]
             if len(parts) >= 5 and parts[4] == "images":
                 if len(parts) < 7:
-                    raise ApiError(404, "not_found", "找不到图像")
+                    raise ApiError(404, "not_found", "image not found")
                 img = self.ex.image_at(run_id, int(parts[5]), parts[6])
                 if not img:
-                    raise ApiError(410, "image_gone", "图像已不在内存里")
+                    raise ApiError(410, "image_gone", "image is no longer in memory")
                 await self._json(writer, 200, img)
                 return
             if len(parts) >= 5 and parts[4] == "steps":
                 if len(parts) >= 6:
                     rec = self.store.get_step(run_id, int(parts[5]))
                     if not rec:
-                        raise ApiError(404, "not_found", "找不到记录")
+                        raise ApiError(404, "not_found", "record not found")
                     await self._json(writer, 200, self.ex.decorate_steps(run_id, [rec])[0])
                     return
                 node_id = query.get("node_id")
@@ -580,7 +581,7 @@ class App:
                     },
                 )
                 return
-            raise ApiError(404, "not_found", "未知动作")
+            raise ApiError(404, "not_found", "unknown action")
         if self.test_mode and route == "/api/test/flood-status" and method == "POST":
             data = data or {}
             run_id = data.get("run_id") or "perf"
@@ -631,7 +632,7 @@ class App:
         if method == "GET":
             await self._static(writer, route)
             return
-        raise ApiError(404, "not_found", "找不到接口")
+        raise ApiError(404, "not_found", "endpoint not found")
 
     async def _breakpoints(
         self,
@@ -659,7 +660,10 @@ class App:
                 top = field.split(".")[0]
                 if field and top not in names:
                     raise ApiError(
-                        422, "invalid_graph", "断点条件字段不在输入模型里", {"field": field}
+                        422,
+                        "invalid_graph",
+                        "breakpoint field is not on the input model",
+                        {"field": field},
                     )
             bp = self.store.set_breakpoint(fid, node_id, when, body)
             self.hub.emit(
@@ -671,7 +675,7 @@ class App:
             self.store.delete_breakpoint(fid, node_id, when)
             await self._raw(writer, 204, b"", "text/plain")
             return
-        raise ApiError(404, "not_found", "找不到接口")
+        raise ApiError(404, "not_found", "endpoint not found")
 
     async def _pins(
         self,
@@ -700,7 +704,7 @@ class App:
             self.store.delete_pin(fid, node_id, port)
             await self._raw(writer, 204, b"", "text/plain")
             return
-        raise ApiError(404, "not_found", "找不到接口")
+        raise ApiError(404, "not_found", "endpoint not found")
 
     async def _sse(self, writer: asyncio.StreamWriter, run_id: str, after: int | None) -> None:
         head = (

@@ -8,6 +8,8 @@ import uuid
 from datetime import UTC, datetime
 from typing import Any
 
+from .catalog import yes_tokens
+
 
 def now_iso() -> str:
     return datetime.now(UTC).isoformat()
@@ -54,7 +56,7 @@ def coerce_compare(left: Any, raw: Any) -> Any:
         if isinstance(raw, bool):
             return raw
         if isinstance(raw, str):
-            return raw.strip().lower() in ("1", "true", "yes", "是")
+            return raw.strip().lower() in yes_tokens()
         return bool(raw)
     if isinstance(left, int) and not isinstance(left, bool):
         try:
@@ -89,7 +91,7 @@ def compare(left: Any, op: str, right: Any) -> bool:
     op = op or "eq"
     fn = OPS.get(op)
     if fn is None:
-        raise ValueError(f"未知比较符: {op}")
+        raise ValueError(f"unknown compare op: {op}")
     try:
         return bool(fn(left, coerce_compare(left, right)))
     except TypeError:

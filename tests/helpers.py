@@ -5,6 +5,7 @@ import time
 from pathlib import Path
 from typing import Any
 
+from roboact.catalog import zh
 from roboact.executor import Executor, compute_stale
 from roboact.sse import SseHub
 from roboact.store import Store
@@ -37,7 +38,7 @@ def e(id: str, src: str, sp: str, dst: str, dp: str):
 def make_flow(nodes, edges, fid="fl_test", version=1):
     return {
         "id": fid,
-        "name": "测试",
+        "name": "test",
         "version": version,
         "format_version": 1,
         "nodes": nodes,
@@ -86,7 +87,7 @@ def loop_flow(compare=3, op="gte", inc_bp=None, fail=False):
 def confirm_flow():
     nodes = [
         n("start", "start", data={"v": 1}),
-        n("hc", "human_confirm", prompt="请确认"),
+        n("hc", "human_confirm", prompt=zh("confirm.default")),
         n("yes", "echo"),
         n("no", "echo"),
         n("out_yes", "output"),
@@ -146,7 +147,7 @@ def ctx(tmp_path: Path):
 def boot(store: Store, flow: dict) -> tuple[str, int]:
     body = {**flow, "id": new_id("fl_")}
     body.pop("flow_id", None)
-    g = store.create_flow(flow.get("name") or "测试", body)
+    g = store.create_flow(flow.get("name") or "test", body)
     fid = g["id"]
     for node in flow.get("nodes") or []:
         for when, spec in (node.get("breakpoints") or {}).items():

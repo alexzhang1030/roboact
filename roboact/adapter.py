@@ -11,6 +11,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from .catalog import en, zh
 from .util import now_iso
 
 ProgressFn = Callable[["Progress"], Awaitable[None] | None]
@@ -151,7 +152,7 @@ class Adapter:
     """Controller-specific implementation. The canvas never sees SDK vs ROS 2."""
 
     adapter_id: str = "adapter"
-    name: str = "适配器"
+    name: str = zh("adapter.generic")
     version: str = "0.2"
     target: Literal["sim", "real"] = "sim"
     action_list_version: str = "v0"
@@ -187,7 +188,7 @@ class Adapter:
         for d in self.list_actions():
             if d.id == action_id:
                 return d
-        raise KeyError(f"未知动作: {action_id}")
+        raise KeyError(f"unknown action: {action_id}")
 
     def status(self) -> str:
         if not self.connected:
@@ -412,7 +413,7 @@ class Adapter:
                 await self.send_goal(action_id, inputs, handle)
                 return await self._wait_async(handle, on_progress)
             if on_progress:
-                await _emit(on_progress, Progress(text="执行中"))
+                await _emit(on_progress, Progress(text=zh("adapter.running")))
             result = await self.run_blocking(action_id, inputs, handle)
             handle.done = True
             handle.result = result
@@ -432,7 +433,7 @@ class Adapter:
 
     async def get_result(self, handle: ExecuteHandle) -> ActionResult:
         if handle.result is None:
-            raise RuntimeError("结果还没有准备好")
+            raise RuntimeError("result not ready")
         return handle.result
 
     async def run_blocking(
@@ -443,11 +444,11 @@ class Adapter:
     async def cancel(self, handle: ExecuteHandle | None) -> CancelResult:
         if self.reject_next_cancel:
             self.reject_next_cancel = False
-            return CancelResult(accepted=False, reason="取消被拒")
+            return CancelResult(accepted=False, reason="cancel rejected")
         if handle is None:
-            return CancelResult(accepted=False, reason="没有可取消的动作")
+            return CancelResult(accepted=False, reason="nothing to cancel")
         if self.force_uncancellable or not handle.cancellable:
-            return CancelResult(accepted=False, reason="这个动作不能取消")
+            return CancelResult(accepted=False, reason="this action cannot be cancelled")
         handle.cancelled = True
         return CancelResult(accepted=True, post_cancel=handle.post_cancel)
 
@@ -544,32 +545,32 @@ FAKE_ACTIONS: list[ActionDescriptor] = [
     ActionDescriptor(
         id="fake_read_pose",
         version="fake-v1",
-        title="假·读位姿",
+        title=en("node.fake_read_pose"),
         name="Read pose",
-        labels={"en": "Read pose", "zh-CN": "假·读位姿"},
+        labels={"en": en("node.fake_read_pose"), "zh-CN": zh("node.fake_read_pose")},
         params=[],
         outputs=[
-            OutputSpec(name="pose", type="any", title="位姿"),
+            OutputSpec(name="pose", type="any", title="pose"),
         ],
         side_effect="read",
         return_mode="blocking",
         timeout_s=5,
         typical_s=0.05,
         cancel=CancelSpec(cancellable=True, post_cancel="hold"),
-        preconditions=[Precondition(text="仿真位姿可读")],
+        preconditions=[Precondition(text="sim pose readable")],
         read_state=False,
         expiry="controller",
-        side_effect_note="会读外部：读仿真位姿",
+        side_effect_note="reads sim pose",
         icon="node-output",
     ),
     ActionDescriptor(
         id="fake_set_pose",
         version="fake-v1",
-        title="假·到点",
+        title=en("node.fake_set_pose"),
         name="Go to pose",
-        labels={"en": "Go to pose", "zh-CN": "假·到点"},
+        labels={"en": en("node.fake_set_pose"), "zh-CN": zh("node.fake_set_pose")},
         params=[
-            ParamSpec(name="target", type="any", required=False, title="目标"),
+            ParamSpec(name="target", type="any", required=False, title="target"),
             ParamSpec(
                 name="x",
                 type="number",
@@ -598,30 +599,30 @@ FAKE_ACTIONS: list[ActionDescriptor] = [
                 title="Z",
             ),
         ],
-        outputs=[OutputSpec(name="pose", type="any", title="到达位姿")],
+        outputs=[OutputSpec(name="pose", type="any", title="pose")],
         side_effect="motion",
         return_mode="goal_progress",
         timeout_s=60,
         typical_s=0.4,
         cancel=CancelSpec(cancellable=True, post_cancel="hold", after="hold", method="cancel_goal"),
-        preconditions=[Precondition(text="仿真控制器已连接", check="connected")],
+        preconditions=[Precondition(text="sim controller connected", check="connected")],
         read_state=True,
         expiry="controller",
-        side_effect_note="会驱动仿真关节到目标点",
-        confirm_text="将在仿真里把末端移到目标点。",
+        side_effect_note="moves sim joints to the target",
+        confirm_text="Move the sim end-effector to the target pose.",
         icon="node-tool",
     ),
     ActionDescriptor(
         id="fake_gripper",
         version="fake-v1",
-        title="假·夹爪",
+        title=en("node.fake_gripper"),
         name="Gripper",
-        labels={"en": "Gripper", "zh-CN": "假·夹爪"},
+        labels={"en": en("node.fake_gripper"), "zh-CN": zh("node.fake_gripper")},
         params=[
-            ParamSpec(name="open", type="boolean", default=True, required=False, title="张开"),
-            ParamSpec(name="target", type="any", required=False, title="目标"),
+            ParamSpec(name="open", type="boolean", default=True, required=False, title="open"),
+            ParamSpec(name="target", type="any", required=False, title="target"),
         ],
-        outputs=[OutputSpec(name="open", type="boolean", title="张开")],
+        outputs=[OutputSpec(name="open", type="boolean", title="open")],
         side_effect="motion",
         return_mode="blocking",
         timeout_s=8,
@@ -629,21 +630,21 @@ FAKE_ACTIONS: list[ActionDescriptor] = [
         cancel=CancelSpec(
             cancellable=True, post_cancel="safe_pose", after="safe_pose", method="cancel_goal"
         ),
-        preconditions=[Precondition(text="夹爪未被锁定")],
+        preconditions=[Precondition(text="gripper not locked")],
         read_state=True,
         expiry="controller",
-        side_effect_note="会驱动仿真夹爪",
-        confirm_text="将在仿真里开合夹爪。",
+        side_effect_note="drives the sim gripper",
+        confirm_text="Open or close the sim gripper.",
         icon="node-tool",
     ),
     ActionDescriptor(
         id="fake_tick",
         version="fake-v1",
-        title="假·节拍",
+        title=en("node.fake_tick"),
         name="Tick",
-        labels={"en": "Tick", "zh-CN": "假·节拍"},
+        labels={"en": en("node.fake_tick"), "zh-CN": zh("node.fake_tick")},
         params=[],
-        outputs=[OutputSpec(name="n", type="number", title="节拍")],
+        outputs=[OutputSpec(name="n", type="number", title="tick")],
         side_effect="none",
         return_mode="blocking",
         timeout_s=5,
@@ -657,20 +658,20 @@ FAKE_ACTIONS: list[ActionDescriptor] = [
     ActionDescriptor(
         id="fake_camera",
         version="fake-v1",
-        title="假·相机",
+        title=en("node.fake_camera"),
         name="Camera",
-        labels={"en": "Camera", "zh-CN": "假·相机"},
+        labels={"en": en("node.fake_camera"), "zh-CN": zh("node.fake_camera")},
         params=[],
-        outputs=[OutputSpec(name="frame", type="image", title="画面")],
+        outputs=[OutputSpec(name="frame", type="image", title="frame")],
         side_effect="read",
         return_mode="blocking",
         timeout_s=5,
         typical_s=0.08,
         cancel=CancelSpec(cancellable=True, post_cancel="hold"),
-        preconditions=[Precondition(text="仿真相机可用")],
+        preconditions=[Precondition(text="sim camera available")],
         read_state=False,
         expiry="adapter_only",
-        side_effect_note="会读外部：生成一张测试图，不写盘",
+        side_effect_note="reads a generated test frame; does not write disk",
         icon="node-model",
     ),
 ]
@@ -680,7 +681,7 @@ class FakeAdapter(Adapter):
     """In-memory sim adapter. Actions are fixtures named fake_*. No real controller."""
 
     adapter_id = "fake"
-    name = "假适配器"
+    name = zh("adapter.fake")
     version = "0.2"
     target = "sim"
     action_list_version = "fake-v1"
@@ -805,7 +806,7 @@ class FakeAdapter(Adapter):
                         return
                     handle.progress = Progress(
                         percent=round((i + 1) / self.async_steps * 100),
-                        text=f"到点 {i + 1}/{self.async_steps}",
+                        text=zh("adapter.pose_progress").format(i=i + 1, n=self.async_steps),
                     )
                     await asyncio.sleep(float(getattr(self, "async_sleep_s", 0.04) or 0.04))
                 handle.result = self._commit_write(

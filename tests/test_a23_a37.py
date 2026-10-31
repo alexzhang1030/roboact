@@ -113,7 +113,7 @@ def test_a31_rejected_missing_timeout_and_write_side_effect():
     adapter.extra_raw_actions = [
         {
             "id": "broken_timeout",
-            "title": "缺超时",
+            "title": "missing timeout",
             "return_mode": "blocking",
             "outputs": [{"name": "ok", "type": "any"}],
             "side_effect": "none",
@@ -121,7 +121,7 @@ def test_a31_rejected_missing_timeout_and_write_side_effect():
         },
         {
             "id": "broken_write",
-            "title": "非法写",
+            "title": "illegal write",
             "return_mode": "blocking",
             "timeout_s": 5,
             "outputs": [{"name": "ok", "type": "any"}],
@@ -137,7 +137,7 @@ def test_a31_rejected_missing_timeout_and_write_side_effect():
     by_id = {r["id"]: r for r in rejected}
     assert "broken_timeout" in by_id
     assert "timeout_s" in by_id["broken_timeout"]["missing"]
-    assert "缺" in by_id["broken_timeout"]["reason"]
+    assert "missing" in by_id["broken_timeout"]["reason"]
     assert "broken_write" in by_id
     assert "side_effect" in by_id["broken_write"]["missing"]
     assert "write" in by_id["broken_write"]["reason"]

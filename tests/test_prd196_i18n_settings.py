@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import pytest
 from roboact import ADAPTER_HEARTBEAT_S, UI_LOST_TIMEOUT_S
+from roboact.catalog import zh
 
 from tests.http_api import http_json, motion_graph, put_flow
 from tests.test_prd195_theme_contrast_fonts import _browser, _goto_ready, _wired_page
@@ -26,12 +27,12 @@ def test_prd196_default_locale_from_navigator(server):
         page.locator('[data-lang-mode="zh-CN"]').click()
         page.wait_for_function("() => document.documentElement.dataset.lang === 'zh-CN'")
         assert page.evaluate("() => localStorage.getItem('roboact.lang')") == "zh-CN"
-        assert "运行" in page.locator(".slot-1").inner_text()
+        assert zh("run.start") in page.locator(".slot-1").inner_text()
         page.reload(wait_until="domcontentloaded")
         page.wait_for_function("window.__ready === true", timeout=20000)
         assert page.evaluate("() => localStorage.getItem('roboact.lang')") == "zh-CN"
         assert page.evaluate("() => document.documentElement.dataset.lang") == "zh-CN"
-        assert "运行" in page.locator(".slot-1").inner_text()
+        assert zh("run.start") in page.locator(".slot-1").inner_text()
         assert blocked == []
         br.close()
     finally:
@@ -47,7 +48,7 @@ def test_prd196_zh_navigator_first_load_is_chinese(server):
         _goto_ready(page, server["base"] + "/")
         assert page.evaluate("() => localStorage.getItem('roboact.lang')") in (None, "system")
         assert page.evaluate("() => document.documentElement.dataset.lang") == "zh-CN"
-        assert "运行" in page.locator(".slot-1").inner_text()
+        assert zh("run.start") in page.locator(".slot-1").inner_text()
         br.close()
     finally:
         p.stop()
@@ -317,7 +318,8 @@ def test_prd198_codes_survive_language_switch(server):
             timeout=15000,
         )
         assert any(
-            "运行" in w or "中断" in w for w in page.locator(".fn-st-word").all_inner_texts()
+            zh("status.running") in w or zh("status.interrupted") in w
+            for w in page.locator(".fn-st-word").all_inner_texts()
         )
         os.kill(server["proc"].pid, 9)
         server["proc"].wait(timeout=5)
@@ -371,7 +373,7 @@ def test_prd198_codes_survive_language_switch(server):
         page.wait_for_timeout(80)
         words = page.locator(".fn-st-word").all_inner_texts()
         assert any("Interrupted" in w for w in words), words
-        assert not any("中断" in w for w in words), words
+        assert not any(zh("status.interrupted") in w for w in words), words
         body = page.inner_text("body")
         assert "Redo this step" in body or "Mark done" in body, body[:800]
         br.close()
