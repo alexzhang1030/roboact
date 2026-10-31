@@ -163,13 +163,14 @@ def cycle_exit_errors(flow: dict[str, Any]) -> list[str]:
         if not has_exit:
             if not conds:
                 errors.append(
-                    f"这个环没有条件判断节点作出口（节点 {names}）。"
-                    "请加入条件判断节点，并将其「是」或「否」连到环外。"
+                    f"this loop has no condition exit (nodes {names}). "
+                    "add a condition node and wire yes or no out of the loop"
                 )
             else:
                 errors.append(
-                    f"环中有条件节点（{', '.join(sorted(conds))}），"
-                    f"但其「是」「否」都未连到环外（节点 {names}）。"
+                    "loop has condition node(s) ("
+                    + ", ".join(sorted(conds))
+                    + f") but yes/no are not wired out of the loop (nodes {names})"
                 )
     return errors
 
@@ -289,7 +290,7 @@ def types_compatible(src_t: str, dst_t: str) -> bool:
 def validate_for_run(flow: dict[str, Any]) -> list[str]:
     errors = list(cycle_exit_errors(flow))
     if not any(n.get("type") == "start" for n in flow.get("nodes") or []):
-        errors.append("流程缺少「开始」节点。")
+        errors.append("flow is missing a start node")
     return errors
 
 

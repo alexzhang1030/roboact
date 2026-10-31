@@ -1,433 +1,55 @@
-# 界面规格 v0：Agent 流程画布（第一期 flow，Vue Flow 1.48.2）
+# UI spec
 
-日期：2026-10-31　负责：Rams · Design　实现：Torvalds · Eng
-依据：PRD v1.3 第 3、5、5.1、8 节；Thompson 执行模型 `/workspace/agent-ui/exec-model-v0.md`（状态值、暂停原因、端点）；Torvalds 评估 `/workspace/agent-ui/flow-lib-eval-2026-10-31.md`；截图 `/workspace/agent-ui/spike/shots/vueflow-demo-after-connect.png`。
+Canvas + top bar + palette + inspector. Status words and chrome come from `web/i18n/*.js`. Backend sends codes.
 
-用户在画布上搭一串预先写好的节点，想看出哪一步错、错在哪个输入，然后只重跑那一步或那一组。
-难处：每个节点都带状态、断点、输入来源和轮次，画布不能因此变乱。所以节点上只放判断「要不要点开」所需的东西，其余都在右侧面板。
+**Themes:** light / dark / follow system (`roboact.theme`). Fonts: Inter (UI), JetBrains Mono (values), system CJK. Formula: `docs/design/contrast.py`. Text ≥ 4.5:1; chrome ≥ 3:1.
 
-## 0. 测试页上要改的（vueflow-demo-after-connect.png）
+**Language:** follow browser / English / Chinese (`roboact.lang`). First `zh*` in `navigator.languages` → Chinese, else English. Missing zh key falls back to English.
 
-1. 一个节点同时显示三种状态：圆点、英文状态词、正文里的中文。三者还互相矛盾（节点 C 写 done，正文写「运行中」；节点 E 写 paused，正文写「完成」）。状态只保留一处：标题行右侧的「图标 + 中文词」。
-2. 状态只靠圆点颜色区分，转成灰度后分不清。每种状态要有不同的图标形状（见第 3 节）。
-3. 回边用了琥珀色。琥珀色留给「停住、不是出错」（断点暂停、步数上限），回边改成中性灰虚线。
-4. 回边标签仍是「第 3 轮 / 上限 10」，改成只写「第 3 轮」，上限只在顶栏出现。
-5. 状态词用英文（idle、running），界面统一用中文。
+**Connection drop (top bar):**
 
-## 1. 布局
+- `operator_lost` → Paused · page disconnected
+- `adapter_lost` → Paused · robot controller lost (Continue off while disconnected)
 
-```
-┌ 顶栏 44px ────────────────────────────────────────────────────────┐
-│ 流程名 · v12        [运行] [继续] [单步] [停止]     步数 37 / 上限 N  ● 已连接 │
-├ 左栏 220px ┬──────────── 画布 ───────────────────┬ 右侧面板 360px ─┤
-│ 节点类型列表 │                                     │ 选中节点的        │
-│ （可折叠）  │                                     │ 输入 输出 参数 记录 │
-└───────────┴─────────────────────────────────────┴────────────────┘
-```
+Stop is not e-stop. Images only on the Output tab. Layout mockups: [design/](design/).
 
-- 顶栏高 44px。左边：流程名、当前版本号。中间：运行控制。右边：步数和上限、和服务端的连接状态（SSE 断开时显示「重连中」）。
-- 运行控制固定三个位置，按钮不因状态变化而挪位置，不可用的置灰，不隐藏：
+### 17.3 Tokens
 
-| 运行状态 | 第 1 位 | 第 2 位 | 第 3 位 |
+| token | use | light | dark |
 |---|---|---|---|
-| 没在跑（空闲、已完成、已停止、出错、超出步数上限） | 运行 | 单步（灰） | 停止（灰） |
-| 运行中 | 暂停 | 单步（灰） | 停止 |
-| 暂停（任何原因） | 继续 | 单步 | 停止 |
-| 等待人工确认 | 继续（灰） | 单步（灰） | 停止 |
+| `--bg` | canvas | `#F6F6F4` | `#141413` |
+| `--grid` | grid dots | `#E2E2DD` | `#2A2A27` |
+| `--surface` | panels, nodes | `#FFFFFF` | `#1E1E1C` |
+| `--surface2` | code, disabled | `#FAFAF8` | `#232321` |
+| `--text` | body | `#1A1A18` | `#ECECE8` |
+| `--muted` | secondary | `#5C5C57` | `#A3A39C` |
+| `--border` | node stroke | `#C9C9C3` | `#3D3D39` |
+| `--control` | control stroke | `#85857F` | `#73736C` |
+| `--edge` | edges, ports | `#8A8A84` | `#77776F` |
+| `--hair` | rules | `#E6E6E1` | `#2E2E2B` |
+| `--blue` | running, primary | `#1F6FEB` | `#4C8DF6` |
+| `--green` | done | `#1A7F37` | `#3FB950` |
+| `--red` | error, adapter lost | `#C62828` | `#F06A6A` |
+| `--amber` | pause, unknown | `#8F6000` | `#D4A72C` |
+| `--redsoft` | error wash | `#FBEAEA` | `#3A2222` |
+| `--ambersoft` | pause wash | `#FBF3E0` | `#3A3020` |
+| `--onblue` | on primary | `#FFFFFF` | `#0B1220` |
 
-  第 1 位的按钮在「运行」「暂停」「继续」之间换字，宽度按最长的字固定，换字时不跳。运行中点「暂停」，正在执行的节点会跑完再停，按钮立刻变成「暂停中…」（灰），等 `paused` 事件到了再变成「继续」。「暂停中…」只是前端显示；后端在发出 `paused` 之前一直是 `running`，所以这段时间右边的运行状态词仍写「运行中」。
-- 运行目标：不做切换按钮（Steve 10-31）。接的是哪个 adapter 就是哪个目标，假的 adapter 就是仿真；顶栏流程名右边写 adapter 的名字，用次要文字色；adapter 报自己是真机时，名字后再加 1px 红框小标签「真机」，22px 高，12px 字。这个判断要 adapter 整体报一个「仿真 / 真机」字段，不能从名字猜。
-- 运行状态写在控制按钮右边，一个词：运行中、已暂停 · 断点 / 单步 / 手动 / 服务重启后 / 等待确认 / 写入超时 / 动作超时 / 页面断开 / 机器人控制器断开 / 记录写不进去、已完成、已停止、出错、超出步数上限。「服务重启后」「等待确认」「写入超时」「记录写不进去」都是「已暂停」加原因（`pause.reason` 为 `restart` / `approval` / `write_timeout` / `motion_timeout` / `operator_lost` / `adapter_lost` / `storage_error`），不是单独的运行状态。颜色规则和节点相同：暂停和超出步数上限用琥珀，出错、「已暂停 · 记录写不进去」和「已暂停 · 机器人控制器断开」用红，其余用次要文字色。
-- 左栏宽 220px，可以折叠成 0。列出节点类型，拖到画布上添加。双击画布空白处也能弹出同一份列表并搜索。
-- 右侧面板宽 360px，可以拖动调宽，最小 320px。没选中节点时显示这次运行的概况（开始时间、总步数、出错的节点列表，点一项跳到该节点）。
-- 提示条：顶栏下方，每条 36px 高，最多叠两条，新的在上。左边是文字，右边最多一个按钮。不自动消失，处理完才收起。
-  - 版本锁定：画布在运行中被改动时，顶栏下方出现一条 36px 高的提示条：「画布已改，这次运行仍按 v12。」右边一个按钮「从新版本重跑」（按 Thompson 的规格，从头开一次新运行）。中性底色，因为这不是错误。
-  - 等待人工确认：「「<节点名>」在等你确认。」右边两个按钮「驳回」「通过」，「通过」是主按钮。琥珀色左边线 3px，其余中性。同样的两个按钮也出现在右侧面板顶部，两处点哪个都行。右侧面板里按钮上方有一个单行输入框「说明（可不填）」，PRD 3 第 12.1 步要求可以附一句话。
-  - 运行记录写不进去（`storage_error`）：「运行记录写不进去：<错误原文>。运行已暂停。」右边按钮「继续」。红色左边线 3px，因为这一条要用户处理。
-  - 另一个页面先操作了（409 `pause_mismatch`）：不用提示条。在控制按钮下方出现一行 12px 文字「另一个页面已经继续了这次运行。」，4 秒后淡出；页面同时按服务端状态刷新。这类提示会自动消失，因为它们不需要用户做任何事。
-  - 停在人工确认上还发了继续或单步（409 `awaiting_approval`）：正常情况下按钮已置灰，F5、F10 在前端也不发请求，所以只会在另一个页面或旧状态下碰到。处理同上：控制按钮下方一行 12px 文字「这一步在等人工确认，先通过或驳回。」，4 秒后淡出，页面按服务端状态刷新。
-  - write 节点超时（`pause.reason = write_timeout`）：顶栏状态词「已暂停 · 写入超时」，琥珀。节点显示「中断 · 结果未知」，右侧面板写明外部可能已写入、继续时会带同一个幂等键重试。不加提示条。
-  - SSE 断开：顶栏右侧的连接状态变成「重连中」，运行控制全部置灰，直到重连并补完事件。不用提示条。
+### 17.4 Contrast (`design/contrast.py`)
 
-## 2. 节点
-
-- 宽度固定 240px，不随内容变宽。高度由端口数决定，缩放时不改变（Torvalds 实测：缩放时改变节点尺寸会让 500 个节点全部重新测量，每次 250–297 ms）。
-- 圆角 6px，边框 1px。内边距左右 12px。
-- 标题行高 32px：左边是副作用标记（如有）和节点名（14px，字重 600），右边是状态图标加状态词（12px）。
-- 端口行每行 24px：输入端口在左边，输出端口在右边。端口名 12px，端口圆点直径 8px。
-- 节点上不放参数。参数在右侧面板里编辑。
-- 边框永远是 1px，任何状态都不改 `border-width`（Torvalds 实测：1px 改 2px 时 500 个节点全部重新测量，最长长任务 249 ms，见第 14 节）。
-- 选中：`outline: 2px solid var(--blue); outline-offset: 2px`，画在节点外面。
-- 状态加粗（暂停、出错）：边框只改颜色，再加 `box-shadow: inset 0 0 0 1px <同色>`，画在节点里面。这样节点既选中又出错时，外圈蓝、内圈红，两样都看得见。
-
-### 缩放分级
-
-| 缩放 | 显示 |
-|---|---|
-| ≥ 0.6 | 全部 |
-| < 0.6 | 只剩标题、状态图标。端口名和状态词用 `visibility:hidden` 隐藏，尺寸不变 |
-
-0.6 是 Torvalds 测试页用的分界线，沿用。
-
-## 3. 运行状态
-
-每种状态用「图标形状 + 中文词 + 边框颜色」三样一起表示。转成灰度后靠图标形状仍能分清（PRD 验收第 10 条）。
-
-| 状态 | 图标 | 词 | 边框 | 其他 |
-|---|---|---|---|---|
-| 空闲 | 空心圆 | 空闲 | 默认灰 | |
-| 排队 | 三个点 | 排队 | 默认灰 | |
-| 运行 | 旋转的四分之一圆弧 | 运行中 | 蓝 | 只有这个图标在动 |
-| 停在断点 | 竖双线（暂停） | 已暂停 · 执行前 / 执行后 | 琥珀，加粗 | |
-| 完成 | 对勾 | 完成 · 1.2 s | 默认灰 | 耗时跟在后面。完成不加绿色边框：一张跑完的图应该是安静的 |
-| 出错 | 叉 | 出错 | 红，加粗 | 标题行下多一行错误摘要（一行，超出截断，完整的在右侧面板） |
-| 跳过 | 斜杠圆 | 跳过 | 默认灰，虚线 | |
-
-表里的「加粗」指第 2 节的内圈 box-shadow，不改边框宽度。完成用对勾的绿色图标，但边框不变。整张图跑完时，眼睛只该被出错和暂停的节点吸引。
-
-### 3.1 执行器另外会产生的状态
-
-| 状态值 | 图标 | 词 | 边框 | 说明 |
-|---|---|---|---|---|
-| `stopped` | 方块 | 已停止 | 默认灰 | 用户点了停止。安静，不是错误 |
-| `interrupted` | 回转箭头 | 中断 | 默认灰 | 只在服务崩溃时出现：不动机器人的节点（`side_effect` 为 none 或读传感器）执行到一半被打断，重启后继续时自动重跑。用户点停止得到的是「已停止」，运行就此结束，不会自动重跑 |
-| `interrupted_unknown` | 问号 | 中断 · 结果未知 | 琥珀，加粗 | 两种来源。① `motion` 节点（会让机器人动的动作）被超时、控制器断开或服务崩溃打断：不自动重跑。右侧面板先显示读回的机器人状态，再给两个按钮「重做这一步」「当作已做完」（对应 `retry` / `mark_done`），旁边是停止；读回前两个按钮置灰，写「正在读机器人状态…」。② 测试用 `write` 节点被崩溃或超时打断：右侧面板写「继续时会带同一个幂等键重试，外部服务按这个键去重。」幂等键：同一个操作每次带同一个编号，服务收到重复编号就不再执行一次 |
-| `awaiting_approval` | 沙漏 | 等待确认 | 琥珀，加粗 | 人工确认节点。和断点暂停的图标不同，灰度下也分得清；操作在顶栏下的提示条和右侧面板 |
-| 服务重启后的暂停 | 竖双线 | 已暂停 | 琥珀，加粗 | 节点上和断点暂停完全一样；原因只写在顶栏「已暂停 · 服务重启后」 |
-| 超时 | 叉 / 问号 | 出错 或 中断 · 结果未知 | 红 / 琥珀，加粗 | 不是单独的状态。普通节点超时记为「出错」，摘要写「超时（60 s）」；`write` 节点超时记为「中断 · 结果未知」，摘要写「超时（60 s），外部可能已写入」（PRD v1.3.2 第 3 节第 5 步） |
-
-运行级别的「已停止」只出现在顶栏的状态词里，不改画布。
-
-「超出步数上限」不在节点上显示，因为总步数不属于任何一个节点。顶栏的步数变成琥珀色，写「停 · 步数 N / 上限 N」，右侧面板概况里写出最后一步是哪个节点。
-
-## 4. 断点
-
-- 节点左边缘 12px 宽的区域是「执行前」断点位，右边缘是「执行后」断点位。悬停时出现浅红色圆点提示可以点，点一下变成实心红点（直径 10px），再点取消。
-- 条件断点（「只在第 N 轮停」或「字段满足条件时停」）：右键红点打开设置，设好后红点中间多一条白色横线。悬停红点显示条件内容。
-- 快捷键沿用 VS Code 的调试键位，开发者不用另学：F9 切换断点，F5 运行 / 继续，F6 暂停，F10 单步，Shift+F5 停止（[VS Code 调试文档](https://code.visualstudio.com/docs/debugtest/debugging)）。
-
-## 5. 输入来源（入口端口）
-
-| 来源 | 端口画法 | 端口旁文字 |
-|---|---|---|
-| 真实上游 | 实心圆，灰 | 无 |
-| 缓存 | 空心圆 | 缓存 · 10-31 15:42 · 第 2 轮 |
-| 可能过期的缓存 | 空心圆加斜线 | 缓存 · 上游已改（悬停列出改过的上游节点） |
-| 手动固定 | 实心圆加图钉 | 已固定（点图钉取消） |
-| 手填 | 实心小方块 | 手填 |
-| 固定了但这次没用（跑整条时） | 实心圆加图钉，次要文字色 | 本次未用固定值 |
-
-「可能过期」不用红色，红色只给出错。文字用 12px 次要文字色。
-
-单跑一个节点时，右侧面板「输入」页顶部有一个下拉框，按「运行时间 · 第几轮」一行一条列出可用的输入，默认选最近一轮。下方是两个按钮：「只跑这个」（主按钮）和「固定这份输入」。
-
-## 6. 连线
-
-- 数据边：1.5px 灰色实线。
-- 正在传数据的边：蓝色，虚线流动动画（`stroke-dashoffset`），只在数据发出到下游开始执行这段时间里动。其余边全部静止。
-- 回边：1.5px 灰色虚线，从节点下方绕回去。线中间的标签写「第 3 轮」，指的是回边指向的那个节点已执行到第几次。
-- 选中的边：2px 蓝色。
-- 悬停一条边，显示它最近一次传过的数据（前 200 个字符），以及「在右侧面板打开」。
-- 端口类型不同时，拖线过程中目标端口变灰，不能连。不等松手后再报错。
-
-## 7. 分组
-
-- 框选后按「成组」或 Ctrl+G 生成分组框：1px 灰色虚线，圆角 8px，左上角是组名，右上角是「跑这一组」按钮。
-- 从组外连进来的线，在框的边上显示成入口端口，画法和第 5 节相同，可以固定。
-- 组里包含的是环的一部分时，回边在框上也显示成入口，旁边写「回边 · 第 N 轮」。
-
-## 8. 副作用
-
-- `write` 节点：标题前放一个向外的箭头图标（↗），悬停说明「会写外部：发邮件」之类，文字由节点类型声明。
-- `read` 节点不加标记，免得画布上到处都是图标。重放时它的输入、输出旁会出现「缓存」字样。
-- 重放时 `write` 节点状态词后面加「· 模拟」。右侧面板里有一个「真执行」按钮，点了会弹出确认框，写明会发生什么（例如「向 xxx@example.com 发一封邮件」），确认后才执行。
-
-## 9. 环与轮次
-
-- 节点上只显示最近一轮的状态。
-- 右侧面板顶部有轮次切换（「‹ 第 3 轮 / 共 5 轮 ›」），切换后下方的输入、输出、耗时跟着变。
-- 单步走过回边时，回边标签的数字加一，右侧面板的轮次跟着加一。
-
-## 10. 颜色
-
-两套主题都用 CSS 变量，在 `:root` 和 `[data-theme="dark"]` 上切换。对比度按 WCAG 计算：文字至少 4.5:1；状态边框和图标至少 3:1（[WCAG 2.2 非文字对比度](https://www.w3.org/WAI/WCAG22/Understanding/non-text-contrast.html)）。下面的对比度是我算出来的，第一个数对画布背景，第二个数对节点底色。
-
-| 变量 | 浅色 | 对比度 | 深色 | 对比度 | 用途 |
-|---|---|---|---|---|---|
-| `--bg` | #F6F6F4 | | #141413 | | 画布背景 |
-| `--grid` | #E2E2DD | | #2A2A27 | | 点阵，间距 20px，点 1px |
-| `--surface` | #FFFFFF | | #1E1E1C | | 节点、面板 |
-| `--text` | #1A1A18 | 16.11 / 17.43 | #ECECE8 | 15.56 / 14.10 | 正文、标题 |
-| `--muted` | #5C5C57 | 6.21 / 6.72 | #A3A39C | 7.26 / 6.58 | 次要文字、端口名 |
-| `--border` | #C9C9C3 | 1.54 / 1.66 | #3D3D39 | 1.69 / 1.53 | 空闲节点边框（节点靠文字识别，这条线只起分隔作用） |
-| `--edge` | #8A8A84 | 3.21 / 3.47 | #77776F | 4.08 / 3.70 | 连线 |
-| `--blue` | #1F6FEB | 4.28 / 4.63 | #4C8DF6 | 5.66 / 5.13 | 运行、选中、主按钮 |
-| `--green` | #1A7F37 | 4.69 / 5.08 | #3FB950 | 7.26 / 6.57 | 完成图标 |
-| `--red` | #C62828 | 5.20 / 5.62 | #F06A6A | 6.12 / 5.55 | 出错、断点 |
-| `--amber` | #9A6700 | 4.50 / 4.87 | #D4A72C | 8.22 / 7.44 | 暂停、步数上限 |
-
-主题之外不再加别的颜色。节点类型不按颜色区分，按图标和名字区分。
-
-## 11. 字体
-
-- 界面文字用系统字体栈：`system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", "Noto Sans CJK SC", sans-serif`。系统自带，不用放进仓库，离线也能用。
-- 数据（输入输出 JSON、耗时、步数、轮次）用等宽字体：JetBrains Mono（OFL 许可），woff2 文件放进仓库，记进依赖清单。
-- 字号只用四档：12、13、14、16px。正文 13px，行高 1.5。
-
-## 12. 间距和尺寸
-
-- 间距只用 4 的倍数：4、8、12、16、24。
-- 按钮高 28px（顶栏）和 32px（面板主按钮），圆角 4px。
-- 点阵背景 20px 间距，吸附网格也用 20px。
-
-## 13. 不要出现的
-
-- 发光、渐变、毛玻璃、多层阴影。节点只能有一层很浅的阴影（`0 1px 2px rgb(0 0 0 / .06)`），深色主题下不加阴影。
-- 所有连线一直流动的动画。
-- 节点上堆参数。
-- 只靠颜色区分状态。
-- 用透明度表示「跳过」或「禁用」。透明度会把文字对比度拉到 4.5:1 以下。
-- 缩放时改变节点尺寸。
-- 小地图默认关闭，放在右下角，按 M 打开。测试页上它一直开着，还遮住了节点 F。
-
-## 14. 需要实现时回答的
-
-- @Torvalds · Eng：选中态用 `outline` 加粗还是 `box-shadow`，哪个在 Vue Flow 里不触发重新测量。
-- 图标已出，见第 15 节。节点清单如果有变，我再补。
-
-### 实测（Torvalds）
-
-结论：**`outline` 和 `box-shadow` 都不会触发重新测量，两个都能用。** 会触发重新测量的是改变节点尺寸的写法，比如边框从 1px 加粗到 2px。
-
-测法：500 个节点，在节点内容 `.sn` 上切换选中 class，开 3 次、关 3 次，共切 6 次。一次切全部 500 个，一次只切 1 个。包装 ResizeObserver 记回调次数，用 `onNodesChange` 数 `dimensions` 变更，用 PerformanceObserver 记长任务。环境是 headless Chrome，离线，console 零错误。
-
-| 写法 | 切换范围 | RO 回调 | 节点重新测量 | 长任务 |
-|---|---|---|---|---|
-| (a) `outline: 2px solid` | 全部 / 1 个 | 0 / 0 | 0 / 0 | 0 / 0 |
-| (b) `box-shadow: 0 0 0 2px` | 全部 / 1 个 | 0 / 0 | 0 / 0 | 0 / 0 |
-| (c) 对照：边框 1px→2px | 全部 | 6 | 3000（每次 500） | 6 个，最长 249 ms，合计 1384 ms |
-| (c) 对照：边框 1px→2px | 1 个 | 6 | 6 | 0 |
-
-- 测量位置（@vue-flow/core 1.48.2）：
-  - 每个节点的外层 `.vue-flow__node` 都挂在同一个 ResizeObserver 上（[NodeWrapper.ts L183](https://github.com/bcakmakoglu/vue-flow/blob/%40vue-flow/core%401.48.2/packages/core/src/components/Nodes/NodeWrapper.ts#L183)）。
-  - 这个 Observer 一触发，就带着 `forceUpdate: true` 调用 `updateNodeDimensions`（[NodeRenderer.vue L26-38](https://github.com/bcakmakoglu/vue-flow/blob/%40vue-flow/core%401.48.2/packages/core/src/container/NodeRenderer/NodeRenderer.vue#L26-L38)）。
-  - `updateNodeDimensions` 定义在 [actions.ts L128](https://github.com/bcakmakoglu/vue-flow/blob/%40vue-flow/core%401.48.2/packages/core/src/store/actions.ts#L128)。它用 `offsetWidth/offsetHeight` 量尺寸（[graph.ts L43-45](https://github.com/bcakmakoglu/vue-flow/blob/%40vue-flow/core%401.48.2/packages/core/src/utils/graph.ts#L43-L45)），然后用 `getBoundingClientRect` 重算端口位置。
-  - 在 vendor 文件 `spike/vueflow/vendor/vue-flow-core.mjs` 里，对应位置是 L9782（Observer）、L6305（`updateNodeDimensions`）、L3500（`getDimensions`）。
-- outline 和 box-shadow 不参与排版，节点尺寸不变，ResizeObserver 不会触发。
-- 注意：如果把加粗的边框直接写在外层 `.vue-flow__node` 上，实测 Observer 也不触发（0 次）。但推断这是因为 ResizeObserver 默认只看内容区，而 Vue Flow 量的是包含边框的 `offsetHeight`，所以存下的尺寸会差 2px，端口位置也可能跟着偏。所以不要用边框表示选中。
-- 复现：`spike/run_select.py`，结果在 `spike/results_select.json`。
-
-## 15. 图标
-
-文件在 `/workspace/agent-ui/icons/`，预览图是 `icons/preview.png`。全部是 16×16 的 SVG，线宽 1.5，圆头圆角，颜色用 `currentColor`。现在共 21 个。CSS 设 `color` 就能换色，深浅主题共用一套文件。图标是我画的，没有用第三方图标库，不用写进依赖清单。
-
-- 节点类型（9 个，对应 `/workspace/prd/node-list-v0.md`）：`node-start` 三角、`node-output` 箭头到竖线、`node-constant` 方框里一横、`node-template` 花括号、`node-model` 四角星、`node-tool` 扳手、`node-condition` 菱形、`node-merge` 两线合一、`node-approval` 人加对勾。
-- 运行状态（7 个，对应第 3 节）：`state-idle` 空心圆、`state-queued` 三点、`state-running` 浅色整圆上一段四分之一弧（只有这个图标旋转，周期 1 s，线性）、`state-paused` 竖双线、`state-done` 对勾、`state-error` 叉、`state-skipped` 斜杠圆。
-- 新加 4 个（对应第 3.1 节）：`state-stopped` 方块、`state-interrupted` 回转箭头、`state-unknown` 问号、`state-awaiting` 沙漏。
-- `mark-write`：写外部的副作用标记，放在标题前。「工具调用」节点的工具在运行时才定，所以只要它允许调用的工具里有一个是 `write`，标题前就放这个标记（按 Thompson 规格 2.4 节）。
-- 用法：节点类型图标放在标题最前面，颜色用 `--muted`。状态图标颜色跟着状态走：完成 `--green`，出错 `--red`，暂停 `--amber`，运行 `--blue`，其余 `--muted`。
-- 系统设置了「减少动态效果」时（`prefers-reduced-motion: reduce`），运行图标不转，连线也不流动，运行中只靠蓝色和「运行中」三个字表示。
-
-## 16. 节点从 adapter 生成以后（v0.2 草稿，依据 PRD v1.4 草稿和群里 10-31 Tedrake、Thompson 的说明）
-
-- **节点面板**：顶上一行写「来自控制器 · 拉取于 HH:MM」，右边一个刷新按钮。另外三种情况：正在加载（灰字「正在读取动作列表」，不画骨架块）；控制器没连上（「未连上机器人控制器」，流程能打开，运行按钮置灰，悬停说原因）；列表为空（「控制器没有报出任何动作」）。手写的控制节点（开始、输出、常量、条件判断、合并、人工确认，按 PRD v1.4.2 第 5.2 节）单独放一组，不受这几种情况影响。
-- **动作已不存在**：控制器更新后少了某个动作，用到它的节点照样留在画布上，边框改成 1px 红色虚线，标题后面写「动作已不存在」，图标用问号。它和运行时「出错」不是一回事，所以不用红底，也不显示错误摘要。运行前检查到这种节点，顶栏不允许开始运行，并在旁边写「有 N 个节点的动作已不存在」，点这行字会定位到第一个这样的节点。
-- **参数表单**：字段和类型从接口自动生成。手写表里写了范围和单位的，单位直接跟在输入框里，比如「0.5 m」；没写范围的，输入框下方用次要文字写「控制器没给范围」，不要编一个默认范围出来。
-- **会不会动机器人**：手写表里标了「会动」的动作，或者表里根本没写这个动作，标题前都加 ↗ 标记（沿用第 8 节的 write 标记），悬停文字改成「会让机器人动」。
-- **取消被拒**：点了停止，但控制器拒绝取消时，节点仍显示运行中，状态词后面加「· 取消被拒」，琥珀色。顶栏的运行状态词改成「停止被拒」，旁边加一句「机器人仍在执行，需要急停请用硬件」。不提供重试取消的按钮以外的任何操作，重试按钮就是再按一次停止。
-- **运行记录保留**（Alex 10-31：运行日志保留）：上一版写的「上次运行已丢失」提示条和拿掉 `storage_error` 两条作废。重启后怎么显示，等 Thompson 的执行模型定了再改，在那之前照第 1 节和第 3.1 节。
-- **相机画面是一个节点**（Alex 10-31）：相机节点的输出是一张图。画布上的节点卡片不放缩略图，尺寸照第 2 节不变；输出端口名后写「图像 · 640×480」这类尺寸（数字来自实际输出）。右侧面板「输出」标签按面板宽度显示整张图，图下写拍摄时间、第几轮、第几步。悬停在连线上时，预览写「图像 · 宽×高 · 拍摄时间」，不显示图片本身。下游节点的输入来源下拉里同样按时间列出每一张。
-- **动作的进度**（Alex 10-31：返回方式按动作而定）：动作如果报进度，运行中的节点状态词写「运行中 · 40%」或最近一条反馈的原文（截到一行）；不报进度的只写「运行中 · 12 s」，按秒计时。两种都不画进度条，节点尺寸不变。
-
-
-### 16.x 停止按钮（按 Thompson embodied-exec-v0 第 3 条，10-31）
-- 「停止」是让机器人停在原地，电机保持供电，不等于急停。按钮悬停文字：「停在原地，电机不断电。急停请用硬件按钮。」
-- 画布上不放任何叫「急停」的按钮或图标。
-- 待定：如果 Alex 定浏览器在另一台电脑上打开，后端要加认证，需要补一屏登录页；定了再画。
-
-### 16.y adapter 字段与到期标记（按 Tedrake 10-31）
-- 红框「真机」只看 adapter 报的 `target`（Tedrake 定的字段名，Torvalds 已改），不从名字猜。
-- 动作说明里写「到期只靠 adapter」（控制器没有到期参数）的动作：参数表单底部一行 12px 琥珀色字「控制器不接受到期时间，后端卡住时这一步停不下来」；画布节点上不加标记，免得和 ↗ 叠在一起。
-
-### 16.z 新增暂停原因（按 Torvalds 10-31）
-- 「已暂停 · 页面断开」：琥珀色。页面看到时说明已重连，顶栏照常显示，可直接继续。
-- 「已暂停 · 机器人控制器断开」：红色（同「记录写不进去」），继续按钮置灰到控制器回来。
-- 绑非本机地址时要令牌：页面收到 401 时整屏只显示一个输入框「访问令牌」和「连接」按钮，不做账号登录页。
-
-### 16.w 等前提条件（按 exec-model v0.2.1 第 2.5.5 节，10-31）
-- 动作在发目标前等 `precondition_wait_s`：节点状态词写「运行中 · 等待前提条件」，蓝色，和运行中同色，不加倒计时条；右侧面板「记录」标签写已经等了几秒、上限几秒（数字来自 adapter 说明）。
-- 这时按停止：节点记「已停止」，不出现读回状态和「重做这一步 / 当作已做完」，因为目标还没发。
-- 等到上限还不成立：节点记出错，摘要写「前提条件没满足（等了 N s）」。
-- 暂停、页面断开、控制器断开时，节点回到排队，继续后从零重新等，不保留已等的秒数。
-
-## 17. 字体与浅色深色（Alex 10-31：「字体搞下，light/dark 搞下」）
-
-### 17.1 字体
-- 界面文字（西文、数字）用 Inter，可变字重。代码、参数值、时间、步数、端口尺寸这类要对齐的地方用 JetBrains Mono 的 400 和 500，数字等宽。两种都是 SIL OFL 1.1 许可，允许随软件一起发布。
-- 字体文件放进后端的静态目录，跟着 Python 包一起发出去，不从网上加载，因为要能离线用。一共三个文件：`InterVariable.woff2` 352,240 字节，`JetBrainsMono-Regular.woff2` 92,164 字节，`JetBrainsMono-Medium.woff2` 93,824 字节，许可证文件和字体放在一起。来源是 [Inter 4.1](https://github.com/rsms/inter/releases/tag/v4.1) 和 [JetBrains Mono 2.304](https://github.com/JetBrains/JetBrainsMono/releases/tag/v2.304)。设计稿用的就是这三个文件，在 `design/fonts/`。
-- 中文不打包，用系统自带的字体，顺序是 PingFang SC、Microsoft YaHei、Noto Sans CJK SC、Noto Sans SC，最后落到 sans-serif。
-- 写法：
-  - `font-family: "Inter", "PingFang SC", "Microsoft YaHei", "Noto Sans CJK SC", "Noto Sans SC", sans-serif`
-  - 等宽：`"JetBrains Mono", ui-monospace, monospace`，再加 `font-variant-numeric: tabular-nums`
-  - `@font-face` 用 `font-display: block`，避免字体还没加载完时先用系统字体排一遍、加载完又跳一下。
-- 字号和行高照第 2 节，这里不改。
-
-### 17.2 浅色和深色
-- 顶栏最右边放一个外观按钮，图标是半黑半白的圆。点开有三项：跟随系统（默认）、浅色、深色。选了哪项存在 `localStorage` 的 `roboact.theme` 里。
-- 在 `<head>` 里先内联一小段脚本，读到选择后马上给 `<html>` 设 `data-theme`，然后再加载样式，这样深色下打开页面不会先闪一下白。选「跟随系统」时监听 `prefers-color-scheme`，系统切换外观时页面跟着变。
-- 颜色只换 token（颜色变量），状态的意思不变：运行中是蓝，暂停和结果未知是琥珀，出错、控制器断开、「真机」框是红，完成是绿。两套 token 的具体值在 `design/gen.py` 的 `:root` 和 `[data-theme=dark]` 里。
-- 深色下不加阴影，层次靠背景深浅和 1px 描边。
-- Logo 和 favicon 两种模式下都不变。
-- 设计稿每屏都有浅色和深色两张，深色那张文件名以 `-dark` 结尾。
-
-### 17.3 颜色变量
-
-| 变量 | 用在哪 | 浅色 | 深色 |
+| pair | light | dark | min |
 |---|---|---|---|
-| `--bg` | 画布底 | `#F6F6F4` | `#141413` |
-| `--grid` | 画布网格点 | `#E2E2DD` | `#2A2A27` |
-| `--surface` | 面板、节点卡片 | `#FFFFFF` | `#1E1E1C` |
-| `--surface2` | 代码块、置灰按钮底 | `#FAFAF8` | `#232321` |
-| `--text` | 正文 | `#1A1A18` | `#ECECE8` |
-| `--muted` | 次要文字、置灰按钮字 | `#5C5C57` | `#A3A39C` |
-| `--border` | 节点卡片描边 | `#C9C9C3` | `#3D3D39` |
-| `--control` | 按钮、输入框、下拉描边 | `#85857F` | `#73736C` |
-| `--edge` | 连线、端口 | `#8A8A84` | `#77776F` |
-| `--hair` | 分隔线 | `#E6E6E1` | `#2E2E2B` |
-| `--blue` | 运行中、选中、主按钮 | `#1F6FEB` | `#4C8DF6` |
-| `--green` | 完成 | `#1A7F37` | `#3FB950` |
-| `--red` | 出错、控制器断开、真机框 | `#C62828` | `#F06A6A` |
-| `--amber` | 断点、暂停、页面断开、结果未知 | `#8F6000` | `#D4A72C` |
-| `--redsoft` | 红色摘要底 | `#FBEAEA` | `#3A2222` |
-| `--ambersoft` | 琥珀摘要底 | `#FBF3E0` | `#3A3020` |
-| `--onblue` | 主按钮上的字 | `#FFFFFF` | `#0B1220` |
-
-浅色的 `--amber` 从 `#9A6700` 改成 `#8F6000`：旧值在琥珀摘要底上只有 4.40:1，不到 4.5。新加 `--control`：按钮、输入框原来用 `--border`，对底色只有约 1.5:1，看不出框在哪。
-
-### 17.4 对比度（WCAG 2.x 相对亮度公式算的，脚本在 `design/contrast.py`）
-
-文字要 ≥ 4.5:1，状态边框、图标、连线、控件描边要 ≥ 3:1（WCAG 1.4.11）。网格点和分隔线是装饰，不要求，故意压低。置灰按钮 WCAG 不要求，但字仍要读得出，这里按 4.5 验。
-
-| 前景 / 背景 | 用在哪 | 浅色 | 深色 | 要求 |
-|---|---|---|---|---|
-| `--text` / `--surface` | 正文 | 17.43 | 14.10 | ≥ 4.5 |
-| `--muted` / `--surface` | 次要文字 | 6.72 | 6.58 | ≥ 4.5 |
-| `--muted` / `--surface2` | 置灰按钮字 | 6.43 | 6.20 | ≥ 4.5 |
-| `--amber` / `--surface` | 「已暂停 · 页面断开」顶栏字 | 5.47 | 7.44 | ≥ 4.5 |
-| `--amber` / `--ambersoft` | 琥珀摘要字 | 4.95 | 5.77 | ≥ 4.5 |
-| `--red` / `--surface` | 「已暂停 · 机器人控制器断开」顶栏字 | 5.62 | 5.55 | ≥ 4.5 |
-| `--red` / `--redsoft` | 红色摘要字 | 4.83 | 4.87 | ≥ 4.5 |
-| `--blue` / `--surface` | 运行中 | 4.63 | 5.13 | ≥ 4.5 |
-| `--green` / `--surface` | 完成 | 5.08 | 6.57 | ≥ 4.5 |
-| `--onblue` / `--blue` | 主按钮字 | 4.63 | 5.75 | ≥ 4.5 |
-| `--edge` / `--bg` | 连线、端口 | 3.21 | 4.08 | ≥ 3 |
-| `--control` / `--surface` | 按钮、输入框描边 | 3.71 | 3.50 | ≥ 3 |
-| `--control` / `--bg` | 画布上的按钮描边 | 3.43 | 3.86 | ≥ 3 |
-| `--grid` / `--bg` | 网格点（装饰） | 1.20 | 1.28 | 不要求 |
-
-### 17.5 字号和行高
-
-| 字号 | 字重 | 行高 | 用在哪 |
-|---|---|---|---|
-| 16 px | 600 | 24 px | 右侧面板标题 |
-| 14 px | 600 | 20 px | 节点标题、顶栏产品名 |
-| 13 px | 400 | 20 px | 正文、按钮、标签页 |
-| 12 px | 400 / 500 | 18 px | 端口名、状态词、次要说明、提示框 |
-| 11 px | 400 | 16 px | 快捷键（F5、F10），只用 JetBrains Mono |
-
-只用这五档，不加别的字号。代码块用 JetBrains Mono 12 px，行高 1.6。
-
-### 17.6 依赖清单
-
-三个字体文件都写进 `vendor-manifest.json`，每条写名称、版本、文件、下载来源、许可证、许可证文件、字节数、sha256。现成的条目在 `design/fonts/vendor-manifest.fonts.json`，直接合并进去。中文用系统字体，不进清单。
-
-### 17.7 和 Torvalds 10-31 那条的差别
-
-界面文字不是只用系统字体：西文和数字用 Inter，中文才落到系统字体。只用系统字体的话，macOS、Windows、Linux 上数字和西文的字形都不一样，截图对照会对不上。
-
-## 18. 语言（English / 简体中文）
-
-### 18.1 设置怎么定（PRD v1.4.5，Steve 10-31 定）
-- 语言：没手动选过时读 `navigator.languages`，第一个以 `zh` 开头就用简体中文，其他一律英文，读不到也用英文。
-- 主题：没手动选过时读 `prefers-color-scheme`（第 17.2 节）。
-- 减少动画：没手动选过时读 `prefers-reduced-motion`。开着时运行中图标不转，状态切换和连线不做动画，只换颜色和图标。
-- 词表文件是 `i18n/en.js` 和 `i18n/zh-CN.js`，两个都是 ES 模块，不用构建（PRD v1.4.7）。每项设置都能「恢复跟随浏览器」。
-- 手动选过以后存进 `localStorage`（`roboact.lang` 为 `en` / `zh-CN`，`roboact.theme`），以后按存下的来。两个页面同时开着时监听 `storage` 事件，一边切了另一边跟着变。
-- 浏览器里只存显示偏好：语言、主题、画布缩放和位置、面板宽度、日志筛选。超时、断开暂停时间、`precondition_wait_s`、连哪个 adapter 都在服务端，界面上只显示，不存浏览器（Tedrake、Thompson 10-31）。
-- 顶栏最右，主题按钮左边放语言按钮：英文界面写「中文」，中文界面写「EN」。不用国旗。`<head>` 内联脚本先设 `<html lang>`，打开时不闪另一种语言。切换不刷新页面，不打断运行。
-
-### 18.2 哪些翻，哪些不翻
-- 翻：界面写死的字。键就是后端的代码（`operator_lost`、`interrupted_unknown`…），界面按代码查当前语言的字。存储、接口、运行日志里只有代码，不存界面字。
-- 不翻：用户起的流程名、节点名、备注、常量和输入输出的值。
-- adapter 给的动作名、参数说明、`read_state` 字段名：有 `labels[当前语言]` 就用，没有就显示 `name`，用 JetBrains Mono，不显示空白。单位（`m`、`rad`、`m/s`）原样显示。
-- 数字和时间两种语言一样：24 小时制，JetBrains Mono。英文界面不用全大写。
-
-### 18.3 字体
-字体栈不变（第 17.1 节），英文只用 Inter。`lang` 要设对：中文时浏览器才挑简体字形，英文界面里出现中文流程名也能落到系统中文字体。
-
-### 18.4 英文变长后会挤的地方（按 Inter 实测宽度）
-节点卡片宽 240 px，标题行去掉左右内边距和类型图标后，标题加状态词大约只剩 188 px。
-1. **节点标题行放不下长状态词。** 「Interrupted · Result unknown」12 px 宽 163 px，「Running · Waiting for precondition」192 px，标题几乎没地方或者直接溢出。改法：英文节点标题行只放图标加一个词（Interrupted、Waiting、Running），「·」后面的那半句挪到下面的摘要行（摘要行宽 216 px）。中文也照这个规则，两种语言结构一样。
-2. **节点标题。** 宽度不变，放不下就截断加「…」，悬停显示全名。
-3. **顶栏状态。** 最长的是「Paused · Robot controller disconnected」，13 px 宽 242 px。1280 宽下必须一行放下，不能挤掉右边的连接状态、语言和主题按钮；放不下时先收起 adapter 名，再收起流程名的版本号。
-4. **按钮和标签页。** 不定死宽度，按文字撑开。`.btn.w` 的 72 px 最小宽度保留。
-5. **右侧面板** 宽 360 px，说明文字本来就会折行，不用改。
-
-### 18.5 文案表
-
-**节点状态**（`state`，界面规格第 3、3.1 节）
-
-| 代码 | 中文 | English（标题行） | English（摘要行） |
-|---|---|---|---|
-| `running` | 运行中 | Running | |
-| `running` + 等前提 | 运行中 · 等待前提条件 | Waiting | Waiting for precondition |
-| `done` | 完成 | Done | |
-| `error` | 出错 | Error | |
-| `paused_before` / `paused_after` | 断点 | Breakpoint | |
-| `interrupted_unknown` | 中断 · 结果未知 | Interrupted | Result unknown. Read back before continuing. |
-| `interrupted` | 中断 | Interrupted | |
-| `stopped` | 已停止 | Stopped | |
-| `skipped` | 跳过 | Skipped | |
-| `queued` | 排队 | Queued | |
-| `awaiting_approval` | 等待确认 | Awaiting approval | |
-| `cancel.cancel_response = rejected` | 取消被拒 | Running | Cancel rejected |
-
-**暂停原因**（`pause.reason`，执行模型第 4 节表，10 个）。顶栏写「Paused · 」加下面的字：
-
-| `reason` | 中文 | English |
-|---|---|---|
-| `breakpoint` | 断点 | Breakpoint |
-| `user` | 手动 | Paused by you |
-| `step_done` | 单步 | Step done |
-| `approval` | 等待确认 | Waiting for approval |
-| `restart` | 服务重启后 | After service restart |
-| `storage_error` | 记录写不进去 | Can't save run log |
-| `write_timeout` | 写入超时 | Write timed out |
-| `motion_timeout` | 动作超时 | Motion timed out |
-| `adapter_lost` | 机器人控制器断开 | Robot controller disconnected |
-| `operator_lost` | 页面断开 | Page disconnected |
-
-`user` 在顶栏写「Paused」，不加后缀。
-
-**运行状态**（顶栏）：运行中 Running；已完成 Done；已停止 Stopped；出错 Error；超出步数上限 Step limit reached。
-
-**控制节点**：开始 Start；输出 Output；常量 Constant；条件判断 If；合并 Merge；人工确认 Approval。条件判断的两个出口：是 Yes；否 No。
-
-**按钮**：运行 Run；继续 Continue；单步 Step；暂停 Pause；停止 Stop；确认 Approve；重试 Retry；标记为完成 Mark as done；读回状态 Read back；保存 Save；导出 Export；导入 Import。
-
-**顶栏其他**：仿真 Sim；真机 Real robot；已连接 Connected；重连中 Reconnecting；跟随系统 System；浅色 Light；深色 Dark；第 2 轮 Round 2。
-
-**报错**（接口错误码，界面上显示）：
-
-| 代码 | 中文 | English |
-|---|---|---|
-| `awaiting_approval` | 正在等人工确认，只能点确认或停止 | Waiting for approval. Approve or stop. |
-| `readback_required` | 先读回机器人状态，再选重试或标记为完成 | Read back the robot's state, then retry or mark as done. |
-| `precondition_failed` | 前提条件没满足 | Precondition not met |
-| 动作已不存在 | 这个动作 adapter 已经不提供了 | This action is no longer provided by the adapter. |
-
-表里没有的界面文字，Torvalds 的 agent 加词时两份词表同时加，键用代码或 `ui.` 开头的英文短名，交我看英文写法。
-
-鉴权先不做（Alex 10-31），令牌失效那一屏（`r-token`）和它的报错先不实现，词表里也先不加。
-
-验收：两种语言各截 12 屏，浅色、深色各一张。英文节点标题行没有溢出，顶栏在 1280 宽下一行放下，没有漏翻也没有显示键名。
+| `--text` / `--surface` | 17.43 | 14.10 | 4.5 |
+| `--muted` / `--surface` | 6.72 | 6.58 | 4.5 |
+| `--muted` / `--surface2` | 6.43 | 6.20 | 4.5 |
+| `--amber` / `--surface` | 5.47 | 7.44 | 4.5 |
+| `--amber` / `--ambersoft` | 4.95 | 5.77 | 4.5 |
+| `--red` / `--surface` | 5.62 | 5.55 | 4.5 |
+| `--red` / `--redsoft` | 4.83 | 4.87 | 4.5 |
+| `--blue` / `--surface` | 4.63 | 5.13 | 4.5 |
+| `--green` / `--surface` | 5.08 | 6.57 | 4.5 |
+| `--onblue` / `--blue` | 4.63 | 5.75 | 4.5 |
+| `--edge` / `--bg` | 3.21 | 4.08 | 3 |
+| `--control` / `--surface` | 3.71 | 3.50 | 3 |
+| `--control` / `--bg` | 3.43 | 3.86 | 3 |
+| `--grid` / `--bg` | 1.20 | 1.28 | decorative |

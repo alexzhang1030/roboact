@@ -5,6 +5,7 @@ from __future__ import annotations
 import time
 
 import pytest
+from roboact.catalog import zh
 
 from tests.conftest import launch_chromium
 from tests.http_api import SSE_WRAP, echo_chain_graph, http_json, motion_graph, put_flow
@@ -80,8 +81,8 @@ def _median(xs: list[float]) -> float:
 
 
 def test_a5_pause_latency_frames_in_browser(server):
-    """A5 / PRD 19.2: 500-node flow running, click pause, rAF frames until 已暂停 ≤ 20."""
-    put_flow(server["base"], echo_chain_graph(500, "A5 五百节点"))
+    """A5 / PRD 19.2: 500-node flow running, click pause, rAF frames until Paused ≤ 20."""
+    put_flow(server["base"], echo_chain_graph(500, "A5 500 nodes"))
     http_json(server["base"], "/api/test/step-delay", "POST", {"seconds": 0.01})
     p, _path = _launch()
     try:
@@ -105,7 +106,7 @@ def test_a5_pause_latency_frames_in_browser(server):
                 timeout=30000,
             )
             frames = page.evaluate(
-                """() => {
+                """(pausedZh) => {
                   return new Promise((resolve) => {
                     const r = window.__af.run.value
                     if (!r || r.status !== 'running') { resolve(-1); return }
@@ -116,14 +117,15 @@ def test_a5_pause_latency_frames_in_browser(server):
                       const el = document.querySelector('.run-word')
                       const w = el ? (el.textContent || '') : ''
                       const paused = w.indexOf('Paused') === 0
-                        || w.indexOf('\\u5df2\\u6682\\u505c') === 0
+                        || w.indexOf(pausedZh) === 0
                       if (paused) resolve(n)
                       else if (n > 180) resolve(n)
                       else requestAnimationFrame(loop)
                     }
                     requestAnimationFrame(loop)
                   })
-                }"""
+                }""",
+                zh("run.word.paused"),
             )
             if int(frames) < 0:
                 page.evaluate("() => window.__af.cmd('stop')")
@@ -156,7 +158,7 @@ def test_a5_pause_latency_frames_in_browser(server):
 
 def test_a4_sse_batching_500_nodes_browser(server):
     """A4 / PRD 19.1: 500 nodes in Chromium, real SSE, ≤10 batches/s, canvas matches backend."""
-    put_flow(server["base"], echo_chain_graph(500, "A4 五百节点"))
+    put_flow(server["base"], echo_chain_graph(500, "A4 500 nodes"))
     http_json(server["base"], "/api/test/step-delay", "POST", {"seconds": 0.01})
     p, _path = _launch()
     try:
@@ -215,7 +217,7 @@ def _wait_node_running(base: str, rid: str, nid: str, timeout: float = 15.0) -> 
 
 def test_a6_reconnect_and_half_open_page_lost(server):
     """A6: real TCP cut + restore, then half-open cut → operator_lost, no new motion."""
-    put_flow(server["base"], motion_graph("A6 重连"))
+    put_flow(server["base"], motion_graph("A6 reconnect"))
     http_json(
         server["base"], "/api/test/adapter", "POST", {"async_steps": 20, "async_sleep_s": 0.3}
     )
@@ -235,16 +237,22 @@ def test_a6_reconnect_and_half_open_page_lost(server):
         cut_t0 = time.monotonic()
         proxy.cut()
         page.wait_for_function(
-            "() => { const t = document.body.innerText; return t.includes('Reconnecting') || "
-            "t.includes('\\u91cd\\u8fde\\u4e2d') }",
+            """(retry) => {
+              const t = document.body.innerText
+              return t.includes('Reconnecting') || t.includes(retry)
+            }""",
+            arg=zh("conn.retry"),
             timeout=8000,
         )
         time.sleep(1.6)
         proxy.restore()
         cut_dt = time.monotonic() - cut_t0
         page.wait_for_function(
-            "() => { const t = document.body.innerText; return t.includes('Connected') || "
-            "t.includes('\\u5df2\\u8fde\\u63a5') }",
+            """(ok) => {
+              const t = document.body.innerText
+              return t.includes('Connected') || t.includes(ok)
+            }""",
+            arg=zh("conn.ok"),
             timeout=15000,
         )
         _wait_run(page, "completed", "paused", "error", "stopped", timeout=120000)

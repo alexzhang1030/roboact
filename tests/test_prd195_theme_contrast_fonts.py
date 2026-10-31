@@ -133,7 +133,7 @@ def _font_urls(urls: list[str]) -> list[str]:
 
 
 def test_prd195_prefers_dark_then_persists_light(server):
-    """19.5 (a)(b): system dark → first load dark; pick 浅色 → reload still light."""
+    """19.5 (a)(b): system dark → first load dark; pick light → reload still light."""
     p, _path = _launch()
     try:
         br = _browser(p)

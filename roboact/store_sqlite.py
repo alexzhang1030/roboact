@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from . import FORMAT_VERSION, SQLITE_BUSY_TIMEOUT_MS
+from .catalog import en
 from .util import dump, load, new_id, now_iso, sha256_text
 
 SCHEMA = f"""
@@ -163,9 +164,8 @@ class SqliteStore:
             g["name"] = meta["name"]
         return g
 
-    def create_flow(
-        self, name: str = "未命名流程", body: dict[str, Any] | None = None
-    ) -> dict[str, Any]:
+    def create_flow(self, name: str = "", body: dict[str, Any] | None = None) -> dict[str, Any]:
+        name = name or en("flow.untitled")
         flow_id = (body or {}).get("id") or (body or {}).get("flow_id") or new_id("fl_")
         nodes = (body or {}).get("nodes") or [
             {"id": "start", "type": "start", "x": 240, "y": 200, "params": {"data": {}}}
@@ -202,7 +202,9 @@ class SqliteStore:
     def save_flow(self, flow_id: str, body: dict[str, Any], bump: bool = True) -> dict[str, Any]:
         meta = self.get_flow_meta(flow_id)
         if meta is None:
-            return self.create_flow(body.get("name") or "未命名流程", {**body, "id": flow_id})
+            return self.create_flow(
+                body.get("name") or en("flow.untitled"), {**body, "id": flow_id}
+            )
         version = int(meta["latest_version"]) + (1 if bump else 0)
         graph = {
             "id": flow_id,

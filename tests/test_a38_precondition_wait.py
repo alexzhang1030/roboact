@@ -21,7 +21,7 @@ def _stand_adapter(
     adapter.stable = stable
     adapter.stable_after_s = stable_after_s
     update: dict = {
-        "preconditions": [Precondition(text="已站稳", check="stable")],
+        "preconditions": [Precondition(text="stable stance", check="stable")],
     }
     if wait_s is not None:
         update["precondition_wait_s"] = wait_s
