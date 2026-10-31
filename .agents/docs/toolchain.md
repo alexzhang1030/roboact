@@ -13,7 +13,7 @@ uv venv --python /usr/bin/python3 --system-site-packages
 uv sync --frozen
 ```
 
-Local check: `scripts/check.sh` (ruff check, ruff format --check, pyright, pytest, private-IP scan over `git ls-files`, gitleaks). CI uses `astral-sh/setup-uv` and the same order on x86_64 (`uv sync --locked`). A second job on `ubuntu-24.04-arm` runs `uv sync --frozen` and pytest so a missing aarch64 wheel fails now. `uv.lock` must resolve for aarch64.
+Local check: `scripts/check.sh` (ruff check, ruff format --check, pyright, pytest, private-IP scan over `git ls-files`, gitleaks). CI uses `astral-sh/setup-uv`, `uv sync --locked`, then the **same script**. A second job on `ubuntu-24.04-arm` runs `uv sync --frozen` and pytest so a missing aarch64 wheel fails now. `uv.lock` must resolve for aarch64.
 
 Ruff: lint E, F, W, I, B, UP, SIM, RUF; `ruff format`; line length 100. Pyright: strict for `roboact`, basic for `tests`. pre-commit runs ruff check + ruff format (pinned rev).
 

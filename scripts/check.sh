@@ -3,6 +3,7 @@
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
+export ROBOACT_TEST="${ROBOACT_TEST:-1}"
 
 if [[ -x "$ROOT/.venv/bin/ruff" ]]; then
   RUN=("$ROOT/.venv/bin/ruff")

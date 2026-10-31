@@ -29,24 +29,12 @@ jobs:
         run: uv sync --locked
       - name: Install Chromium for Playwright
         run: uv run python -m playwright install --with-deps chromium
-      - name: Ruff
-        run: uv run ruff check
-      - name: Ruff format
-        run: uv run ruff format --check
-      - name: Pyright
-        run: |
-          uv run pyright
-          uv run pyright --project pyrightconfig.tests.json
-      - name: Pytest
-        env:
-          ROBOACT_TEST: "1"
-        run: uv run pytest -q --tb=short
-      - name: Private IPv4 scan (git ls-files only)
-        run: python3 scripts/check_private_ip.py
-      - name: Gitleaks
+      - name: Install gitleaks
         run: |
           curl -sSfL https://github.com/gitleaks/gitleaks/releases/download/v8.24.3/gitleaks_8.24.3_linux_x64.tar.gz | tar -xz -C /tmp gitleaks
-          /tmp/gitleaks detect --source . --no-banner --redact --exit-code 1
+          sudo install -m 0755 /tmp/gitleaks /usr/local/bin/gitleaks
+      - name: scripts/check.sh
+        run: scripts/check.sh
 
   test-aarch64:
     runs-on: ubuntu-24.04-arm
