@@ -18,7 +18,7 @@ from .adapter import (
     Progress,
     WaitAborted,
 )
-from .catalog import en, yes_tokens, zh
+from .catalog import en, yes_tokens
 from .util import compare, dump, get_path, sha256_text
 
 
@@ -275,7 +275,7 @@ class ConfirmOut(BaseModel):
 
 class ConfirmParams(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    prompt: str = Field(default=zh("confirm.default"), title="Prompt")
+    prompt: str = Field(default=en("confirm.default"), title="Prompt")
 
 
 class ConfirmNode(NodeType):
@@ -660,7 +660,7 @@ def make_action_node(desc: ActionDescriptor, adapter: Adapter) -> type[NodeType]
         timeout_s = desc.timeout_s
         typical_s = desc.typical_s
         icon = desc.icon or ("node-tool" if side == SideEffect.motion else "node-constant")
-        palette = True
+        palette = desc.id != "fake_note"
         from_adapter = True
         adapter_id = adapter.adapter_id
         group = adapter.name

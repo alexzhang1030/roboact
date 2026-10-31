@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import itertools
 import json
+import re
 import shutil
 import socket
 import subprocess
@@ -14,7 +15,7 @@ from typing import Any
 from urllib.parse import urlparse
 
 import pytest
-from roboact.catalog import zh
+from roboact.catalog import en
 from roboact.flow_file import (
     MAX_FILE_BYTES,
     dump_json,
@@ -43,7 +44,7 @@ FORBIDDEN_KEYS = (
 def sample_doc(**flow_over: Any) -> dict[str, Any]:
     flow = {
         "action_list_version": "fake-v1",
-        "adapter": {"name": zh("adapter.fake"), "target": "sim", "version": "0.2"},
+        "adapter": {"name": en("adapter.fake"), "target": "sim", "version": "0.2"},
         "id": "flow-sample",
         "name": "sample",
         "revision": 3,
@@ -149,7 +150,7 @@ def run_doc(**param_over: Any) -> dict[str, Any]:
         ],
         "flow": {
             "action_list_version": "fake-v1",
-            "adapter": {"name": zh("adapter.fake"), "target": "sim", "version": "0.2"},
+            "adapter": {"name": en("adapter.fake"), "target": "sim", "version": "0.2"},
             "id": "flow-run",
             "name": "runnable",
             "revision": 1,
@@ -173,14 +174,14 @@ def run_doc(**param_over: Any) -> dict[str, Any]:
                 "id": "go",
                 "kind": "action",
                 "params": {"x": 0.4, "y": 0.1, "z": 0.2},
-                "position": {"x": 240, "y": 160},
+                "position": {"x": 320, "y": 160},
                 "title": "Go",
             },
             {
                 "id": "out",
                 "kind": "output",
                 "params": {},
-                "position": {"x": 480, "y": 160},
+                "position": {"x": 600, "y": 160},
                 "title": "Out",
             },
             {
@@ -278,7 +279,7 @@ def _open_ui(base: str, flow_id: str | None = None):
         playwright.stop()
         raise
     ctx = browser.new_context(
-        locale="en-US", accept_downloads=True, viewport={"width": 1440, "height": 900}
+        locale="en-US", accept_downloads=True, viewport={"width": 1280, "height": 800}
     )
     ctx.add_init_script("localStorage.setItem('roboact.lang', 'en');")
     page = ctx.new_page()
@@ -431,7 +432,7 @@ edges:
     to: {node: go, port: target}
   - from: {node: go, port: pose}
     to: {node: out, port: value}
-""".replace("__ADAPTER__", zh("adapter.fake"))
+""".replace("__ADAPTER__", en("adapter.fake"))
     code, imported = _import(base, yml, "yml")
     assert code == 200, imported
     note = next(n for n in imported["flow"]["nodes"] if n["id"] == "note")
@@ -890,3 +891,145 @@ def test_20_16(tmp_path):
         text=True,
     )
     assert out.strip() == "0.18.16"
+
+
+HAN = re.compile(r"[\u3400-\u9FFF]")
+
+
+def _gone_missing_doc() -> dict[str, Any]:
+    doc = run_doc(token=None)
+    doc["nodes"].append(
+        {
+            "action": "gone.action",
+            "id": "ghost",
+            "kind": "action",
+            "params": {},
+            "position": {"x": 40, "y": 20},
+            "title": "Gone",
+        }
+    )
+    return doc
+
+
+def _han_hits(obj: Any, path: str = "") -> list[tuple[str, str]]:
+    hits: list[tuple[str, str]] = []
+    if isinstance(obj, dict):
+        for key, val in obj.items():
+            if key in ("zh-CN", "zh"):
+                continue
+            hits.extend(_han_hits(val, f"{path}.{key}"))
+    elif isinstance(obj, list):
+        for i, val in enumerate(obj):
+            hits.extend(_han_hits(val, f"{path}[{i}]"))
+    elif isinstance(obj, str) and HAN.search(obj):
+        hits.append((path, obj))
+    return hits
+
+
+def test_c12_fake_note_not_in_palette(server):
+    boot = http_json(server["base"], "/api/bootstrap")
+    note = next(t for t in boot["node_types"] if t.get("type") == "fake_note")
+    assert note["palette"] is False
+    assert not any(
+        t.get("type") == "fake_note" and t.get("palette") is not False for t in boot["node_types"]
+    )
+
+
+def test_c12_import_restores_file_positions(server):
+    """Item 10: fromFlow restores file positions; run_doc used to overlap (200px gap)."""
+    doc = run_doc()
+    want = {n["id"]: (n["position"]["x"], n["position"]["y"]) for n in doc["nodes"]}
+    assert want["go"][0] - want["start"][0] >= 240
+    code, imported = _import(server["base"], dump_json(doc), "json")
+    assert code == 200, imported
+    got = {n["id"]: (n["x"], n["y"]) for n in imported["flow"]["nodes"]}
+    assert got == want
+
+
+def test_c12_en_bootstrap_and_dom_have_no_han(server):
+    """Locale en: bootstrap display strings and the rendered DOM contain no Han."""
+    base = server["base"]
+    boot = http_json(base, "/api/bootstrap")
+    assert boot["adapter"]["name"] == en("adapter.fake")
+    assert boot["flow"]["name"] == en("flow.demo")
+    hits = _han_hits(boot)
+    assert hits == [], hits
+    pw, browser, ctx, page = _open_ui(base)
+    try:
+        page.set_viewport_size({"width": 1280, "height": 800})
+        page.wait_for_function("window.__ready === true", timeout=120000)
+        text = page.inner_text("body")
+        assert not HAN.search(text), text
+        html = page.content()
+        assert "假适配器" not in html
+    finally:
+        ctx.close()
+        browser.close()
+        pw.stop()
+
+
+def test_c12_counts_banner_lock_and_no_overlap(server, tmp_path):
+    """Counts, lock text, mismatch lines, gone summary, no Start/Go overlap."""
+    base = server["base"]
+    src = tmp_path / "gone.json"
+    src.write_text(dump_json(_gone_missing_doc()), encoding="utf-8")
+    pw, browser, ctx, page = _open_ui(base)
+    try:
+        page.set_viewport_size({"width": 1280, "height": 800})
+        _ui_import(page, src)
+        page.wait_for_function(
+            """() => {
+              const c = window.__af && window.__af.runCheck && window.__af.runCheck.value
+              return !!(c && (c.action_gone || []).includes('ghost')
+                && (c.missing_input || []).includes('note'))
+            }""",
+            timeout=15000,
+        )
+        gone_count = page.locator('[data-testid="count-action-gone"]').inner_text()
+        need_count = page.locator('[data-testid="count-missing-input"]').inner_text()
+        assert gone_count == "1 missing action"
+        assert need_count == "1 node needs input"
+        gone = page.locator('.fn[data-status="missing"]')
+        assert "Gone" in gone.inner_text()
+        assert "This action is no longer provided by the adapter." in gone.inner_text()
+        assert page.locator(".fn-gone-x").count() == 1
+        assert page.locator(".vue-flow__minimap").count() == 0
+        assert page.locator(".fn[data-node-type='fake_note'] .port-missing").count() >= 1
+        page.locator('[data-testid="count-action-gone"]').click()
+        page.wait_for_function("() => window.__af.selected.value === 'ghost'", timeout=5000)
+        boxes = page.evaluate(
+            """() => [...document.querySelectorAll('.vue-flow__node')].map(n => {
+              const r = n.getBoundingClientRect()
+              return {id: n.getAttribute('data-id'), x: r.x, y: r.y, r: r.right, b: r.bottom}
+            })"""
+        )
+        by_id = {b["id"]: b for b in boxes}
+        start, go = by_id["start"], by_id["go"]
+        sep = start["r"] <= go["x"] or go["r"] <= start["x"]
+        sep = sep or start["b"] <= go["y"] or go["b"] <= start["y"]
+        assert sep, (start, go)
+        mis = tmp_path / "mis.json"
+        doc = run_doc()
+        doc["flow"]["robot"] = {"id": "other-arm", "model": "Other"}
+        doc["flow"]["adapter"] = {"name": "OtherAdapter", "target": "sim", "version": "9"}
+        doc["flow"]["action_list_version"] = "old-list"
+        doc["flow"]["units"] = {"angle": "deg", "length": "mm"}
+        mis.write_text(dump_json(doc), encoding="utf-8")
+        _ui_import(page, mis)
+        page.wait_for_selector('[data-testid="flow-mismatch"]', timeout=15000)
+        lines = page.locator(".mismatch-line").count()
+        assert lines == 4
+        locked = page.locator('[data-testid="run-locked"]')
+        assert locked.count() == 1
+        assert "Review the differences above before running." in locked.inner_text()
+        assert page.locator(".slot-1").get_attribute("title") == (
+            "Review the differences above before running."
+        )
+        top_h = page.locator(".top").evaluate("el => el.getBoundingClientRect().height")
+        assert top_h <= 45, top_h
+        assert page.locator(".top .lang-btn").count() == 1
+        assert "Export" not in page.locator(".top .right").inner_text()
+    finally:
+        ctx.close()
+        browser.close()
+        pw.stop()

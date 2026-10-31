@@ -14,7 +14,7 @@ from urllib.parse import parse_qs, unquote, urlparse
 
 from . import DEFAULT_STEP_LIMIT, SSE_RETRY_MS
 from .adapter import FAKE_NOTE_ACTION, FakeAdapter
-from .catalog import zh
+from .catalog import en
 from .errors import ApiError
 from .executor import Executor
 from .flow_file import (
@@ -156,7 +156,7 @@ class App:
 
     def _demo_graph(self) -> dict[str, Any]:
         return {
-            "name": zh("flow.demo"),
+            "name": en("flow.demo"),
             "adapter_id": self.adapter.adapter_id,
             "action_list_version": self.adapter.action_list_version,
             "nodes": [
@@ -216,7 +216,7 @@ class App:
             g = self.store.latest_graph(flows[0]["flow_id"])
             if g:
                 return g
-        return self.store.create_flow(zh("flow.demo"), self._demo_graph())
+        return self.store.create_flow(en("flow.demo"), self._demo_graph())
 
     def _pick_flow(self, wanted: str | None) -> dict[str, Any]:
         if wanted:
@@ -372,7 +372,7 @@ class App:
             body = dict(data or {})
             body.pop("unlock_record", None)
             body.pop("mismatch_unlocked", None)
-            flow = self.store.create_flow(body.get("name") or zh("flow.untitled"), body)
+            flow = self.store.create_flow(body.get("name") or en("flow.untitled"), body)
             await self._json(writer, 200, {"flow": flow})
             return
         if route == "/api/flows/export" and method == "POST":
@@ -760,7 +760,7 @@ class App:
         graph.pop("id", None)
         graph.pop("flow_id", None)
         graph.setdefault("adapter_id", self.adapter.adapter_id)
-        created = self.store.create_flow(graph.get("name") or "Untitled flow", graph)
+        created = self.store.create_flow(graph.get("name") or en("flow.untitled"), graph)
         blockers = inspect_run(created, self.adapter)
         await self._json(
             writer,

@@ -245,7 +245,7 @@ export default {
   'node.tool_call': 'Tool call',
   'run.target_sim': 'Sim',
   'run.stop_rejected_note': 'The robot is still moving. Use the hardware button for e-stop.',
-  'run.action_missing_count': '{n} nodes use an action that no longer exists',
+  'run.action_missing_count': '{n} missing actions',
   'run.disabled_no_controller': 'Robot controller not connected. Run is disabled.',
   'error.readback_required': 'Read back the robot\'s state, then retry or mark as done.',
   'error.action_missing': 'This action is no longer provided by the adapter.',
