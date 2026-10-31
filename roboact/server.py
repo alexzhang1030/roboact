@@ -13,7 +13,7 @@ from urllib.parse import parse_qs, unquote, urlparse
 
 from . import DEFAULT_STEP_LIMIT, SSE_RETRY_MS
 from .adapter import FakeAdapter
-from .catalog import zh
+from .catalog import en
 from .errors import ApiError
 from .executor import Executor
 from .graph import params_changed
@@ -142,7 +142,7 @@ class App:
 
     def _demo_graph(self) -> dict[str, Any]:
         return {
-            "name": zh("flow.demo"),
+            "name": en("flow.demo"),
             "adapter_id": self.adapter.adapter_id,
             "action_list_version": self.adapter.action_list_version,
             "nodes": [
@@ -202,7 +202,7 @@ class App:
             g = self.store.latest_graph(flows[0]["flow_id"])
             if g:
                 return g
-        return self.store.create_flow(zh("flow.demo"), self._demo_graph())
+        return self.store.create_flow(en("flow.demo"), self._demo_graph())
 
     def _pick_flow(self, wanted: str | None) -> dict[str, Any]:
         if wanted:
@@ -355,7 +355,7 @@ class App:
             await self._json(writer, 200, {"flows": self.store.list_flows()})
             return
         if route == "/api/flows" and method == "POST":
-            flow = self.store.create_flow((data or {}).get("name") or zh("flow.untitled"), data)
+            flow = self.store.create_flow((data or {}).get("name") or en("flow.untitled"), data)
             await self._json(writer, 200, {"flow": flow})
             return
         if route.startswith("/api/flows/") and "/breakpoints/" in route:

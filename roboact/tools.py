@@ -182,6 +182,7 @@ class Tools(Adapter):
                 args.get("line")
                 or args.get("text")
                 or args.get("value")
+                or args.get("content")
                 or args.get(zh("parse.note_content"))
                 or ""
             )

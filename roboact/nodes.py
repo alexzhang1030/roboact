@@ -18,7 +18,7 @@ from .adapter import (
     Progress,
     WaitAborted,
 )
-from .catalog import en, yes_tokens, zh
+from .catalog import en, yes_tokens
 from .util import compare, dump, get_path, sha256_text
 
 
@@ -275,7 +275,7 @@ class ConfirmOut(BaseModel):
 
 class ConfirmParams(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    prompt: str = Field(default=zh("confirm.default"), title="Prompt")
+    prompt: str = Field(default=en("confirm.default"), title="Prompt")
 
 
 class ConfirmNode(NodeType):
