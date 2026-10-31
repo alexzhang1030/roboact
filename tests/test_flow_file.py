@@ -960,8 +960,7 @@ def test_c12_en_bootstrap_and_dom_have_no_han(server):
         page.wait_for_function("window.__ready === true", timeout=120000)
         text = page.inner_text("body")
         assert not HAN.search(text), text
-        html = page.content()
-        assert "假适配器" not in html
+        assert not HAN.search(page.content())
     finally:
         ctx.close()
         browser.close()
@@ -1027,8 +1026,14 @@ def test_c12_counts_banner_lock_and_no_overlap(server, tmp_path):
         )
         top_h = page.locator(".top").evaluate("el => el.getBoundingClientRect().height")
         assert top_h <= 45, top_h
+        steps_box = page.locator(".top .steps")
+        overflow = steps_box.evaluate("el => el.scrollWidth - el.clientWidth")
+        assert overflow <= 1, overflow
         assert page.locator(".top .lang-btn").count() == 1
         assert "Export" not in page.locator(".top .right").inner_text()
+        page.locator('[data-testid="flow-export"]').click()
+        assert page.locator(".flow-menu .menu-label").inner_text() == "Export…"
+        assert page.locator(".flow-menu").inner_text().find("Import") >= 0
     finally:
         ctx.close()
         browser.close()

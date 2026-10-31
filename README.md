@@ -37,7 +37,7 @@ python3 -m venv .venv
 
 ## Limits
 
-Step limit 1000. Node timeout 60 s (deadline given to the adapter). SSE retry 2 s. SQLite `busy_timeout` 5000 ms. Browser stores only display prefs (`roboact.lang|theme|motion|viewport.*|panels|grid|logFilter`). Timeouts stay on the server.
+Step limit 1000. Node timeout 60 s (deadline given to the adapter). SSE retry 2 s. SQLite `busy_timeout` 5000 ms. Browser stores only display prefs (`roboact.lang|theme|motion|viewport.*|panels|grid|minimap|logFilter`). Timeouts stay on the server.
 
 Storage, HTTP, SSE, and exported flows carry **codes**. UI maps codes via `web/i18n/en.js` and `web/i18n/zh-CN.js`.
 

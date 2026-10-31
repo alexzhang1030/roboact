@@ -19,7 +19,7 @@ const ICONS = {
   interrupted: 'state-interrupted',
   interrupted_unknown: 'state-unknown',
   cancel_rejected: 'state-running',
-  action_missing: 'state-error',
+  action_missing: 'state-unknown',
   missing_input: 'state-unknown',
 }
 
@@ -71,6 +71,12 @@ export default markRaw(defineComponent({
       for (const p of ins.value) {
         const v = params[p.name]
         if (v == null || v === '') set.add(p.name)
+      }
+      const listed = (spec.value && spec.value.action && spec.value.action.params) || []
+      for (const p of listed) {
+        if (!p || !p.name) continue
+        const v = params[p.name]
+        if ((p.secret || p.required) && (v == null || v === '')) set.add(p.name)
       }
       return set
     })

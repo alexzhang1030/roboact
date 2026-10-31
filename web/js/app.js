@@ -572,7 +572,14 @@ const App = defineComponent({
       const types = (runCheck.value && runCheck.value.type_errors) || []
       const limits = (runCheck.value && runCheck.value.limit_errors) || []
       const hit = [...types, ...limits].some(e => e.param === key && (e.node === nid || (selectedNode.value && (selectedNode.value.data.title === e.node || selectedNode.value.id === e.node))))
-      return hit ? 'param-bad' : ''
+      if (hit) return 'param-bad'
+      const missing = (runCheck.value && runCheck.value.missing_input) || []
+      if (nid && missing.includes(nid)) {
+        const raw = selectedNode.value && selectedNode.value.data && selectedNode.value.data.params
+        const val = raw ? raw[key] : undefined
+        if (val == null || val === '') return 'param-missing'
+      }
+      return ''
     }
 
     async function loadAll(flowId) {
@@ -1076,18 +1083,11 @@ const App = defineComponent({
       if (!top) return
       top.dataset.collapse = ''
       const left = top.querySelector('.top-left')
-      const ctrls = top.querySelector('.ctrls')
-      const right = top.querySelector('.right')
-      if (!left || !ctrls || !right) return
-      const overlaps = () => {
-        const L = left.getBoundingClientRect()
-        const C = ctrls.getBoundingClientRect()
-        const R = right.getBoundingClientRect()
-        return L.right + 8 > C.left || C.right + 8 > R.left
-      }
-      if (overlaps()) {
+      if (!left) return
+      const cramped = () => left.scrollWidth > left.clientWidth + 1
+      if (cramped()) {
         top.dataset.collapse = 'adapter'
-        if (overlaps()) top.dataset.collapse = 'adapter-ver'
+        if (cramped()) top.dataset.collapse = 'adapter-ver'
       }
     }
     function displayType(spec) { return typeLabel(spec) }
@@ -1232,6 +1232,7 @@ const App = defineComponent({
           <input v-if="nameEditing" class="name" v-model="meta.name" @change="finishNameEdit" @blur="finishNameEdit" @keydown.enter.prevent="finishNameEdit" />
           <button v-else type="button" class="name-btn" data-testid="flow-export" :title="t('flow.export_format')" :aria-expanded="exportOpen ? 'true' : 'false'" aria-haspopup="menu" @click="onNameClick" @dblclick="startNameEdit">{{ flowNameLabel }}</button>
           <div class="menu theme-menu" v-if="exportOpen" role="menu">
+            <div class="menu-label">{{ t('flow.export') }}</div>
             <button type="button" role="menuitem" data-testid="export-json" @click="exportFlow('json')">{{ t('flow.format_json') }}</button>
             <button type="button" role="menuitem" data-testid="export-yaml" @click="exportFlow('yaml')">{{ t('flow.format_yaml') }}</button>
             <label class="file-open" role="menuitem">{{ t('flow.import') }}<input type="file" accept=".json,.yaml,.yml,application/json,text/yaml" style="display:none" data-testid="flow-import" @change="importFlow"></label>
