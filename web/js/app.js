@@ -957,7 +957,12 @@ const App = defineComponent({
           phase = 'pan'; await runPh(2000, true, false)
           phase = 'ticks'; await runPh(2000, false, true)
           phase = 'both'; await runPh(3000, true, true)
-          const stat = ph => { const s = frames.filter(x => x.phase === ph).slice(1).map(x => x.d).sort((a, b) => a - b); const p = q => +s[Math.min(s.length - 1, Math.floor(q * s.length))].toFixed(1); return { frames: s.length, medianMs: p(0.5), p95Ms: p(0.95), maxMs: +s[s.length - 1].toFixed(1) } }
+          const stat = ph => {
+            const intervalsMs = frames.filter(x => x.phase === ph).slice(1).map(x => x.d)
+            const s = [...intervalsMs].sort((a, b) => a - b)
+            const p = q => +s[Math.min(s.length - 1, Math.floor(q * s.length))].toFixed(1)
+            return { frames: intervalsMs.length, medianMs: p(0.5), p95Ms: p(0.95), maxMs: +s[s.length - 1].toFixed(1), intervalsMs }
+          }
           window.__result = { n: PERF_N, pan: stat('pan'), ticks: stat('ticks'), both: stat('both'), longTasks, statusTicks: tick, dim: window.__dim || 0, domNodes: document.querySelectorAll('.vue-flow__node').length }
         })
         return

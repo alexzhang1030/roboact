@@ -11,7 +11,7 @@ Offline, zero-build robot flow canvas. Wire the atomic actions an adapter expose
 
 Roboact is licensed under the **MIT** License (`LICENSE`, Copyright (c) 2026 alexzhang1030). Third-party texts stay under `vendor/licenses/`. This repo is not published to PyPI and has no publish config.
 
-Specs in this tree: [PRD v1.4.14](docs/prd.md), [exec-model v0.2.3](docs/exec-model.md) (token §0.2 / A39 ignored — auth deferred), [system-design](docs/system-design.md), [UI spec](docs/ui-spec.md) (**§17 fonts/themes, §18 language**), [Rams design sheets](docs/design/), [diagrams](docs/diagrams/). History: `docs/prd-v1.md`, `docs/exec-model-v0.md`, `docs/ui-spec-v0.md`, `docs/system-design-v0.md`. Decision records are PCR in [`.agents/docs/`](.agents/docs/).
+Specs in this tree: [PRD v1.4.15](docs/prd.md), [exec-model v0.2.3](docs/exec-model.md) (token §0.2 / A39 ignored — auth deferred), [system-design](docs/system-design.md), [UI spec](docs/ui-spec.md) (**§17 fonts/themes, §18 language**), [Rams design sheets](docs/design/), [diagrams](docs/diagrams/). History: `docs/prd-v1.md`, `docs/exec-model-v0.md`, `docs/ui-spec-v0.md`, `docs/system-design-v0.md`. Decision records are PCR in [`.agents/docs/`](.agents/docs/).
 
 ## Install and run
 
@@ -131,7 +131,7 @@ web/                    Static frontend, served by the backend
 web/i18n/               en.js and zh-CN.js catalogs (ES modules, no build)
 web/vendor/             Vue / Vue Flow / icons (unmodified upstream files)
 assets/logo.svg         Brand mark (favicon is the same drawing)
-docs/prd.md             PRD v1.4.14 (current product doc in this tree; token rows ignored)
+docs/prd.md             PRD v1.4.15 (current product doc in this tree; token rows ignored)
 docs/system-design.md
 docs/ui-spec.md         §17 fonts and themes, §18 language
 docs/design/            Rams light + `-dark` sheets

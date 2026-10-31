@@ -10,6 +10,7 @@ import zlib
 import pytest
 
 from tests.conftest import chrome_path, emit_prd19_ci_past_capture, launch_chromium
+from tests.prd19 import p95_frames, within_prd19_limit
 
 pw = pytest.importorskip("playwright.sync_api")
 
@@ -111,16 +112,24 @@ def test_prd19_canvas_performance_500_nodes(server, capfd):
         page.wait_for_function("window.__result", timeout=90000)
         r = page.evaluate("window.__result")
         assert r["domNodes"] == 500
-        recorded = {
-            phase: {k: r[phase][k] for k in ("frames", "medianMs", "p95Ms", "maxMs")}
-            for phase in ("pan", "ticks", "both")
-        }
+        recorded = {}
+        for phase in ("pan", "ticks", "both"):
+            intervals = r[phase]["intervalsMs"]
+            recorded[phase] = {
+                "frames": r[phase]["frames"],
+                "medianMs": r[phase]["medianMs"],
+                "p95Ms": r[phase]["p95Ms"],
+                "maxMs": r[phase]["maxMs"],
+                "p95Frames": p95_frames(intervals),
+            }
         if os.environ.get("CI"):
             emit_prd19_ci_past_capture(recorded, capfd)
         else:
-            limit_ms = 2 * 1000 / 60 + 0.5
             for phase in ("pan", "ticks", "both"):
-                assert r[phase]["p95Ms"] <= limit_ms, phase + " " + str(r[phase])
+                intervals = r[phase]["intervalsMs"]
+                assert within_prd19_limit(intervals), (
+                    phase + " p95Frames=" + str(p95_frames(intervals)) + " " + str(r[phase])
+                )
             long_after = [t for t in r["longTasks"] if t["ms"] > 100]
             assert long_after == [], long_after
         assert blocked == []
