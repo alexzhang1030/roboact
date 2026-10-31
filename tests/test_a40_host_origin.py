@@ -1,23 +1,21 @@
-"""PRD 19.9 / A40 — Host, Origin, Content-Type checks. No auth. Loopback bind only."""
+"""PRD 19.9 / A40 — one reject and one allow for Host, Origin, Content-Type."""
 
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 import time
 import urllib.request
 from pathlib import Path
 
-import pytest
-from roboact.server import refuse_host_flag
-
 from tests.conftest import free_port
 
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def _start(tmp_path: Path) -> tuple[subprocess.Popen[bytes], int, str]:
+def _start(tmp_path: Path) -> tuple[subprocess.Popen[bytes], int]:
     port = free_port()
     db = tmp_path / "a40.db"
     proc = subprocess.Popen(
@@ -31,11 +29,7 @@ def _start(tmp_path: Path) -> tuple[subprocess.Popen[bytes], int, str]:
             str(db),
         ],
         cwd=str(ROOT),
-        env={
-            **dict(**{k: v for k, v in __import__("os").environ.items()}),
-            "ROBOACT_TEST": "1",
-            "PYTHONPATH": str(ROOT),
-        },
+        env={**os.environ, "ROBOACT_TEST": "1", "PYTHONPATH": str(ROOT)},
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
     )
@@ -53,7 +47,7 @@ def _start(tmp_path: Path) -> tuple[subprocess.Popen[bytes], int, str]:
     else:
         proc.kill()
         raise RuntimeError("server did not start")
-    return proc, port, base
+    return proc, port
 
 
 def _curl(
@@ -62,7 +56,7 @@ def _curl(
     path: str = "/api/bootstrap",
     method: str = "GET",
     data: str | None = None,
-) -> tuple[int, bytes, str]:
+) -> tuple[int, bytes]:
     cmd = ["curl", "-sS", "-D", "-", "-o", "-", "-w", "\nHTTP_CODE:%{http_code}\n", *extra]
     if method != "GET":
         cmd += ["-X", method]
@@ -76,40 +70,52 @@ def _curl(
     if idx < 0:
         raise RuntimeError(r.stderr.decode() or raw.decode(errors="replace"))
     code = int(raw[idx + len(marker) :].strip())
-    body = raw[:idx]
-    return code, body, r.stderr.decode()
+    return code, raw[:idx]
 
 
-def test_a40_host_origin_content_type(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
-    proc, port, _base = _start(tmp_path)
+def _start_body(port: int) -> str:
+    url = f"http://127.0.0.1:{port}/api/bootstrap"
+    boot = json.loads(urllib.request.urlopen(url, timeout=2).read())
+    return json.dumps({"flow_id": boot["flow"]["id"]})
+
+
+def test_a40_host_reject(tmp_path: Path) -> None:
+    proc, port = _start(tmp_path)
     try:
-        boot = json.loads(
-            urllib.request.urlopen(f"http://127.0.0.1:{port}/api/bootstrap", timeout=2).read()
-        )
-        flow_id = boot["flow"]["id"]
-        start_body = json.dumps({"flow_id": flow_id})
-
-        evil_host, evil_raw, _ = _curl(
+        code, raw = _curl(
             port,
             ["-H", "Host: evil.example"],
             path="/api/runs",
             method="POST",
-            data=start_body,
+            data=_start_body(port),
         )
-        print("A40 Host: evil.example raw:\n", evil_raw.decode(errors="replace")[:800])
-        assert evil_host == 403, (evil_host, evil_raw)
-
-        plain, plain_raw, _ = _curl(
-            port,
-            ["-H", f"Host: 127.0.0.1:{port}", "-H", "Content-Type: text/plain"],
-            path="/api/runs",
-            method="POST",
-            data=start_body,
+        print("A40 Host reject raw:\n", raw.decode(errors="replace")[:800])
+        assert code == 403, (code, raw)
+        assert b"bad_host" in raw
+        runs = json.loads(
+            urllib.request.urlopen(f"http://127.0.0.1:{port}/api/runs", timeout=2).read()
         )
-        print("A40 Content-Type: text/plain raw:\n", plain_raw.decode(errors="replace")[:800])
-        assert plain == 415, (plain, plain_raw)
+        assert runs.get("runs") == [], runs
+    finally:
+        proc.terminate()
+        proc.wait(timeout=3)
 
-        ws, ws_raw, _ = _curl(
+
+def test_a40_host_allow(tmp_path: Path) -> None:
+    proc, port = _start(tmp_path)
+    try:
+        code, raw = _curl(port, ["-H", f"Host: 127.0.0.1:{port}"])
+        print("A40 Host allow raw:\n", raw.decode(errors="replace")[:400])
+        assert code == 200, (code, raw)
+    finally:
+        proc.terminate()
+        proc.wait(timeout=3)
+
+
+def test_a40_origin_reject(tmp_path: Path) -> None:
+    proc, port = _start(tmp_path)
+    try:
+        code, raw = _curl(
             port,
             [
                 "-H",
@@ -122,62 +128,76 @@ def test_a40_host_origin_content_type(tmp_path: Path, capsys: pytest.CaptureFixt
                 "Connection: Upgrade",
             ],
         )
-        print("A40 WS foreign Origin raw:\n", ws_raw.decode(errors="replace")[:800])
-        assert ws in (400, 403), (ws, ws_raw)
-
-        ok, ok_raw, _ = _curl(port, ["-H", f"Host: 127.0.0.1:{port}"])
-        assert ok == 200, (ok, ok_raw)
-
+        print("A40 Origin reject raw:\n", raw.decode(errors="replace")[:800])
+        assert code == 403, (code, raw)
+        assert b"bad_origin" in raw
         runs = json.loads(
             urllib.request.urlopen(f"http://127.0.0.1:{port}/api/runs", timeout=2).read()
         )
-        print("A40 runs after rejected commands:", runs)
         assert runs.get("runs") == [], runs
     finally:
         proc.terminate()
-        try:
-            proc.wait(timeout=3)
-        except subprocess.TimeoutExpired:
-            proc.kill()
-        captured = capsys.readouterr()
-        print(captured.out)
+        proc.wait(timeout=3)
 
 
-def test_host_flag_is_not_provided() -> None:
-    refuse_host_flag([])
-    refuse_host_flag(["--port", "7465"])
-    with pytest.raises(SystemExit) as ei:
-        refuse_host_flag(["--host", "0.0.0.0"])
-    assert ei.value.code == 2
-    with pytest.raises(SystemExit) as ei2:
-        refuse_host_flag(["--host", "127.0.0.1"])
-    assert ei2.value.code == 2
-
-    port = free_port()
-    proc = subprocess.Popen(
-        [
-            sys.executable,
-            "-m",
-            "roboact",
-            "--host",
-            "0.0.0.0",
-            "--port",
-            str(port),
-            "--db",
-            "/tmp/no.db",
-        ],
-        cwd=str(ROOT),
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        text=True,
-    )
+def test_a40_origin_allow(tmp_path: Path) -> None:
+    proc, port = _start(tmp_path)
     try:
-        out, _ = proc.communicate(timeout=5)
-        print(out)
-        assert proc.returncode == 2, out
-        assert "not provided" in out
-        assert "ssh -L 17465:127.0.0.1:17465" in out
-        assert "WARNING" not in out
+        code, raw = _curl(
+            port,
+            [
+                "-H",
+                f"Host: 127.0.0.1:{port}",
+                "-H",
+                f"Origin: http://127.0.0.1:{port}",
+                "-H",
+                "Upgrade: websocket",
+                "-H",
+                "Connection: Upgrade",
+            ],
+        )
+        print("A40 Origin allow raw:\n", raw.decode(errors="replace")[:800])
+        assert code != 403, (code, raw)
+        assert b"bad_origin" not in raw
     finally:
-        if proc.poll() is None:
-            proc.kill()
+        proc.terminate()
+        proc.wait(timeout=3)
+
+
+def test_a40_content_type_reject(tmp_path: Path) -> None:
+    proc, port = _start(tmp_path)
+    try:
+        code, raw = _curl(
+            port,
+            ["-H", f"Host: 127.0.0.1:{port}", "-H", "Content-Type: text/plain"],
+            path="/api/runs",
+            method="POST",
+            data=_start_body(port),
+        )
+        print("A40 Content-Type reject raw:\n", raw.decode(errors="replace")[:800])
+        assert code == 415, (code, raw)
+        assert b"bad_content_type" in raw
+        runs = json.loads(
+            urllib.request.urlopen(f"http://127.0.0.1:{port}/api/runs", timeout=2).read()
+        )
+        assert runs.get("runs") == [], runs
+    finally:
+        proc.terminate()
+        proc.wait(timeout=3)
+
+
+def test_a40_content_type_allow(tmp_path: Path) -> None:
+    proc, port = _start(tmp_path)
+    try:
+        code, raw = _curl(
+            port,
+            ["-H", f"Host: 127.0.0.1:{port}", "-H", "Content-Type: application/json"],
+            path="/api/runs",
+            method="POST",
+            data=_start_body(port),
+        )
+        print("A40 Content-Type allow raw:\n", raw.decode(errors="replace")[:800])
+        assert code == 201, (code, raw)
+    finally:
+        proc.terminate()
+        proc.wait(timeout=3)

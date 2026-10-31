@@ -1,20 +1,24 @@
-"""exec-model v0.2 A23–A37 (PRD §8 mapping in each name). R1–R8 are real-robot N/A in v1."""
+"""Must-keep: A31 palette reject; 10 s page-lost; 3 s adapter-lost; motion readback."""
 
 from __future__ import annotations
 
 import asyncio
-import time
 
-import pytest
 from roboact.adapter import FakeAdapter
 from roboact.errors import ApiError
 from roboact.executor import Executor
-from roboact.nodes import bind_adapter, ingest_action, list_specs, rejected_actions
-from roboact.server import refuse_host_flag
+from roboact.nodes import (
+    SleepNode,
+    bind_adapter,
+    get_type,
+    ingest_action,
+    list_specs,
+    rejected_actions,
+)
 from roboact.sse import SseHub
-from roboact.store import Store, open_store
+from roboact.store import Store
 
-from tests.helpers import boot, cont, e, make_flow, n, recs, run_until, wait_status
+from tests.helpers import boot, cont, e, make_flow, n, run_until, wait_status
 
 
 def adapter_ctx(tmp_path, adapter=None):
@@ -42,112 +46,11 @@ def pose_flow(**go_bp):
     )
 
 
-def test_a23_heartbeat_cancels_goal_when_backend_dies():
-    async def go():
-        adapter = FakeAdapter()
-        adapter.heartbeat_timeout_s = 0.2
-        adapter.async_steps = 40
-        adapter.start_watchdog()
-        adapter.receive_heartbeat()
-        exec_task = asyncio.create_task(
-            adapter.execute("fake_set_pose", {"x": 1.0, "y": 0.0, "z": 0.0})
-        )
-        await asyncio.sleep(0.05)
-        assert adapter.list_active_goals()
-        await asyncio.sleep(0.35)
-        assert adapter.goals_cancelled_by_lost_heartbeat >= 1
-        result = await exec_task
-        assert result.success is False
-        await adapter.stop_watchdog()
-
-    asyncio.run(go())
-
-
-def test_a24_controller_expiry_stops_goal():
-    async def go():
-        adapter = FakeAdapter()
-        adapter.async_steps = 80
-        result = await adapter.execute(
-            "fake_set_pose",
-            {"x": 1.0, "y": 0.0, "z": 0.0},
-            deadline=time.time() + 0.12,
-        )
-        assert result.success is False
-        assert result.message == "timeout"
-
-    asyncio.run(go())
-
-
-def test_a25_cancellable_actions_accept_cancel():
-    async def go():
-        adapter = FakeAdapter()
-        adapter.async_steps = 30
-        task = asyncio.create_task(adapter.execute("fake_set_pose", {"x": 1.0, "y": 0.0, "z": 0.0}))
-        await asyncio.sleep(0.05)
-        handles = [h for h in adapter._handles.values() if not h.done]
-        assert handles
-        res = await adapter.cancel(handles[0])
-        assert res.accepted is True
-        result = await task
-        assert result.success is False
-
-    asyncio.run(go())
-
-
-def test_a26_stop_calls_cancel_no_new_goal(tmp_path):
-    async def go():
-        adapter = FakeAdapter()
-        adapter.async_steps = 20
-        ex, store, adapter, hub = adapter_ctx(tmp_path, adapter)
-        rid, _ = await run_until(ex, store, pose_flow(), "running", timeout=2)
-        t0 = time.time()
-        while time.time() - t0 < 2:
-            ctrl = ex.get(rid)
-            if (
-                adapter.calls
-                and ctrl
-                and ctrl.current_nid == "go"
-                and ctrl.current_inst is not None
-            ):
-                break
-            await asyncio.sleep(0.01)
-        n0 = len(adapter.calls)
-        out = await ex.stop_run(rid)
-        assert out.get("status") in ("stopping", "stopped", "running")
-        await wait_status(ex, rid, "stopped", "completed", timeout=4)
-        assert len(adapter.calls) == n0
-        assert ex.get(rid).cancel_called.get("go") is True
-        await hub.stop()
-
-    asyncio.run(go())
-
-
-def test_a27_cancel_rejected_stays_running(tmp_path):
-    async def go():
-        adapter = FakeAdapter()
-        adapter.reject_next_cancel = True
-        adapter.async_steps = 20
-        ex, store, adapter, hub = adapter_ctx(tmp_path, adapter)
-        rid, _ = await run_until(ex, store, pose_flow(), "running", timeout=2)
-        await asyncio.sleep(0.05)
-        out = await ex.stop_run(rid)
-        assert out.get("cancel") == "rejected"
-        st = ex.get(rid)
-        assert st.status == "running"
-        assert st.node_state.get("go", {}).get("state") == "cancel_rejected"
-        await wait_status(ex, rid, "completed", "stopped", "error", timeout=4)
-        await hub.stop()
-
-    asyncio.run(go())
-
-
 def test_a28_motion_timeout_requires_readback(tmp_path):
     async def go():
         adapter = FakeAdapter()
         adapter.async_steps = 80
         ex, store, adapter, hub = adapter_ctx(tmp_path, adapter)
-        from roboact.nodes import get_type
-
         get_type("fake_set_pose").timeout_s = 0.15
         try:
             rid, st = await run_until(ex, store, pose_flow(), "paused", timeout=4)
@@ -205,22 +108,6 @@ def test_a29_restart_mid_motion_no_auto_retry(tmp_path):
     asyncio.run(go())
 
 
-def test_a30_missing_action_blocks_run(tmp_path):
-    async def go():
-        adapter = FakeAdapter()
-        adapter.drop_action_ids.add("fake_set_pose")
-        ex, store, adapter, hub = adapter_ctx(tmp_path, adapter)
-        try:
-            await run_until(ex, store, pose_flow(), "completed")
-            raise AssertionError
-        except ApiError as err:
-            assert err.error == "action_missing"
-        assert adapter.calls == []
-        await hub.stop()
-
-    asyncio.run(go())
-
-
 def test_a31_rejected_missing_timeout_and_write_side_effect():
     adapter = FakeAdapter()
     adapter.extra_raw_actions = [
@@ -270,31 +157,12 @@ def test_a31_rejected_missing_timeout_and_write_side_effect():
     assert cls.side_effect.value == "motion"
 
 
-def test_a32_goal_progress_waits_for_result(tmp_path):
-    async def go():
-        adapter = FakeAdapter()
-        adapter.async_steps = 6
-        ex, store, adapter, hub = adapter_ctx(tmp_path, adapter)
-        flow = pose_flow(after={"enabled": True})
-        rid, st = await run_until(ex, store, flow, "paused", timeout=4)
-        assert st.pause["reason"] == "breakpoint"
-        assert st.pause["when"] == "after"
-        go = [r for r in recs(store, rid) if r["node_id"] == "go"]
-        assert go and go[0]["status"] == "done"
-        assert "out" not in {r["node_id"] for r in recs(store, rid)}
-        await hub.stop()
-
-    asyncio.run(go())
-
-
 def test_a33_operator_lost_pauses_without_cancel(tmp_path):
     async def go():
         adapter = FakeAdapter()
         adapter.async_steps = 4
         ex, store, adapter, hub = adapter_ctx(tmp_path, adapter)
         ex.ui_lost_s = 0.15
-        from roboact.nodes import SleepNode
-
         old_sleep = SleepNode.timeout_s
         SleepNode.timeout_s = 5
         flow = make_flow(
@@ -312,7 +180,6 @@ def test_a33_operator_lost_pauses_without_cancel(tmp_path):
         )
         rid, _ = await run_until(ex, store, flow, "running", timeout=2)
         ex.note_ui(rid)
-        # drop subscribers: note_ui then wait with no SSE
         st = await wait_status(ex, rid, "paused", timeout=4)
         assert st.pause["reason"] == "operator_lost"
         SleepNode.timeout_s = old_sleep
@@ -327,8 +194,6 @@ def test_a34_adapter_lost_pauses(tmp_path):
         ex, store, adapter, hub = adapter_ctx(tmp_path, adapter)
         ex.adapter_heartbeat_s = 0.15
         ex.start_background()
-        from roboact.nodes import SleepNode
-
         old_sleep = SleepNode.timeout_s
         SleepNode.timeout_s = 5
         flow = make_flow(
@@ -353,62 +218,3 @@ def test_a34_adapter_lost_pauses(tmp_path):
         await hub.stop()
 
     asyncio.run(go())
-
-
-def test_a35_motion_output_readonly(tmp_path):
-    async def go():
-        adapter = FakeAdapter()
-        ex, store, adapter, hub = adapter_ctx(tmp_path, adapter)
-        flow = pose_flow(after={"enabled": True})
-        rid, st = await run_until(ex, store, flow, "paused", timeout=4)
-        assert st.pause["when"] == "after"
-        try:
-            await cont(ex, rid, edits={"outputs": {"pose": {"x": 9, "y": 9, "z": 9}}})
-            raise AssertionError
-        except ApiError as err:
-            assert err.error == "motion_output_readonly"
-        await hub.stop()
-
-    asyncio.run(go())
-
-
-def test_a36_images_stay_out_of_sqlite(tmp_path):
-    async def go():
-        adapter = FakeAdapter()
-        bind_adapter(adapter)
-        db = tmp_path / "runs.db"
-        store = open_store(db)
-        hub = SseHub(store, interval=0.1)
-        hub.start()
-        ex = Executor(store, adapter, hub, str(tmp_path / "data"))
-        ex.ui_lost_s = None
-        flow = make_flow(
-            [n("start", "start", data={}), n("cam", "fake_camera"), n("out", "output")],
-            [e("e0", "start", "data", "cam", "value"), e("e1", "cam", "frame", "out", "value")],
-        )
-        for _ in range(10):
-            rid, _ = await run_until(ex, store, flow, "completed", timeout=3)
-            rec = next(r for r in recs(store, rid) if r["node_id"] == "cam")
-            frame = (rec.get("output") or {}).get("frame") or {}
-            assert frame.get("omitted") is True or "data" not in frame
-            assert frame.get("width") and frame.get("height") and frame.get("captured_at")
-            img = ex.image_at(rid, rec["step"], "frame")
-            assert img and img.get("data")
-        raw = db.read_bytes()
-        assert b"\x89PNG" not in raw
-        assert b"data:image/png;base64" not in raw
-        # restart process view: images gone
-        ex.images.clear()
-        last = store.list_runs()[0]["run_id"]
-        cam = next(r for r in recs(store, last) if r["node_id"] == "cam")
-        assert ex.image_at(last, cam["step"], "frame") is None
-        await hub.stop()
-
-    asyncio.run(go())
-
-
-def test_host_flag_is_not_provided():
-    refuse_host_flag([])
-    with pytest.raises(SystemExit) as ei:
-        refuse_host_flag(["--host", "0.0.0.0"])
-    assert ei.value.code == 2

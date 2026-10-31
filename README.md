@@ -9,9 +9,9 @@ Offline, zero-build robot flow canvas. Wire the atomic actions an adapter expose
 - Adapter: one interface in front of an SDK or ROS 2. v1 ships `FakeAdapter` only (`target=sim`).
 - **Offline**: frontend, icons, and fonts live in the repo; Python deps are local wheels. Latin UI and digits use Inter; code, parameter values, times, and step counts use JetBrains Mono (both in `roboact/static/fonts/`, SIL OFL 1.1). CJK falls back to system PingFang SC / Microsoft YaHei / Noto Sans CJK SC — not bundled.
 
-Licence is [MIT](LICENSE) (`Copyright (c) 2026 alexzhang1030`). This repo is not published to PyPI and has no publish config.
+Licence for Roboact itself is **not decided yet**. There is no LICENSE file. Third-party texts stay under `vendor/licenses/`. This repo is not published to PyPI and has no publish config.
 
-Specs in this tree: [PRD v1.4.11](docs/prd.md), [exec-model v0.2.3](docs/exec-model.md) (token §0.2 / A39 ignored — auth deferred), [system-design](docs/system-design.md), [UI spec](docs/ui-spec.md) (**§17 fonts/themes, §18 language**), [Rams design sheets](docs/design/), [diagrams](docs/diagrams/). History: `docs/prd-v1.md`, `docs/exec-model-v0.md`, `docs/ui-spec-v0.md`, `docs/system-design-v0.md`. Decision records are PCR in [`.agents/docs/`](.agents/docs/).
+Specs in this tree: [PRD v1.4.12](docs/prd.md), [exec-model v0.2.3](docs/exec-model.md) (token §0.2 / A39 ignored — auth deferred), [system-design](docs/system-design.md), [UI spec](docs/ui-spec.md) (**§17 fonts/themes, §18 language**), [Rams design sheets](docs/design/), [diagrams](docs/diagrams/). History: `docs/prd-v1.md`, `docs/exec-model-v0.md`, `docs/ui-spec-v0.md`, `docs/system-design-v0.md`. Decision records are PCR in [`.agents/docs/`](.agents/docs/).
 
 ## Install and run
 
@@ -92,16 +92,16 @@ Only items exercised **in a browser against the real backend** are marked pass. 
 
 | Item | Status | Evidence |
 |---|---|---|
-| A4 / PRD 19.1 push merge | **pass** | `test_a4_sse_batching_500_nodes_browser`: Chromium + real SSE, 500 nodes finish, batches/s ≤ 10, canvas matches backend. Server `test_batch_rate_at_most_10_per_second` is a control only. |
-| A5 / PRD 19.2 pause latency | **pass** | `test_a5_pause_latency_frames_in_browser`: pause a 500-node run; rAF frames from the click until the top-bar Paused word, 5 reps, all ≤ 20. Server `test_pause_event_immediate_a5` is a control only. |
-| A6 reconnect + page lost | **pass** | `test_a6_reconnect_and_half_open_page_lost`: real TCP cut then restore (event ids do not go backwards, canvas matches backend); half-open (stop forwarding, no FIN/RST) → `operator_lost`, no new motion. Server `replay_after` / A33 are controls only. |
-| PRD 19 canvas performance | **pass** | Browser `test_prd19_canvas_performance_500_nodes` (pan / status flood p95 ≤ 33 ms) plus A4’s real SSE 500-node run. |
-| PRD 19.2 stop without waiting for the window | **pass** | Same as A5. |
-| PRD 19.4 wait until stable | **pass** | FakeAdapter: `test_prd194_wait_then_send_when_stable`, `test_prd194_timeout_precondition_failed_no_goal`, `test_prd194_no_wait_fails_on_first_read`. |
-| PRD 19.5 light and dark | **pass** | `test_prd195_prefers_dark_then_persists_light`: system dark first-loads dark; pick light and reload stays light. `test_prd195_follow_system_tracks_prefers`. `test_prd195_grayscale_six_states_both_themes`. `test_prd195_offline_fonts_both_themes`: offline load of `/static/fonts/` Inter / JetBrains Mono, no remote font request. Contrast: `test_contrast_ui_spec` (uses `docs/design/contrast.py`). |
-| Locale + settings | **pass** | `test_i18n` (catalog keys match; no hard-coded CJK in `web/` outside catalogs). `test_prd196_*` (navigator language including French → English, persist, English overflow). `test_prd197_*` (clear storage, bad `localStorage`, reduced motion, panel/grid, last flow and canvas). `test_prd198_codes_survive_language_switch`. |
-| A40 / Host Origin | **pass** | `test_a40_host_origin_content_type` (`Host: evil.example` → 403, `Content-Type: text/plain` → 415, foreign Origin WS → 403/400; no run starts). |
-| PRD 19.10 toolchain | **pass** | Python 3.12 (`.python-version`, `requires-python = ">=3.12"`; source: Jetson Thor + ROS 2 Jazzy / Ubuntu 24.04, [REP 2000](https://www.ros.org/reps/rep-2000.html)). No `rclpy` in `pyproject.toml`. `scripts/check.sh` and CI `check` + `test-aarch64`. |
+| A4 / PRD 19.1 push merge | **pass** | Chromium, 500 nodes, real SSE: `n=117 duration_s=12.449 batches_per_sec=9.398` (≤ 10). Canvas matched backend. |
+| A5 / PRD 19.2 pause latency | **pass** | Chromium rAF over 5 runs: `min=2 median=3.0 max=4` (all ≤ 20). samples=`[2, 3, 3, 4, 4]`. |
+| A6 reconnect + page lost | **部分通过** | Real TCP-proxy half-open → `operator_lost`, no new motion node (`nodes=['start', 'go']`). Pause was `11.251s` (need ≤ 10 s). Reconnect cut `1.604s`, event ids did not go backwards. |
+| PRD 19 canvas performance | **pass** | `test_prd19_canvas_performance_500_nodes` plus A4’s 500-node real SSE run. |
+| PRD 19.2 stop without waiting for the window | **pass** | Same as A5 (rAF min/median/max all ≤ 20). |
+| PRD 19.4 wait until stable | **pass** | `test_a38_wait_then_send_when_stable`, `test_a38_deadline_precondition_failed_no_goal`, `test_a38_no_wait_fails_on_first_read`. |
+| PRD 19.5 light and dark | **pass** | `test_prd195_prefers_dark_then_persists_light`; grayscale six states; `test_prd195_offline_fonts_both_themes` (no remote font request). Contrast: `test_section_17_4_table_values`. |
+| Locale + settings | **pass** | Catalog key parity; missing zh key falls back to English. Navigator en / zh / fr. 19.7 persist / bad `localStorage` / two-tab sync. `test_prd198_codes_survive_language_switch`. |
+| A40 / Host Origin | **pass** | One reject + one allow each for Host, Origin, Content-Type (`test_a40_*`). Rejects start no run. |
+| PRD 19.10 toolchain | **pass** | Python 3.12; no `rclpy` in `pyproject.toml`; `scripts/check.sh` + CI `check` / `test-aarch64`. |
 | A39 authentication | **deferred (Alex 2026-10-31)** | No tokens. See [.agents/docs/auth-and-network.md](.agents/docs/auth-and-network.md). |
 
 ## Before a real robot (R1–R8, N/A in v1)
@@ -122,7 +122,7 @@ v1 uses `FakeAdapter` (`target=sim`). These must pass before a real robot. Sourc
 ## Layout
 
 ```
-LICENSE                 MIT (Copyright (c) 2026 alexzhang1030)
+(no LICENSE file)       Roboact licence not decided yet
 AGENTS.md               Project rules + PCR block
 .agents/docs/           Project Context Records (map in README.md)
 roboact/                Python package (adapter, nodes, graph, executor, Store, HTTP+SSE)
@@ -131,7 +131,7 @@ web/                    Static frontend, served by the backend
 web/i18n/               en.js and zh-CN.js catalogs (ES modules, no build)
 web/vendor/             Vue / Vue Flow / icons (unmodified upstream files)
 assets/logo.svg         Brand mark (favicon is the same drawing)
-docs/prd.md             PRD v1.4.11 (current product doc in this tree; token rows ignored)
+docs/prd.md             PRD v1.4.12 (current product doc in this tree; token rows ignored)
 docs/system-design.md
 docs/ui-spec.md         §17 fonts and themes, §18 language
 docs/design/            Rams light + `-dark` sheets

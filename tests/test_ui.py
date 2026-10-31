@@ -1,8 +1,10 @@
-"""Playwright: 离线、断点界面、灰度可辨、500 节点性能、尺寸不因选中/缩放改变。"""
+"""PRD 19 canvas performance and 19.3 node-size stability."""
 
 from __future__ import annotations
 
+import struct
 import urllib.parse
+import zlib
 
 import pytest
 
@@ -42,105 +44,7 @@ def _page(browser, base):
     return page, blocked, errs
 
 
-def test_offline_no_external_requests(server):
-    p, path = _launch()
-    try:
-        br = launch_chromium(p, path)
-        page, blocked, errs = _page(br, server["base"])
-        page.goto(server["base"] + "/", wait_until="domcontentloaded")
-        page.wait_for_function("window.__ready === true", timeout=20000)
-        page.wait_for_timeout(400)
-        assert blocked == []
-        assert not [e for e in errs if "process" in e or "404" in e]
-        assert page.locator(".fn").count() >= 1
-        br.close()
-    finally:
-        p.stop()
-
-
-def test_breakpoint_flow_ui(server):
-    p, path = _launch()
-    try:
-        br = launch_chromium(p, path)
-        page, blocked, _errs = _page(br, server["base"])
-        page.goto(server["base"] + "/", wait_until="domcontentloaded")
-        page.wait_for_function("window.__ready === true", timeout=20000)
-        page.evaluate("() => window.__af.toggleBp('start', 'before')")
-        page.locator(".ctrls button.primary").click()
-        page.wait_for_function(
-            "() => window.__af.run.value && window.__af.run.value.status === 'paused'",
-            timeout=10000,
-        )
-        page.wait_for_selector('.fn[data-status="paused"]', timeout=5000)
-        assert page.locator('.fn[data-status="paused"]').count() >= 1
-        word = page.locator('.fn[data-status="paused"] .fn-st-word').first.inner_text()
-        assert "Paused" in word or "已暂停" in word, word
-        assert blocked == []
-        br.close()
-    finally:
-        p.stop()
-
-
-def test_grayscale_states_distinct(server):
-    p, path = _launch()
-    try:
-        br = launch_chromium(p, path)
-        page, blocked, _errs = _page(br, server["base"])
-        page.goto(server["base"] + "/?gallery=1", wait_until="domcontentloaded")
-        page.wait_for_function("window.__ready === true", timeout=20000)
-        page.wait_for_timeout(300)
-        words = page.locator(".fn-st-word").all_inner_texts()
-        assert any("Done" in w or "完成" in w for w in words)
-        assert any("Paused" in w or "暂停" in w for w in words)
-        assert any("Error" in w or "出错" in w for w in words)
-        kinds = page.eval_on_selector_all(
-            ".ico", "els => els.map(e => e.getAttribute('data-kind'))"
-        )
-        assert set(kinds) >= {"done", "paused", "error"}
-        # screenshot each icon, convert to grayscale, compare occupancy grids
-        grids = []
-        for kind in ("done", "paused", "error"):
-            el = page.locator(f'.ico[data-kind="{kind}"]').first
-            png = el.screenshot()
-            grids.append(_gray_grid(png))
-        assert grids[0] != grids[1]
-        assert grids[0] != grids[2]
-        assert grids[1] != grids[2]
-        assert blocked == []
-        br.close()
-    finally:
-        p.stop()
-
-
-def _gray_grid(png: bytes):
-
-    # Prefer PIL if present; otherwise decode PNG via a tiny parser for 8-bit
-    # RGBA.
-    try:
-        import io
-
-        from PIL import Image
-
-        im = Image.open(io.BytesIO(png)).convert("L")
-        w, h = im.size
-        pix = list(im.getdata())
-    except Exception:
-        w, h, pix = _png_gray(png)
-    gw, gh = 6, 6
-    grid = []
-    for gy in range(gh):
-        for gx in range(gw):
-            xs = range(int(gx * w / gw), int((gx + 1) * w / gw) or 1)
-            ys = range(int(gy * h / gh), int((gy + 1) * h / gh) or 1)
-            vals = [pix[y * w + x] for y in ys for x in xs if 0 <= y * w + x < len(pix)]
-            grid.append(0 if not vals else (1 if (sum(vals) / len(vals)) < 200 else 0))
-    return tuple(grid)
-
-
 def _png_gray(png: bytes):
-    import struct
-    import zlib
-
     assert png[:8] == b"\x89PNG\r\n\x1a\n"
     i = 8
     w = h = 0

@@ -1,8 +1,8 @@
 # Licence and repo
 
-**Current conclusion.** MIT. The copyright line is exactly `Copyright (c) 2026 alexzhang1030`. Mention MIT in the README. Do not invent a second licence.
+**Current conclusion.** Roboact's own licence is **not decided yet**. Do not add a LICENSE file. Do not claim MIT (or any other licence) for this project. Third-party licence texts stay under `vendor/licenses/` and are recorded per file in `vendor-manifest.json`.
 
-The public GitHub repository is `alexzhang1030/roboact`. The product name is Roboact. This tree is not published to PyPI. Vendor files (Vue, Vue Flow, fonts, Python wheels) are recorded in `vendor-manifest.json` with sha256 and a licence file under `vendor/licenses/`.
+The public GitHub repository is `alexzhang1030/roboact`. The product name is Roboact. This tree is not published to PyPI.
 
 ## Git
 
@@ -15,13 +15,14 @@ PCR records live in `.agents/docs/`. Do not add `docs/decisions/`.
 
 ## Why
 
-The repository is public. A leaked controller address or token cannot be unpublished from git history. `rg` and many globs skip dot-directories; `git ls-files` does not.
+Licence choice is not on record. The repository is public. A leaked controller address or token cannot be unpublished from git history. `rg` and many globs skip dot-directories; `git ls-files` does not.
 
 ## Rejected
 
-- A second licence or a PyPI publish config.
+- Shipping a LICENSE file or calling Roboact MIT before Alex confirms.
+- A PyPI publish config.
 - Scanning a directory glob that silently skips `.agents/`.
 
 ## Who / date / spec
 
-Alex, 2026-10-31. [PRD header](../../docs/prd.md), [LICENSE](../../LICENSE), [PRD 19.8](../../docs/prd.md).
+Alex, 2026-10-31. [PRD header](../../docs/prd.md), [PRD 19.8](../../docs/prd.md).

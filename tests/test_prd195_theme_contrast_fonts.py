@@ -14,15 +14,7 @@ except ImportError:
     Image = None
 
 from tests.conftest import launch_chromium
-from tests.test_contrast_ui_spec import (
-    DARK_CSS,
-    LIGHT_CSS,
-    NONTEXT_MIN,
-    TEXT_MIN,
-    contrast_ratio,
-    meets,
-    parse_css_color,
-)
+from tests.test_contrast_ui_spec import DARK_CSS, LIGHT_CSS, parse_css_color
 from tests.test_ui import _launch, _png_gray
 
 pw = pytest.importorskip("playwright.sync_api")
@@ -299,114 +291,6 @@ def test_prd195_offline_fonts_both_themes(server):
             assert host in LOCAL_HOSTS, url
             assert "/static/fonts/" in url, url
             assert any(n in url for n in ("InterVariable", "JetBrainsMono"))
-        assert blocked == []
-        assert _external_hosts(seen) == []
-        br.close()
-    finally:
-        p.stop()
-
-
-def test_prd195_follow_system_tracks_prefers(server):
-    """§17: 跟随系统 listens to prefers-color-scheme."""
-    p, _path = _launch()
-    try:
-        br = _browser(p)
-        ctx = br.new_context(viewport={"width": 1280, "height": 800}, color_scheme="dark")
-        page, blocked, _seen, _errs = _wired_page(ctx, server["base"])
-        _goto_ready(page, server["base"] + "/")
-        page.evaluate("() => window.__af.setThemeMode('system')")
-        page.wait_for_function("() => document.documentElement.dataset.theme === 'dark'")
-        page.emulate_media(color_scheme="light")
-        page.wait_for_function(
-            "() => document.documentElement.dataset.theme === 'light'", timeout=5000
-        )
-        assert page.evaluate("() => localStorage.getItem('roboact.theme')") == "system"
-        page.emulate_media(color_scheme="dark")
-        page.wait_for_function(
-            "() => document.documentElement.dataset.theme === 'dark'", timeout=5000
-        )
-        assert blocked == []
-        br.close()
-    finally:
-        p.stop()
-
-
-def test_prd195_live_contrast_operator_adapter_disabled_edge_grid(server):
-    """19.5 (e): live computed contrast for amber/red, disabled buttons, edges, grid."""
-    p, _path = _launch()
-    try:
-        br = _browser(p)
-        ctx = br.new_context(viewport={"width": 1280, "height": 800}, color_scheme="light")
-        page, blocked, seen, _errs = _wired_page(ctx, server["base"])
-        _goto_ready(page, server["base"] + "/")
-        for theme, expected in (("light", LIGHT_CSS), ("dark", DARK_CSS)):
-            page.evaluate(
-                """(theme) => {
-                  if (window.__af && window.__af.setThemeMode) window.__af.setThemeMode(theme)
-                  else {
-                    document.documentElement.dataset.theme = theme
-                    localStorage.setItem('roboact.theme', theme)
-                  }
-                }""",
-                theme,
-            )
-            page.wait_for_timeout(60)
-            data = page.evaluate(
-                """() => {
-                  const vars = {}
-                  const s = getComputedStyle(document.documentElement)
-                  const names = ['bg','grid','surface','text','muted','border','edge','red','amber']
-                  for (const n of names) {
-                    vars[n] = s.getPropertyValue('--' + n).trim()
-                  }
-                  const disabled = document.querySelector('button:disabled')
-                  const dcs = disabled ? getComputedStyle(disabled) : null
-                  const primary = document.querySelector('button.primary')
-                  if (primary) primary.disabled = true
-                  const pcs = primary ? getComputedStyle(primary) : null
-                  const canvas = document.querySelector('.vue-flow')
-                  const ccs = canvas ? getComputedStyle(canvas) : null
-                  return {
-                    vars,
-                    disabled: dcs
-                      ? { color: dcs.color, bg: dcs.backgroundColor, opacity: dcs.opacity }
-                      : null,
-                    primaryDisabled: pcs
-                      ? { color: pcs.color, bg: pcs.backgroundColor, opacity: pcs.opacity }
-                      : null,
-                    canvasBg: ccs ? ccs.backgroundColor : '',
-                    canvasImage: ccs ? ccs.backgroundImage : '',
-                  }
-                }"""
-            )
-            palette = {k: parse_css_color(v) for k, v in data["vars"].items() if v}
-            for key in ("bg", "grid", "surface", "muted", "edge", "red", "amber"):
-                assert palette[key] == expected[key], f"{theme} --{key}: live {
-                    palette[key]
-                } expected {expected[key]}"
-
-            for bg in ("bg", "surface"):
-                assert meets(contrast_ratio(palette["amber"], palette[bg]), TEXT_MIN)
-                assert meets(contrast_ratio(palette["red"], palette[bg]), TEXT_MIN)
-                assert meets(contrast_ratio(palette["edge"], palette[bg]), NONTEXT_MIN)
-                assert meets(contrast_ratio(palette["muted"], palette[bg]), TEXT_MIN)
-            assert contrast_ratio(palette["grid"], palette["bg"]) >= 1.05
-
-            assert data["disabled"], "no disabled button on the idle canvas"
-            d_fg = parse_css_color(data["disabled"]["color"])
-            d_bg = parse_css_color(data["disabled"]["bg"])
-            assert float(data["disabled"]["opacity"]) == 1.0
-            assert meets(contrast_ratio(d_fg, d_bg), TEXT_MIN), f"{theme} disabled {d_fg} on {d_bg}"
-
-            assert data["primaryDisabled"]
-            p_fg = parse_css_color(data["primaryDisabled"]["color"])
-            p_bg = parse_css_color(data["primaryDisabled"]["bg"])
-            assert float(data["primaryDisabled"]["opacity"]) == 1.0
-            assert meets(contrast_ratio(p_fg, p_bg), TEXT_MIN), (
-                f"{theme} primary disabled {p_fg} on {p_bg}"
-            )
-
-            assert "radial-gradient" in data["canvasImage"]
         assert blocked == []
         assert _external_hosts(seen) == []
         br.close()

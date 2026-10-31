@@ -255,27 +255,30 @@ def test_prd197_clear_storage_resets_prefs_not_timeouts(server):
         p.stop()
 
 
-def test_prd197_clear_storage_zh_resets_to_browser_lang(server):
+def test_prd196_missing_zh_key_falls_back_to_english(server):
+    """19.6: delete a Chinese key → English text, never the key name."""
     p, _path = _launch()
     try:
         br = _browser(p)
-        ctx = br.new_context(
-            viewport={"width": 1280, "height": 800}, locale="zh-CN", color_scheme="light"
-        )
-        page, _, _, _ = _wired_page(ctx, server["base"])
+        ctx = br.new_context(viewport={"width": 1280, "height": 800}, locale="zh-CN")
+        page, blocked, _seen, _errs = _wired_page(ctx, server["base"])
         _goto_ready(page, server["base"] + "/")
-        page.evaluate(
-            """() => {
-              window.__af.setThemeMode('dark')
-              window.__af.setLocaleMode('en')
+        out = page.evaluate(
+            """async () => {
+              const mod = await import('/js/i18n.js')
+              const key = 'run.start'
+              const enVal = mod.CATALOGS.en[key]
+              const zhVal = mod.CATALOGS['zh-CN'][key]
+              delete mod.CATALOGS['zh-CN'][key]
+              const shown = mod.catalogLookup(key, 'zh-CN')
+              return { key, enVal, zhVal, shown }
             }"""
         )
-        page.evaluate("() => { localStorage.clear(); sessionStorage.clear() }")
-        page.reload(wait_until="domcontentloaded")
-        page.wait_for_function("window.__ready === true", timeout=20000)
-        assert page.evaluate("() => document.documentElement.dataset.theme") == "light"
-        assert page.evaluate("() => document.documentElement.dataset.lang") == "zh-CN"
-        assert "运行" in page.locator(".slot-1").inner_text()
+        assert out["enVal"]
+        assert out["zhVal"] != out["enVal"]
+        assert out["shown"] == out["enVal"]
+        assert out["shown"] != out["key"]
+        assert blocked == []
         br.close()
     finally:
         p.stop()
