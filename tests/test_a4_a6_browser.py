@@ -199,6 +199,62 @@ def test_a4_sse_batching_500_nodes_browser(server):
         p.stop()
 
 
+# Half-open A6: one 10 s pose step. last_ui_at is the start-of-run beat
+# (~go start). After 10 s the node ends and _ui_lost is true, so grip
+# never starts. Cut ~0.4 s after go is running so remaining ≤ 10 s
+# (28 × 0.4 s = 11.2 s was the 11.251 s overrun).
+A6_HALF_STEPS = 1
+A6_HALF_SLEEP_S = 10.0
+A6_CUT_AFTER_S = 0.4
+A6_CUT_BEFORE_BEAT_S = 1.8
+
+
+def _configure_a6_half_open_motion(base: str) -> None:
+    http_json(
+        base,
+        "/api/test/adapter",
+        "POST",
+        {"async_steps": A6_HALF_STEPS, "async_sleep_s": A6_HALF_SLEEP_S},
+    )
+
+
+def _half_open_to_operator_lost(page, proxy: TcpProxy, base: str) -> float:
+    """Cut the page mid-`go`. Return seconds from cut to operator_lost."""
+    _click_run(page)
+    _wait_run(page, "running", timeout=20000)
+    rid = _run_id(page)
+    t_run = time.monotonic()
+    _wait_node_running(base, rid, "go")
+    deadline = t_run + A6_CUT_BEFORE_BEAT_S
+    target = min(time.monotonic() + A6_CUT_AFTER_S, deadline)
+    while time.monotonic() < target:
+        time.sleep(0.02)
+    recs_at_cut = list(http_json(base, f"/api/runs/{rid}").get("records") or [])
+    assert not any(r.get("node_id") == "grip" for r in recs_at_cut), recs_at_cut
+    cut = time.monotonic()
+    proxy.half_open()
+    paused = None
+    while time.monotonic() - cut < 20:
+        snap = http_json(base, f"/api/runs/{rid}")
+        st = (snap.get("run") or snap).get("status")
+        if st == "paused":
+            paused = snap
+            break
+        time.sleep(0.05)
+    dt_lost = time.monotonic() - cut
+    assert paused is not None, f"backend never paused after half-open (waited {dt_lost:.3f}s)"
+    reason = ((paused.get("run") or paused).get("pause") or {}).get("reason")
+    assert reason == "operator_lost", (
+        reason,
+        paused.get("pause") or (paused.get("run") or {}).get("pause"),
+    )
+    recs_after = list(paused.get("records") or [])
+    assert not any(r.get("node_id") == "grip" for r in recs_after), [
+        r.get("node_id") for r in recs_after
+    ]
+    return dt_lost
+
+
 def _wait_node_running(base: str, rid: str, nid: str, timeout: float = 15.0) -> dict:
     t0 = time.monotonic()
     last = None
@@ -281,47 +337,58 @@ def test_a6_reconnect_and_half_open_page_lost(server):
 
         # --- half-open: stop forwarding, no FIN, SSE writes still succeed ---
         page.evaluate("() => window.__af.cmd('stop')")
-        http_json(
-            server["base"], "/api/test/adapter", "POST", {"async_steps": 28, "async_sleep_s": 0.4}
-        )
+        _configure_a6_half_open_motion(server["base"])
         page.wait_for_timeout(200)
-        _click_run(page)
-        _wait_run(page, "running", timeout=20000)
-        rid2 = _run_id(page)
-        _wait_node_running(server["base"], rid2, "go")
-        recs_at_cut = list(http_json(server["base"], f"/api/runs/{rid2}").get("records") or [])
-        assert not any(r.get("node_id") == "grip" for r in recs_at_cut), recs_at_cut
-        cut2 = time.monotonic()
-        proxy.half_open()
-        paused = None
-        while time.monotonic() - cut2 < 20:
-            snap = http_json(server["base"], f"/api/runs/{rid2}")
-            st = (snap.get("run") or snap).get("status")
-            if st == "paused":
-                paused = snap
-                break
-            time.sleep(0.05)
-        dt_lost = time.monotonic() - cut2
+        dt_lost = _half_open_to_operator_lost(page, proxy, server["base"])
         print(f"A6 half-open cut→operator_lost: {dt_lost:.3f}s", flush=True)
-        assert paused is not None, f"backend never paused after half-open (waited {dt_lost:.3f}s)"
-        reason = ((paused.get("run") or paused).get("pause") or {}).get("reason")
-        assert reason == "operator_lost", (
-            reason,
-            paused.get("pause") or (paused.get("run") or {}).get("pause"),
-        )
-        recs_after = list(paused.get("records") or [])
-        assert not any(r.get("node_id") == "grip" for r in recs_after), [
-            r.get("node_id") for r in recs_after
-        ]
-        # exec-model §5.1: about 10 s. Current motion may finish first; allow
-        # slack.
         assert dt_lost >= 7.0, f"operator_lost too fast ({dt_lost:.3f}s); deadline is 10s"
+        assert dt_lost <= 10.0, f"A6 pause {dt_lost:.3f}s > 10s"
         print(
             f"A6 half-open checks: reason=operator_lost dt={dt_lost:.3f}s "
-            f"within_10s={dt_lost <= 10.0} "
-            f"nodes={[r.get('node_id') for r in recs_after]} cut_reconnect_s={cut_dt:.3f}",
+            f"within_10s={dt_lost <= 10.0} cut_reconnect_s={cut_dt:.3f}",
             flush=True,
         )
+        br.close()
+    finally:
+        p.stop()
+        proxy.close()
+
+
+def test_a6_half_open_pauses_within_10s(server):
+    """A6: five real half-open cuts; every pause must be in [7 s, 10 s]."""
+    put_flow(server["base"], motion_graph("A6 10s bound"))
+    _configure_a6_half_open_motion(server["base"])
+    proxy = TcpProxy("127.0.0.1", server["port"])
+    p, _path = _launch()
+    try:
+        br = _browser(p)
+        page, _blocked, _errs = _open(br, proxy.base)
+        samples: list[float] = []
+        for i in range(5):
+            if i:
+                proxy.restore()
+                page.wait_for_function(
+                    """(ok) => {
+                      const t = document.body.innerText
+                      return t.includes('Connected') || t.includes(ok)
+                    }""",
+                    arg=zh("conn.ok"),
+                    timeout=15000,
+                )
+                page.evaluate("() => window.__af.cmd('stop')")
+                page.wait_for_timeout(200)
+            dt = _half_open_to_operator_lost(page, proxy, server["base"])
+            samples.append(dt)
+            print(f"A6 half-open rep {i + 1}/5: {dt:.3f}s", flush=True)
+        samples.sort()
+        mn, med, mx = samples[0], _median(samples), samples[-1]
+        print(
+            f"A6 half-open over {len(samples)} reps: "
+            f"min={mn:.3f} median={med:.3f} max={mx:.3f} samples={samples}",
+            flush=True,
+        )
+        assert mn >= 7.0, f"A6 too fast: min={mn:.3f}s samples={samples}"
+        assert mx <= 10.0, f"A6 over 10s: max={mx:.3f}s samples={samples}"
         br.close()
     finally:
         p.stop()
