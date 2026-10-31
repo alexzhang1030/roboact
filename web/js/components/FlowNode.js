@@ -141,7 +141,7 @@ export default markRaw(defineComponent({
     }
   },
   template: `
-  <div class="fn" :data-status="kind" :data-state="st.status" :data-node-type="data.nodeType">
+  <div class="fn" :class="{ 'no-ports': !rows }" :data-status="kind" :data-state="st.status" :data-node-type="data.nodeType">
     <div class="bp before" :class="{ on: bpBefore.enabled, cond: bpBefore.round || (bpBefore.condition && bpBefore.condition.field) }"
          :title="bpBeforeTitle"
          @click.stop="toggleBp(id, 'before')">

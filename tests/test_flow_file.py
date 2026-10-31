@@ -1252,15 +1252,15 @@ def _gone_card_metrics(page) -> dict:
         """() => {
           const card = document.querySelector('.fn[data-status="missing"]')
           const sum = card.querySelector('[data-testid="node-summary"]')
-          const cs = getComputedStyle(card)
-          const padB = parseFloat(cs.paddingBottom)
+          const body = getComputedStyle(sum)
           return {
             cardH: card.clientHeight,
             gap: card.clientHeight - (sum.offsetTop + sum.offsetHeight),
-            padB,
+            padL: parseFloat(body.paddingLeft),
+            padB: parseFloat(getComputedStyle(card).paddingBottom),
             title: sum.getAttribute('title'),
             portRows: card.querySelectorAll('.fn-port').length,
-            clamp: getComputedStyle(sum).webkitLineClamp || getComputedStyle(sum).lineClamp,
+            clamp: body.webkitLineClamp || body.lineClamp,
           }
         }"""
     )
@@ -1281,6 +1281,7 @@ def test_c14_gone_node_card_follows_content(server, tmp_path):
               return out
             }"""
         )
+        print(f"C14 demo heights: {demo}", flush=True)
         for typ, want in DEMO_NODE_CLIENT_H.items():
             assert typ in demo, demo
             assert abs(demo[typ] - want) <= 1, (typ, demo[typ], want)
@@ -1297,16 +1298,18 @@ def test_c14_gone_node_card_follows_content(server, tmp_path):
         )
         _set_en_catalog(page, "error.action_missing", GONE_ONE_LINE)
         one = _gone_card_metrics(page)
+        print(f"C14 gone one-line: {one}", flush=True)
         assert one["title"] == GONE_ONE_LINE, one
         assert one["portRows"] == 0, one
-        assert one["gap"] <= one["padB"] + 2, one
+        assert abs(one["gap"] - one["padL"]) <= 1, one
 
         _set_en_catalog(page, "error.action_missing", GONE_LONG_DESC)
         two = _gone_card_metrics(page)
+        print(f"C14 gone two-line: {two}", flush=True)
         assert two["title"] == GONE_LONG_DESC, two
         assert two["portRows"] == 0, two
         assert two["clamp"] == "2", two
-        assert two["gap"] <= two["padB"] + 2, two
+        assert abs(two["gap"] - two["padL"]) <= 1, two
         assert one["cardH"] < two["cardH"], (one, two)
     finally:
         ctx.close()
