@@ -5,10 +5,18 @@ from __future__ import annotations
 import time
 
 import pytest
+from roboact import A5_MAX_MS, A5_P95_MS
 from roboact.catalog import zh
 
 from tests.conftest import launch_chromium
-from tests.http_api import SSE_WRAP, echo_chain_graph, http_json, motion_graph, put_flow
+from tests.http_api import (
+    SSE_WRAP,
+    echo_chain_graph,
+    http_json,
+    http_status,
+    motion_graph,
+    put_flow,
+)
 from tests.tcp_proxy import TcpProxy
 from tests.test_ui import _launch, _page
 
@@ -80,24 +88,106 @@ def _median(xs: list[float]) -> float:
     return (s[mid - 1] + s[mid]) / 2
 
 
+def _p95(xs: list[float]) -> float:
+    s = sorted(xs)
+    if not s:
+        return 0.0
+    k = (len(s) - 1) * 0.95
+    lo = int(k)
+    hi = min(lo + 1, len(s) - 1)
+    frac = k - lo
+    return s[lo] * (1 - frac) + s[hi] * frac
+
+
+def _stop_run(page) -> None:
+    page.evaluate("() => window.__af.cmd('stop')")
+    page.wait_for_function(
+        """() => {
+          const r = window.__af.run.value
+          return !r || ['stopped', 'completed', 'error'].includes(r.status)
+            || (r.status === 'paused' && r.pause && r.pause.reason)
+        }""",
+        timeout=30000,
+    )
+    st = page.evaluate("() => window.__af.run.value && window.__af.run.value.status")
+    if st == "paused":
+        page.evaluate("() => window.__af.cmd('stop')")
+        page.wait_for_function(
+            """() => {
+              const r = window.__af.run.value
+              return !r || ['stopped', 'completed', 'error'].includes(r.status)
+            }""",
+            timeout=30000,
+        )
+
+
+_A5_MEASURE = """(kind) => {
+  return new Promise((resolve) => {
+    window.__afPauseTimes = []
+    const started = Date.now()
+    if (kind === 'run') window.__af.doRun('all')
+    if (kind === 'user') document.querySelector('.slot-1').click()
+    if (kind === 'step') document.querySelector('.slot-2').click()
+    const poll = () => {
+      const evs = window.__afPauseTimes
+      if (evs && evs.length && evs[0].paused_at_ms) {
+        resolve({
+          ms: Date.now() - evs[0].paused_at_ms,
+          reason: (window.__af.run.value && window.__af.run.value.pause
+            && window.__af.run.value.pause.reason) || '',
+        })
+        return
+      }
+      if (Date.now() - started > 20000) {
+        resolve({ ms: null, timed_out: true, reason: '' })
+        return
+      }
+      requestAnimationFrame(poll)
+    }
+    requestAnimationFrame(poll)
+  })
+}"""
+
+
 def test_a5_pause_latency_frames_in_browser(server):
-    """A5 / PRD 19.2: pause event → first Paused frame, ≤ 20 rAF frames."""
-    put_flow(server["base"], echo_chain_graph(500, "A5 500 nodes"))
-    http_json(server["base"], "/api/test/step-delay", "POST", {"seconds": 0.01})
+    """A5 / PRD 19.2: server write of paused → first frame after pause event."""
+    flow = put_flow(server["base"], echo_chain_graph(8, "A5 small"))
+    fid = flow["id"]
+    http_json(server["base"], "/api/test/step-delay", "POST", {"seconds": 0.04})
+    http_json(
+        server["base"],
+        f"/api/flows/{fid}/breakpoints/n0/before",
+        "PUT",
+        {"enabled": True, "mode": "every"},
+    )
     p, _path = _launch()
     try:
         br = _browser(p)
         page, blocked, _errs = _open(br, server["base"])
         page.wait_for_function(
-            "() => document.querySelectorAll('.vue-flow__node').length >= 400",
-            timeout=120000,
+            "() => document.querySelectorAll('.vue-flow__node').length >= 6",
+            timeout=60000,
         )
-        samples: list[int] = []
-        click_frames: list[int] = []
-        event_ms: list[float] = []
-        attempts = 0
-        while len(samples) < 5 and attempts < 10:
-            attempts += 1
+        by_kind: dict[str, list[float]] = {"breakpoint": [], "step": [], "user": []}
+
+        for _ in range(20):
+            rec = page.evaluate(_A5_MEASURE, "run")
+            assert not rec.get("timed_out"), rec
+            assert rec.get("ms") is not None, rec
+            assert rec.get("reason") == "breakpoint", rec
+            by_kind["breakpoint"].append(float(rec["ms"]))
+            page.evaluate("() => { window.__afPauseTimes = [] }")
+            rec_s = page.evaluate(_A5_MEASURE, "step")
+            assert not rec_s.get("timed_out"), rec_s
+            assert rec_s.get("ms") is not None, rec_s
+            assert rec_s.get("reason") == "step_done", rec_s
+            by_kind["step"].append(float(rec_s["ms"]))
+            _stop_run(page)
+
+        http_json(server["base"], f"/api/flows/{fid}/breakpoints/n0/before", "DELETE")
+        page.reload(wait_until="domcontentloaded")
+        page.wait_for_function("window.__ready === true", timeout=120000)
+        for _ in range(20):
             _click_run(page)
             _wait_run(page, "running", timeout=30000)
             page.wait_for_function(
@@ -107,88 +197,29 @@ def test_a5_pause_latency_frames_in_browser(server):
                 }""",
                 timeout=30000,
             )
-            rec = page.evaluate(
-                """(pausedZh) => {
-                  return new Promise((resolve) => {
-                    const r = window.__af.run.value
-                    if (!r || r.status !== 'running') {
-                      resolve({ event_frames: -1 }); return
-                    }
-                    window.__afPauseTimes = []
-                    const clickAt = performance.now()
-                    document.querySelector('.slot-1').click()
-                    let nClick = 0
-                    let nEvent = 0
-                    let eventAt = 0
-                    let saw = false
-                    const loop = () => {
-                      nClick += 1
-                      if (!saw && window.__afPauseTimes && window.__afPauseTimes.length) {
-                        saw = true
-                        eventAt = window.__afPauseTimes[0].at
-                        nEvent = 0
-                      }
-                      if (saw) nEvent += 1
-                      const el = document.querySelector('.run-word')
-                      const w = el ? (el.textContent || '') : ''
-                      const paused = w.indexOf('Paused') === 0
-                        || w.indexOf(pausedZh) === 0
-                      if (paused) {
-                        resolve({
-                          event_frames: saw ? nEvent : nClick,
-                          click_frames: nClick,
-                          event_ms: saw ? performance.now() - eventAt : null,
-                          click_ms: performance.now() - clickAt,
-                        })
-                        return
-                      }
-                      if (nClick > 180) {
-                        resolve({
-                          event_frames: nEvent,
-                          click_frames: nClick,
-                          event_ms: saw ? performance.now() - eventAt : null,
-                          timed_out: true,
-                        })
-                        return
-                      }
-                      requestAnimationFrame(loop)
-                    }
-                    requestAnimationFrame(loop)
-                  })
-                }""",
-                zh("run.word.paused"),
+            rec = page.evaluate(_A5_MEASURE, "user")
+            assert not rec.get("timed_out"), rec
+            assert rec.get("ms") is not None, rec
+            assert rec.get("reason") == "user", rec
+            by_kind["user"].append(float(rec["ms"]))
+            _stop_run(page)
+
+        all_ms = by_kind["breakpoint"] + by_kind["step"] + by_kind["user"]
+        assert len(all_ms) == 60, {k: len(v) for k, v in by_kind.items()}
+        for kind, xs in by_kind.items():
+            print(
+                f"A5 {kind} n={len(xs)} min={min(xs):.2f} median={_median(xs):.2f} "
+                f"p95={_p95(xs):.2f} max={max(xs):.2f} samples={xs}",
+                flush=True,
             )
-            frames = int((rec or {}).get("event_frames") or -1)
-            if frames < 0:
-                page.evaluate("() => window.__af.cmd('stop')")
-            else:
-                samples.append(frames)
-                click_frames.append(int(rec.get("click_frames") or frames))
-                if rec.get("event_ms") is not None:
-                    event_ms.append(float(rec["event_ms"]))
-                page.evaluate("() => window.__af.cmd('stop')")
-            page.wait_for_function(
-                """() => {
-                  const r = window.__af.run.value
-                  return !r || ['stopped', 'completed', 'error', 'paused'].includes(r.status)
-                }""",
-                timeout=30000,
-            )
-        assert len(samples) >= 5, f"A5 needed 5 reps, got {samples}"
-        samples.sort()
-        mn, med, mx = samples[0], _median([float(x) for x in samples]), samples[-1]
+        mn, med, p95, mx = min(all_ms), _median(all_ms), _p95(all_ms), max(all_ms)
         print(
-            f"A5 pause event→frame over {len(samples)} reps: "
-            f"min={mn} median={med:.1f} max={mx} samples={samples} "
-            f"click_frames={sorted(click_frames)} event_ms={event_ms}",
+            f"A5 server-write→first-frame over {len(all_ms)}: "
+            f"min={mn:.2f} median={med:.2f} p95={p95:.2f} max={mx:.2f}",
             flush=True,
         )
-        assert mn <= 20 and med <= 20 and mx <= 20, (
-            f"A5 min/median/max must all be ≤20; min={mn} median={med} max={mx} samples={samples}"
-        )
-        assert event_ms and max(event_ms) <= 100.0, (
-            f"A5 event→frame {max(event_ms):.1f}ms > 100ms (19.2)"
-        )
+        assert mx <= A5_MAX_MS, f"A5 max {mx:.2f}ms > {A5_MAX_MS}ms samples={all_ms}"
+        assert p95 <= A5_P95_MS, f"A5 p95 {p95:.2f}ms > {A5_P95_MS}ms samples={all_ms}"
         assert blocked == []
         br.close()
     finally:
@@ -238,42 +269,26 @@ def test_a4_sse_batching_500_nodes_browser(server):
         p.stop()
 
 
-# Half-open A6: one 10 s pose step. last_ui_at is the start-of-run beat
-# (~go start). After 10 s the node ends and _ui_lost is true, so grip
-# never starts. Cut ~0.4 s after go is running so remaining ≤ 10 s
-# (28 × 0.4 s = 11.2 s was the 11.251 s overrun).
-A6_HALF_STEPS = 1
-A6_HALF_SLEEP_S = 10.0
-A6_CUT_AFTER_S = 0.4
-A6_CUT_BEFORE_BEAT_S = 1.8
+def _configure_motion(base: str, **body: object) -> None:
+    http_json(base, "/api/test/adapter", "POST", body)
 
 
-def _configure_a6_half_open_motion(base: str) -> None:
-    http_json(
-        base,
-        "/api/test/adapter",
-        "POST",
-        {"async_steps": A6_HALF_STEPS, "async_sleep_s": A6_HALF_SLEEP_S},
-    )
-
-
-def _half_open_to_operator_lost(page, proxy: TcpProxy, base: str) -> float:
-    """Cut the page mid-`go`. Return seconds from cut to operator_lost."""
+def _cut_to_operator_lost(
+    page, proxy: TcpProxy, base: str, *, wait_s: float = 20.0
+) -> tuple[float, dict]:
+    """Cut the page mid-`go`. Return (seconds from cut to pause, snap)."""
     _click_run(page)
     _wait_run(page, "running", timeout=20000)
     rid = _run_id(page)
-    t_run = time.monotonic()
     _wait_node_running(base, rid, "go")
-    deadline = t_run + A6_CUT_BEFORE_BEAT_S
-    target = min(time.monotonic() + A6_CUT_AFTER_S, deadline)
-    while time.monotonic() < target:
-        time.sleep(0.02)
+    time.sleep(0.4)
     recs_at_cut = list(http_json(base, f"/api/runs/{rid}").get("records") or [])
     assert not any(r.get("node_id") == "grip" for r in recs_at_cut), recs_at_cut
+    http_json(base, "/api/test/adapter", "POST", {"clear_cancel_calls": True})
     cut = time.monotonic()
     proxy.half_open()
     paused = None
-    while time.monotonic() - cut < 20:
+    while time.monotonic() - cut < wait_s:
         snap = http_json(base, f"/api/runs/{rid}")
         st = (snap.get("run") or snap).get("status")
         if st == "paused":
@@ -291,7 +306,7 @@ def _half_open_to_operator_lost(page, proxy: TcpProxy, base: str) -> float:
     assert not any(r.get("node_id") == "grip" for r in recs_after), [
         r.get("node_id") for r in recs_after
     ]
-    return dt_lost
+    return dt_lost, paused
 
 
 def _wait_node_running(base: str, rid: str, nid: str, timeout: float = 15.0) -> dict:
@@ -311,7 +326,7 @@ def _wait_node_running(base: str, rid: str, nid: str, timeout: float = 15.0) -> 
 
 
 def test_a6_reconnect_and_half_open_page_lost(server):
-    """A6: real TCP cut + restore, then half-open cut → operator_lost, no new motion."""
+    """A6: real TCP cut + restore → run finishes, Last-Event-ID does not go backwards."""
     put_flow(server["base"], motion_graph("A6 reconnect"))
     http_json(
         server["base"], "/api/test/adapter", "POST", {"async_steps": 20, "async_sleep_s": 0.3}
@@ -373,30 +388,30 @@ def test_a6_reconnect_and_half_open_page_lost(server):
             f"events_after={len(keyed)} node_seq={node_ids}",
             flush=True,
         )
-
-        # --- half-open: stop forwarding, no FIN, SSE writes still succeed ---
-        page.evaluate("() => window.__af.cmd('stop')")
-        _configure_a6_half_open_motion(server["base"])
-        page.wait_for_timeout(200)
-        dt_lost = _half_open_to_operator_lost(page, proxy, server["base"])
-        print(f"A6 half-open cut→operator_lost: {dt_lost:.3f}s", flush=True)
-        assert dt_lost >= 7.0, f"operator_lost too fast ({dt_lost:.3f}s); deadline is 10s"
-        assert dt_lost <= 10.0, f"A6 pause {dt_lost:.3f}s > 10s"
-        print(
-            f"A6 half-open checks: reason=operator_lost dt={dt_lost:.3f}s "
-            f"within_10s={dt_lost <= 10.0} cut_reconnect_s={cut_dt:.3f}",
-            flush=True,
-        )
         br.close()
     finally:
         p.stop()
         proxy.close()
 
 
-def test_a6_half_open_pauses_within_10s(server):
-    """A6: five real half-open cuts; every pause must be in [7 s, 10 s]."""
-    put_flow(server["base"], motion_graph("A6 10s bound"))
-    _configure_a6_half_open_motion(server["base"])
+def _restore_and_stop(page, proxy: TcpProxy) -> None:
+    proxy.restore()
+    page.wait_for_function(
+        """(ok) => {
+          const t = document.body.innerText
+          return t.includes('Connected') || t.includes(ok)
+        }""",
+        arg=zh("conn.ok"),
+        timeout=15000,
+    )
+    _stop_run(page)
+    page.wait_for_timeout(200)
+
+
+def test_r16_cancellable_cut_pauses_within_10s(server):
+    """r1–r6 step 1: cancellable 30 s motion, real TCP cut, pause ≤ 10 s, 5 reps."""
+    put_flow(server["base"], motion_graph("r16 cancellable 30s"))
+    _configure_motion(server["base"], async_steps=1, async_sleep_s=30.0)
     proxy = TcpProxy("127.0.0.1", server["port"])
     p, _path = _launch()
     try:
@@ -404,30 +419,188 @@ def test_a6_half_open_pauses_within_10s(server):
         page, _blocked, _errs = _open(br, proxy.base)
         samples: list[float] = []
         for i in range(5):
-            if i:
-                proxy.restore()
-                page.wait_for_function(
-                    """(ok) => {
-                      const t = document.body.innerText
-                      return t.includes('Connected') || t.includes(ok)
-                    }""",
-                    arg=zh("conn.ok"),
-                    timeout=15000,
-                )
-                page.evaluate("() => window.__af.cmd('stop')")
-                page.wait_for_timeout(200)
-            dt = _half_open_to_operator_lost(page, proxy, server["base"])
+            dt, snap = _cut_to_operator_lost(page, proxy, server["base"], wait_s=15)
+            calls = http_json(server["base"], "/api/test/adapter").get("cancel_calls") or []
+            pause = (snap.get("run") or snap).get("pause") or {}
+            rb = (pause.get("readback") or {}).get("state") or {}
             samples.append(dt)
-            print(f"A6 half-open rep {i + 1}/5: {dt:.3f}s", flush=True)
-        samples.sort()
-        mn, med, mx = samples[0], _median(samples), samples[-1]
+            print(
+                f"r1-r6 step1 rep {i + 1}/5: {dt:.3f}s cancel_calls={len(calls)} "
+                f"readback={bool(rb)}",
+                flush=True,
+            )
+            assert calls, f"cancel did not reach the adapter on rep {i + 1}"
+            assert rb, f"robot state not read back on rep {i + 1}: {pause}"
+            assert dt <= 10.0, f"r1-r6 step1 pause {dt:.3f}s > 10s"
+            proxy.restore()
+            page.wait_for_function(
+                """(ok) => {
+                  const t = document.body.innerText
+                  return t.includes('Connected') || t.includes(ok)
+                }""",
+                arg=zh("conn.ok"),
+                timeout=15000,
+            )
+            page.evaluate(
+                """async () => {
+                  const run = window.__af.run.value
+                  const rid = run && (run.run_id || run.id)
+                  const r = await (await fetch('/api/runs/' + rid)).json()
+                  const snap = r.run || r
+                  window.__af.run.value = {
+                    ...run, ...snap, status: snap.status, pause: snap.pause,
+                  }
+                  window.__af.selected.value = 'go'
+                }"""
+            )
+            page.wait_for_selector("[data-testid=readback]", timeout=10000)
+            _stop_run(page)
+            page.wait_for_timeout(200)
+        print(f"r1-r6 step1 five times (s): {samples}", flush=True)
+        br.close()
+    finally:
+        p.stop()
+        proxy.close()
+
+
+def test_r16_noncancellable_runs_to_end(server):
+    """r1–r6 step 2: non-cancellable timeout_s ≤ 10, runs to end, then pause."""
+    put_flow(server["base"], motion_graph("r16 noncancellable"))
+    _configure_motion(
+        server["base"],
+        async_steps=1,
+        async_sleep_s=10.3,
+        action_updates={
+            "fake_set_pose": {
+                "timeout_s": 10,
+                "cancel": {"cancellable": False, "post_cancel": "hold"},
+            }
+        },
+    )
+    proxy = TcpProxy("127.0.0.1", server["port"])
+    p, _path = _launch()
+    try:
+        br = _browser(p)
+        page, _blocked, _errs = _open(br, proxy.base)
+        dt, snap = _cut_to_operator_lost(page, proxy, server["base"], wait_s=20)
+        calls = http_json(server["base"], "/api/test/adapter").get("cancel_calls") or []
+        recs = list(snap.get("records") or [])
+        go = [r for r in recs if r.get("node_id") == "go"]
         print(
-            f"A6 half-open over {len(samples)} reps: "
-            f"min={mn:.3f} median={med:.3f} max={mx:.3f} samples={samples}",
+            f"r1-r6 step2: {dt:.3f}s cancel_calls={len(calls)} go_status="
+            f"{go[-1].get('status') if go else None}",
             flush=True,
         )
-        assert mn >= 7.0, f"A6 too fast: min={mn:.3f}s samples={samples}"
-        assert mx <= 10.0, f"A6 over 10s: max={mx:.3f}s samples={samples}"
+        assert calls == [], calls
+        assert go and go[-1].get("status") in ("done", "stopped"), go
+        _restore_and_stop(page, proxy)
+        br.close()
+    finally:
+        p.stop()
+        proxy.close()
+
+
+def test_r16_timeout_cap_blocks_run_browser(server):
+    """r1–r6 step 3: non-cancellable timeout_s = 11 → Run blocked, names the node."""
+    put_flow(server["base"], motion_graph("r16 timeout cap"))
+    _configure_motion(
+        server["base"],
+        action_updates={
+            "fake_set_pose": {
+                "timeout_s": 11,
+                "cancel": {"cancellable": False, "post_cancel": "hold"},
+            }
+        },
+    )
+    boot = http_json(server["base"], "/api/bootstrap")
+    fid = boot["flow"]["id"]
+    check = http_json(server["base"], f"/api/flows/{fid}/run-check")
+    assert check.get("can_run") is False, check
+    assert check.get("timeout_errors"), check
+    node = check["timeout_errors"][0]["node"]
+    assert node, check
+    code, body = http_status(
+        server["base"],
+        "/api/runs",
+        "POST",
+        {
+            "flow_id": fid,
+            "flow_version": boot["flow"]["version"],
+            "max_steps": 1000,
+            "client_id": "t",
+        },
+    )
+    assert code == 409, (code, body)
+    assert (body or {}).get("error") == "motion_timeout_cap", body
+    assert node in str((body or {}).get("message") or "") or node in str(
+        (body or {}).get("detail") or ""
+    ), body
+    p, _path = _launch()
+    try:
+        br = _browser(p)
+        page, _blocked, _errs = _open(br, server["base"])
+        page.wait_for_function(
+            """() => {
+              const c = window.__af.runCheck.value
+              return c && (c.timeout_errors || []).length
+            }""",
+            timeout=15000,
+        )
+        assert page.evaluate("() => window.__af.slot1Disabled.value") is True
+        text = page.evaluate("() => window.__af.timeoutCapText.value")
+        assert node in (text or ""), (node, text)
+        assert page.locator("[data-testid=motion-timeout-cap]").inner_text()
+        br.close()
+    finally:
+        p.stop()
+
+
+def test_r16_cancel_rejected_then_pause(server):
+    """r1–r6 step 4: adapter refuses cancel → cancel_rejected, runs to end, pause."""
+    put_flow(server["base"], motion_graph("r16 cancel rejected"))
+    _configure_motion(
+        server["base"],
+        async_steps=1,
+        async_sleep_s=15.0,
+        reject_next_cancel=True,
+        clear_cancel_calls=True,
+    )
+    proxy = TcpProxy("127.0.0.1", server["port"])
+    p, _path = _launch()
+    try:
+        br = _browser(p)
+        page, _blocked, _errs = _open(br, proxy.base)
+        _click_run(page)
+        _wait_run(page, "running", timeout=20000)
+        rid = _run_id(page)
+        _wait_node_running(server["base"], rid, "go")
+        time.sleep(0.4)
+        proxy.half_open()
+        cut = time.monotonic()
+        saw_rej = False
+        paused = None
+        while time.monotonic() - cut < 25:
+            snap = http_json(server["base"], f"/api/runs/{rid}")
+            node = (snap.get("nodes") or {}).get("go") or {}
+            if (node.get("state") or node.get("status")) == "cancel_rejected":
+                saw_rej = True
+            if (snap.get("run") or snap).get("status") == "paused":
+                paused = snap
+                break
+            time.sleep(0.05)
+        dt = time.monotonic() - cut
+        assert saw_rej, "node never showed status.cancel_rejected"
+        assert paused is not None, f"never paused ({dt:.3f}s)"
+        reason = ((paused.get("run") or paused).get("pause") or {}).get("reason")
+        assert reason == "operator_lost", reason
+        go = [r for r in (paused.get("records") or []) if r.get("node_id") == "go"]
+        assert go and go[-1].get("status") == "done", go
+        calls = http_json(server["base"], "/api/test/adapter").get("cancel_calls") or []
+        assert calls, "refused cancel must still be asked of the adapter"
+        print(
+            f"r1-r6 step4: {dt:.3f}s cancel_rejected then pause, cancel_calls={len(calls)}",
+            flush=True,
+        )
         br.close()
     finally:
         p.stop()

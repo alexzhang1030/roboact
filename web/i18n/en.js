@@ -279,6 +279,7 @@ export default {
   'flow.run_locked': 'Review the differences above before running.',
   'run.param_out_of_limit': '{node}: {param} is outside this robot\'s limits',
   'run.param_type_mismatch': '{node}: {param} must be {type}',
+  'run.motion_timeout_cap': '{node}: non-cancellable motion timeout must be 10 s or less',
   'run.missing_input_count': '{n} nodes need input',
   'status.missing_input': 'Needs input',
 }

@@ -104,7 +104,7 @@ const App = defineComponent({
     const importErrors = ref(null)
     const runCheck = ref({
       action_gone: [], missing_input: [], mismatches: [], mismatch_unlocked: false,
-      type_errors: [], limit_errors: [], can_run: true,
+      type_errors: [], limit_errors: [], timeout_errors: [], can_run: true,
     })
     const bannerClock = { storage: 0, approval: 0, version: 0 }
     let mismatchTimer = null
@@ -199,6 +199,7 @@ const App = defineComponent({
       if (c.can_run === false) return true
       if ((c.action_gone || []).length || (c.missing_input || []).length) return true
       if ((c.type_errors || []).length || (c.limit_errors || []).length) return true
+      if ((c.timeout_errors || []).length) return true
       if ((c.mismatches || []).length && !c.mismatch_unlocked) return true
       return false
     })
@@ -222,6 +223,13 @@ const App = defineComponent({
       const n = ((runCheck.value && runCheck.value.missing_input) || []).length
       return n ? countLabel('run.missing_input_count', n) : ''
     })
+    const timeoutCapText = computed(() => {
+      void locale.value
+      const errs = (runCheck.value && runCheck.value.timeout_errors) || []
+      if (!errs.length) return ''
+      return t('run.motion_timeout_cap', { node: errs[0].node })
+    })
+    const timeoutCapIds = computed(() => ((runCheck.value && runCheck.value.timeout_errors) || []).map(e => e.node_id).filter(Boolean))
     const adapterLabel = computed(() => { void locale.value; return serverLabel(adapter.value && adapter.value.name) })
     const flowNameLabel = computed(() => { void locale.value; return serverLabel(meta.value && meta.value.name) || t('flow.untitled') })
     const slot2Disabled = computed(() => controlsOff.value || !isPaused.value || waitingApproval.value || needsReadback.value || (adapterLost.value && adapterDown.value))
@@ -308,6 +316,7 @@ const App = defineComponent({
     })
     const readback = computed(() => (run.value && run.value.pause && run.value.pause.readback) || null)
     const readingState = computed(() => needsReadback.value && !readback.value)
+    const showLostReadback = computed(() => !!(isPaused.value && operatorLost.value && readback.value))
     const selectedCancelRejected = computed(() => {
       const s = selected.value && nodeStatus[selected.value]
       return !!(s && (s.status === 'cancel_rejected' || s.state === 'cancel_rejected'))
@@ -524,16 +533,7 @@ const App = defineComponent({
           const next = await get('/api/adapter')
           const prev = adapter.value || {}
           adapter.value = next
-          const robotChanged = JSON.stringify(prev.robot) !== JSON.stringify(next.robot)
-          const unitsChanged = JSON.stringify(prev.units) !== JSON.stringify(next.units)
-          if (
-            prev.name !== next.name
-            || prev.action_list_version !== next.action_list_version
-            || robotChanged
-            || unitsChanged
-          ) {
-            await refreshRunCheck()
-          }
+          await refreshRunCheck()
         } catch (_) {}
       }, 1500)
     }
@@ -546,10 +546,10 @@ const App = defineComponent({
       try {
         runCheck.value = await get('/api/flows/' + meta.value.id + '/run-check')
       } catch (_) {
-        runCheck.value = {
-          action_gone: [], missing_input: [], mismatches: [], mismatch_unlocked: false,
-          type_errors: [], limit_errors: [], can_run: false,
-        }
+          runCheck.value = {
+            action_gone: [], missing_input: [], mismatches: [], mismatch_unlocked: false,
+            type_errors: [], limit_errors: [], timeout_errors: [], can_run: false,
+          }
       }
       applyImportMarks()
     }
@@ -671,7 +671,7 @@ const App = defineComponent({
           pausePending.value = false
           if (run.value) run.value = { ...run.value, status: 'paused', pause: ev, paused_node: ev.node_id, paused_phase: ev.when }
           applyPauseReason(ev)
-          if (window.__afPauseTimes) window.__afPauseTimes.push({ at: performance.now(), server_mono: ev.paused_at_mono })
+          if (window.__afPauseTimes) window.__afPauseTimes.push({ at: performance.now(), server_mono: ev.paused_at_mono, paused_at_ms: ev.paused_at_ms })
           refreshRecords(runId)
         },
         resumed: () => {
@@ -776,7 +776,7 @@ const App = defineComponent({
         records.value = []
         listen(rid)
       } catch (e) {
-        rejectMsg.value = mapError(e.code) || e.message
+        rejectMsg.value = mapError(e.code, (e.body && e.body.detail) || {}) || e.message
         overlay.value = rejectMsg.value
       }
     }
@@ -1207,7 +1207,7 @@ const App = defineComponent({
       nodes, edges, run, adapter, doRun, cmd, toggleBp, vf, nodeStatus, decide, pausePending,
       slot1Label, slot1Disabled, slot2Disabled, banners, mismatch, pauseRun, runWord, runWordKind,
       runCheck, importErrors, exportFlow, importFlow, reviewEnable, updateParam,
-      jumpToFirst, runLocked, runLockedText, actionGoneCount, missingInputCount,
+      jumpToFirst, runLocked, runLockedText, actionGoneCount, missingInputCount, timeoutCapText,
       adapterLost, uiLost, operatorLost, rejectedActions, resolveMotion, theme, themeMode, setThemeMode,
       applyTheme, selected, tab, toggleTheme, locale, localeMode, setLocaleMode, motion, motionMode,
       setMotionMode, t, leftOpen, rightW, showMini, meta, logFilter,
@@ -1219,7 +1219,7 @@ const App = defineComponent({
       motion, motionMode, motionOpen, pickMotion, savedViewport, defaultViewport, persistViewportNow, logFilter,
       showMini, showGrid, addMenu, addQ, rejectMsg, overlay, specOf, t, displayType, fieldLabel, groupTitle, slot1Key,
       adapterLabel, flowNameLabel, nameEditing, topEl, runLocked, runLockedText, slot1Title,
-      actionGoneCount, missingInputCount, jumpToFirst, onNameClick, startNameEdit, finishNameEdit, fitTopBar,
+      actionGoneCount, missingInputCount, timeoutCapText, timeoutCapIds, jumpToFirst, onNameClick, startNameEdit, finishNameEdit, fitTopBar,
       nodeRecords, logRecords, rounds, shownRec, viewRound, runActive, waitingApproval, confirmNote, versionWarn, stepsClass, stepsText,
       filteredTypes, paletteTypes, paletteGroups, paletteStatus, groupBoxes, portSources, stepLimit, overrides, singleRound, compareA, compareB, compareOut,
       deadlineAdapterOnly, outputImages, isReal, crashRecovery, selectedSpec,
@@ -1227,7 +1227,7 @@ const App = defineComponent({
       slot1Label, slot1Disabled, slot2Disabled, slot3Disabled, slot1Action, pauseRun,
       runWord, runWordKind, banners, mismatch, mismatchFade, selectedUnknown, selectedWait, writeTimeoutHint, selectedCancelRejected,
       adapterLost, uiLost, operatorLost, runCheck, importErrors, exportOpen, paramMark, mismatchLines,
-      rejectedActions, needsReadback, readback, readingState, resolveMotion,
+      rejectedActions, needsReadback, readback, readingState, showLostReadback, resolveMotion,
       isGallery: GALLERY, galleryStates,
       addNode, onPaletteDrag, onDrop, toggleBp, setBpRound, removeSelected, makeGroup, scheduleSave,
       onConnect, onNodeDragStop, onNodesChange, onPaneClick, onCanvasDbl,
@@ -1263,6 +1263,7 @@ const App = defineComponent({
           <span class="run-locked" v-if="runLockedText" data-testid="run-locked">{{ runLockedText }}</span>
           <span class="run-counts" data-testid="count-action-gone" v-if="actionGoneCount" @click="jumpToFirst(runCheck.action_gone)">{{ actionGoneCount }}</span>
           <span class="run-counts missing" data-testid="count-missing-input" v-if="missingInputCount" @click="jumpToFirst(runCheck.missing_input)">{{ missingInputCount }}</span>
+          <span class="run-counts" data-testid="motion-timeout-cap" v-if="timeoutCapText" @click="jumpToFirst(timeoutCapIds)">{{ timeoutCapText }}</span>
         </div>
         <div class="mismatch" :class="{ out: mismatchFade }" v-if="mismatch">{{ mismatch }}</div>
       </div>
@@ -1390,12 +1391,12 @@ const App = defineComponent({
             </div>
           </div>
           <p class="idem-note" v-if="writeTimeoutHint">{{ t('idem.note') }}</p>
-          <div class="readback" v-else-if="needsReadback">
+          <div class="readback" v-else-if="needsReadback || showLostReadback" data-testid="readback">
             <p class="idem-note" v-if="readingState">{{ t('readback.reading') }}</p>
             <template v-else>
               <h3>{{ t('readback.title') }}</h3>
               <div class="kv">{{ JSON.stringify(readback && readback.state || {}, null, 2) }}</div>
-              <div style="display:flex;gap:8px;margin-top:8px">
+              <div v-if="needsReadback" style="display:flex;gap:8px;margin-top:8px">
                 <button class="primary" @click="resolveMotion('retry')">{{ t('readback.retry') }}</button>
                 <button @click="resolveMotion('mark_done')">{{ t('readback.done') }}</button>
               </div>

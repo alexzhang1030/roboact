@@ -279,6 +279,7 @@ export default {
   'flow.run_locked': '先检查上面的差异，再运行。',
   'run.param_out_of_limit': '{node}：{param} 超出这台机器人的限制',
   'run.param_type_mismatch': '{node}：{param} 必须是 {type}',
+  'run.motion_timeout_cap': '{node}：不可取消的运动超时必须不超过 10 秒',
   'run.missing_input_count': '{n} 个节点需要输入',
   'status.missing_input': '需要输入',
 }

@@ -6,7 +6,7 @@ How a run is scheduled. Product copy lives in [prd.md](prd.md).
 
 ## Disconnect
 
-- No page beat for ~10 s → pause `operator_lost` after the current node. Do not cancel that node. Do not start the next.
+- No page beat for ~10 s → cancel the current action if its `cancel` says cancellable, then pause `operator_lost`. A non-cancellable or refused cancel runs to end, then pause. Do not start the next.
 - Adapter ping fails for ~3 s → pause `adapter_lost`. Continue is disabled until the adapter is back.
 - Half-open TCP still accepts SSE writes; liveness is `last_ui_at` (ui-beat + SSE subscribe), not subscriber count.
 

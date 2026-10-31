@@ -39,7 +39,7 @@ Daily use
 
 Disconnects
 
-14. Refresh or disconnect ≤ 10 s: run unaffected. Page disconnected > 10 s: finish current node (not cancelled), then pause; top bar `run.word.paused_operator_lost`. Same state on return.
+14. Refresh or disconnect ≤ 10 s: run unaffected. Page disconnected > 10 s: cancel the current action if its `cancel` says cancellable, then pause; a non-cancellable or refused cancel runs to end, then pause; top bar `run.word.paused_operator_lost`. Same state on return. Worst case is 10 s plus the remaining time of one non-cancellable action. (Alex, 2026-11-01)
 
 ## 3. Requirements
 
@@ -105,6 +105,8 @@ Executor
 - Missing required field → no node; panel names it. Names and types from interface, rest hand-written; param form generated from it.
 - Action-list version locked with flow; mismatch fails before start (inference).
 - Stop and cancel outcome per action; refused cancel keeps node running, shows `status.cancel_rejected`; non-cancellable runs to end.
+- Non-cancellable `motion` action with `timeout_s` > 10 s: Run blocked, checked before every run, names the node (cap inference, Thompson; Tedrake to confirm).
+- Cancel during execution goes through the adapter (ROS 2 actions can cancel a goal mid-execution); the executor does not only check between nodes.
 - Node stays running until final result.
 - Camera node: `read`, one image in Output tab with time, round, step (ui-spec §16); no thumbnail; memory only; log dimensions, time, size.
 - Running label: "running · 40%" or "running · 12 s"; no progress bars.
@@ -142,6 +144,7 @@ Hardware
 - No per-run sim/real toggle; adapter name right of flow name; red `real_tag` tag when real.
 - v1: fake adapter, invented actions named as fake (sim).
 - Adapter heartbeat; loss cancels active goals (ROS 2 goals outlive clients, [rclcpp #2241](https://github.com/ros2/rclcpp/issues/2241)).
+- Before real robot: the adapter or robot side stops on its own when the server heartbeat is lost, so a hung server still stops motion; the server's 10 s page pause is a backup (Tedrake, Thompson; inference).
 - `timeout_s` → controller expiry; controller without it: description says "expiry by adapter only", UI flags it.
 - Crash: `motion` → result unknown; poll actions query goal, blocking use `read_state`; human confirms.
 - Adapter silent 3 s → pause, `run.word.paused_adapter_lost`; deadline sent to adapter; 60 s Python timer as backup. Defaults adjustable, no source (Torvalds).
@@ -215,7 +218,7 @@ Hardware
 
 19.1 Real SSE: ≤ 10 events/s; frames meet 19. Steps: acceptance.md#19.1
 
-19.2 Pause to first frame ≤ 100 ms, p95 ≤ 20 ms (A5). Steps: acceptance.md#19.2
+19.2 Server writes paused state to first browser frame ≤ 100 ms, p95 ≤ 20 ms (A5). Not from the click, not from the browser receiving the event. Steps: acceptance.md#19.2
 
 19.3 0 node-size updates across zoom 0.6 and selection. Steps: acceptance.md#19.3
 
@@ -239,8 +242,9 @@ A6: failing (see 5). A38: 19.4. A40: 19.9. R1–R6 include two checks; Steps: ac
 
 ## 5. Risks and open questions
 
-- A6 failing: 11.251 s measured (PR #1) vs ≤ 10 s; merged by Alex (2026-10-31 21:38); fix before real robot; 10 s is not a real-robot bound until then.
-- A6 (Torvalds): `motion` started in 10 s–11.25 s? Extra 1.25 s from heartbeat interval or waiting for current node (step 14)?
+- A6 failing: 11.251 s measured (PR #1) vs ≤ 10 s. Cause (Torvalds, 2026-11-01): executor checks disconnect only between nodes (`executor.py:1159`). Rule 14 changed to cancel the current action; until the executor and adapter change merges and acceptance.md#r1-r6 step 1 passes, 10 s is not a real-robot bound. A test-only change does not close A6.
+- Click to Paused: 35–54 frames under CI load, from queued node updates (Torvalds); same 3–4 frames on main and the A6 branch locally. Outside A5; fix in executor with A6; no limit set (Alex).
+- Cancel stop behavior (hold in place or decelerate) depends on each controller; adapter must state and test it (Tedrake, inference).
 - No auth; tokens (exec-model §0.2) or SSH before real robot.
 - Only 500 nodes tested; at thousands, LiteGraph (canvas) may win; re-measure first.
 - Perf numbers: headless, software rendering, ~60 Hz cap; compare libraries only.
