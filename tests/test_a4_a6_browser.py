@@ -125,6 +125,7 @@ _A5_MEASURE = """(kind) => {
   return new Promise((resolve) => {
     window.__afPauseTimes = []
     const started = Date.now()
+    const prevMs = (window.__af.run.value && window.__af.run.value.paused_at_ms) || 0
     if (kind === 'run') window.__af.doRun('all')
     if (kind === 'user') document.querySelector('.slot-1').click()
     if (kind === 'step') document.querySelector('.slot-2').click()
@@ -132,7 +133,9 @@ _A5_MEASURE = """(kind) => {
       const evs = window.__afPauseTimes
       if (evs && evs.length && evs[0].paused_at_ms) return evs[0].paused_at_ms
       const run = window.__af.run.value
-      if (run && run.status === 'paused' && run.paused_at_ms) return run.paused_at_ms
+      if (run && run.status === 'paused' && run.paused_at_ms && run.paused_at_ms !== prevMs) {
+        return run.paused_at_ms
+      }
       return 0
     }
     const poll = () => {
