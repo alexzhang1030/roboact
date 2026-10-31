@@ -81,7 +81,7 @@ def _median(xs: list[float]) -> float:
 
 
 def test_a5_pause_latency_frames_in_browser(server):
-    """A5 / PRD 19.2: 500-node flow running, click pause, rAF frames until Paused ≤ 20."""
+    """A5 / PRD 19.2: pause event → first Paused frame, ≤ 20 rAF frames."""
     put_flow(server["base"], echo_chain_graph(500, "A5 500 nodes"))
     http_json(server["base"], "/api/test/step-delay", "POST", {"seconds": 0.01})
     p, _path = _launch()
@@ -93,6 +93,8 @@ def test_a5_pause_latency_frames_in_browser(server):
             timeout=120000,
         )
         samples: list[int] = []
+        click_frames: list[int] = []
+        event_ms: list[float] = []
         attempts = 0
         while len(samples) < 5 and attempts < 10:
             attempts += 1
@@ -105,32 +107,65 @@ def test_a5_pause_latency_frames_in_browser(server):
                 }""",
                 timeout=30000,
             )
-            frames = page.evaluate(
+            rec = page.evaluate(
                 """(pausedZh) => {
                   return new Promise((resolve) => {
                     const r = window.__af.run.value
-                    if (!r || r.status !== 'running') { resolve(-1); return }
+                    if (!r || r.status !== 'running') {
+                      resolve({ event_frames: -1 }); return
+                    }
+                    window.__afPauseTimes = []
+                    const clickAt = performance.now()
                     document.querySelector('.slot-1').click()
-                    let n = 0
+                    let nClick = 0
+                    let nEvent = 0
+                    let eventAt = 0
+                    let saw = false
                     const loop = () => {
-                      n += 1
+                      nClick += 1
+                      if (!saw && window.__afPauseTimes && window.__afPauseTimes.length) {
+                        saw = true
+                        eventAt = window.__afPauseTimes[0].at
+                        nEvent = 0
+                      }
+                      if (saw) nEvent += 1
                       const el = document.querySelector('.run-word')
                       const w = el ? (el.textContent || '') : ''
                       const paused = w.indexOf('Paused') === 0
                         || w.indexOf(pausedZh) === 0
-                      if (paused) resolve(n)
-                      else if (n > 180) resolve(n)
-                      else requestAnimationFrame(loop)
+                      if (paused) {
+                        resolve({
+                          event_frames: saw ? nEvent : nClick,
+                          click_frames: nClick,
+                          event_ms: saw ? performance.now() - eventAt : null,
+                          click_ms: performance.now() - clickAt,
+                        })
+                        return
+                      }
+                      if (nClick > 180) {
+                        resolve({
+                          event_frames: nEvent,
+                          click_frames: nClick,
+                          event_ms: saw ? performance.now() - eventAt : null,
+                          timed_out: true,
+                        })
+                        return
+                      }
+                      requestAnimationFrame(loop)
                     }
                     requestAnimationFrame(loop)
                   })
                 }""",
                 zh("run.word.paused"),
             )
-            if int(frames) < 0:
+            frames = int((rec or {}).get("event_frames") or -1)
+            if frames < 0:
                 page.evaluate("() => window.__af.cmd('stop')")
             else:
-                samples.append(int(frames))
+                samples.append(frames)
+                click_frames.append(int(rec.get("click_frames") or frames))
+                if rec.get("event_ms") is not None:
+                    event_ms.append(float(rec["event_ms"]))
                 page.evaluate("() => window.__af.cmd('stop')")
             page.wait_for_function(
                 """() => {
@@ -143,12 +178,16 @@ def test_a5_pause_latency_frames_in_browser(server):
         samples.sort()
         mn, med, mx = samples[0], _median([float(x) for x in samples]), samples[-1]
         print(
-            f"A5 pause rAF frames over {len(samples)} reps: "
-            f"min={mn} median={med:.1f} max={mx} samples={samples}",
+            f"A5 pause event→frame over {len(samples)} reps: "
+            f"min={mn} median={med:.1f} max={mx} samples={samples} "
+            f"click_frames={sorted(click_frames)} event_ms={event_ms}",
             flush=True,
         )
         assert mn <= 20 and med <= 20 and mx <= 20, (
             f"A5 min/median/max must all be ≤20; min={mn} median={med} max={mx} samples={samples}"
+        )
+        assert event_ms and max(event_ms) <= 100.0, (
+            f"A5 event→frame {max(event_ms):.1f}ms > 100ms (19.2)"
         )
         assert blocked == []
         br.close()
