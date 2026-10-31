@@ -12,6 +12,40 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 
+_prd19_ci_record: dict[str, Any] | None = None
+
+
+def record_prd19_ci(recorded: dict[str, Any]) -> None:
+    """Keep the canvas-perf numbers for the terminal summary / runner log."""
+    global _prd19_ci_record
+    _prd19_ci_record = recorded
+
+
+def prd19_ci_log_line(recorded: dict[str, Any] | None = None) -> str:
+    payload = recorded if recorded is not None else _prd19_ci_record
+    return f"PRD19 canvas perf (CI, record only): {payload}"
+
+
+def emit_prd19_ci_past_capture(recorded: dict[str, Any], capfd: Any) -> None:
+    """Write the CI record past pytest fd capture (no ``-s``)."""
+    record_prd19_ci(recorded)
+    line = prd19_ci_log_line(recorded)
+    notice = f"::notice title=PRD19 canvas perf::{line}"
+    with capfd.disabled():
+        sys.stderr.write(line + "\n")
+        sys.stderr.write(notice + "\n")
+        sys.stderr.flush()
+
+
+def pytest_terminal_summary(terminalreporter: Any, exitstatus: int, config: Any) -> None:
+    del exitstatus, config
+    if _prd19_ci_record is None:
+        return
+    line = prd19_ci_log_line()
+    notice = f"::notice title=PRD19 canvas perf::{line}"
+    terminalreporter.write_line(line)
+    terminalreporter.write_line(notice)
+
 
 def chrome_path() -> str | None:
     for p in (

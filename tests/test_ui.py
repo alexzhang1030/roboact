@@ -4,13 +4,12 @@ from __future__ import annotations
 
 import os
 import struct
-import sys
 import urllib.parse
 import zlib
 
 import pytest
 
-from tests.conftest import chrome_path, launch_chromium
+from tests.conftest import chrome_path, emit_prd19_ci_past_capture, launch_chromium
 
 pw = pytest.importorskip("playwright.sync_api")
 
@@ -103,7 +102,7 @@ def _png_gray(png: bytes):
     return w, h, pix
 
 
-def test_prd19_canvas_performance_500_nodes(server):
+def test_prd19_canvas_performance_500_nodes(server, capfd):
     p, path = _launch()
     try:
         br = launch_chromium(p, path)
@@ -117,12 +116,7 @@ def test_prd19_canvas_performance_500_nodes(server):
             for phase in ("pan", "ticks", "both")
         }
         if os.environ.get("CI"):
-            print(
-                "PRD19 canvas perf (CI, record only):",
-                recorded,
-                file=sys.__stdout__,
-                flush=True,
-            )
+            emit_prd19_ci_past_capture(recorded, capfd)
         else:
             limit_ms = 2 * 1000 / 60 + 0.5
             for phase in ("pan", "ticks", "both"):
