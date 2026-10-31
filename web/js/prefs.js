@@ -9,6 +9,7 @@ export const KEYS = {
   motion: 'roboact.motion',
   panels: 'roboact.panels',
   grid: 'roboact.grid',
+  minimap: 'roboact.minimap',
   logFilter: 'roboact.logFilter',
   viewportPrefix: 'roboact.viewport.',
 }

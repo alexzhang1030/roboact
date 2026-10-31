@@ -153,7 +153,7 @@ class Adapter:
     """Controller-specific implementation. The canvas never sees SDK vs ROS 2."""
 
     adapter_id: str = "adapter"
-    name: str = zh("adapter.generic")
+    name: str = en("adapter.generic")
     version: str = "0.2"
     target: Literal["sim", "real"] = "sim"
     action_list_version: str = "v0"
@@ -741,7 +741,7 @@ class FakeAdapter(Adapter):
     """In-memory sim adapter. Actions are fixtures named fake_*. No real controller."""
 
     adapter_id = "fake"
-    name = zh("adapter.fake")
+    name = en("adapter.fake")
     version = "0.2"
     target = "sim"
     action_list_version = "fake-v1"

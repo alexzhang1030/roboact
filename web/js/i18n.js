@@ -80,6 +80,34 @@ export function t(key, params) {
   return catalogLookup(key, locale.value, params)
 }
 
+const SERVER_LABEL_KEYS = ['adapter.fake', 'adapter.generic', 'flow.demo', 'flow.untitled']
+
+export function serverLabel(value, keys) {
+  if (value == null || value === '') return ''
+  const s = String(value)
+  const list = keys || SERVER_LABEL_KEYS
+  for (const key of list) {
+    if (s === key) return t(key)
+    if (s === CATALOGS.en[key] || s === CATALOGS['zh-CN'][key]) return t(key)
+  }
+  return s
+}
+
+const EN_COUNT_ONE = {
+  'run.action_missing_count': '1 missing action',
+  'run.missing_input_count': '1 node needs input',
+}
+
+export function countLabel(key, n) {
+  const loc = locale.value
+  const num = Number(n)
+  if (loc === 'en') {
+    const form = new Intl.PluralRules('en').select(num)
+    if (form === 'one' && EN_COUNT_ONE[key]) return EN_COUNT_ONE[key]
+  }
+  return t(key, { n: num })
+}
+
 export function catalogLookup(key, loc, params) {
   const L = loc || locale.value
   const primary = CATALOGS[L] || CATALOGS.en

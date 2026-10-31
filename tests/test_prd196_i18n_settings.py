@@ -477,10 +477,12 @@ def test_prd197_panel_grid_persist_and_follow_theme(server):
               window.__af.setLocaleMode('zh-CN')
               window.__af.leftOpen.value = false
               window.__af.rightW.value = 400
-              window.__af.showMini.value = false
+              window.__af.showMini.value = true
               window.__af.logFilter.value = 'error'
             }"""
         )
+        page.wait_for_timeout(40)
+        page.evaluate("() => { window.__af.showMini.value = false }")
         page.wait_for_timeout(80)
         page.reload(wait_until="domcontentloaded")
         page.wait_for_function("window.__ready === true", timeout=20000)
@@ -489,7 +491,7 @@ def test_prd197_panel_grid_persist_and_follow_theme(server):
         panels = page.evaluate("() => JSON.parse(localStorage.getItem('roboact.panels') || '{}')")
         assert panels.get("leftOpen") is False
         assert panels.get("rightW") == 400
-        assert page.evaluate("() => localStorage.getItem('roboact.grid')") == "0"
+        assert page.evaluate("() => localStorage.getItem('roboact.minimap')") == "0"
         assert page.evaluate("() => localStorage.getItem('roboact.logFilter')") == "error"
         assert page.evaluate("() => window.__af.leftOpen.value") is False
         assert page.evaluate("() => window.__af.rightW.value") == 400

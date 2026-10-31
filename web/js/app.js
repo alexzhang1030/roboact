@@ -11,6 +11,7 @@ import {
   t, locale, localeMode, theme, themeMode, motionMode, motion,
   setLocaleMode, setThemeMode, setMotionMode, applyTheme, applyLocale, applyMotion,
   applyStorageEvent, syncAll, actionLabel, mapError, fieldLabel, CATALOGS,
+  serverLabel, countLabel,
 } from './i18n.js'
 import { KEYS, writeRaw, readRaw, readPanels, writePanels, readViewport, writeViewport, readLogFilter } from './prefs.js'
 
@@ -82,7 +83,10 @@ const App = defineComponent({
     const themeOpen = ref(false)
     const langOpen = ref(false)
     const motionOpen = ref(false)
-    const showMini = ref(readRaw(KEYS.grid) !== '0')
+    const showGrid = ref(readRaw(KEYS.grid) !== '0')
+    const showMini = ref(readRaw(KEYS.minimap) === '1')
+    const nameEditing = ref(false)
+    const topEl = ref(null)
     const savedViewport = ref(null)
     const defaultViewport = { x: 0, y: 0, zoom: 1 }
     const logFilter = ref(readLogFilter())
@@ -199,6 +203,27 @@ const App = defineComponent({
       return false
     })
     const slot1Disabled = computed(() => controlsOff.value || pausePending.value || waitingApproval.value || needsReadback.value || (adapterLost.value && adapterDown.value) || (!isRunning.value && !isPaused.value && flowBlocked.value))
+    const runLocked = computed(() => {
+      const c = runCheck.value || {}
+      return !!(c.mismatches || []).length && !c.mismatch_unlocked
+    })
+    const runLockedText = computed(() => {
+      void locale.value
+      return runLocked.value ? t('flow.run_locked') : ''
+    })
+    const slot1Title = computed(() => runLockedText.value || '')
+    const actionGoneCount = computed(() => {
+      void locale.value
+      const n = ((runCheck.value && runCheck.value.action_gone) || []).length
+      return n ? countLabel('run.action_missing_count', n) : ''
+    })
+    const missingInputCount = computed(() => {
+      void locale.value
+      const n = ((runCheck.value && runCheck.value.missing_input) || []).length
+      return n ? countLabel('run.missing_input_count', n) : ''
+    })
+    const adapterLabel = computed(() => { void locale.value; return serverLabel(adapter.value && adapter.value.name) })
+    const flowNameLabel = computed(() => { void locale.value; return serverLabel(meta.value && meta.value.name) || t('flow.untitled') })
     const slot2Disabled = computed(() => controlsOff.value || !isPaused.value || waitingApproval.value || needsReadback.value || (adapterLost.value && adapterDown.value))
     const slot3Disabled = computed(() => controlsOff.value || !(isRunning.value || isPaused.value))
     const runWord = computed(() => {
@@ -259,7 +284,7 @@ const App = defineComponent({
       const c = runCheck.value || {}
       if (!(c.mismatches || []).length || c.mismatch_unlocked) return []
       return c.mismatches.map(m => {
-        if (m.kind === 'adapter') return t('flow.mismatch_adapter', { file: m.file, current: m.current })
+        if (m.kind === 'adapter') return t('flow.mismatch_adapter', { file: serverLabel(m.file), current: serverLabel(m.current) })
         if (m.kind === 'actions') return t('flow.mismatch_actions', { file: m.file, current: m.current })
         if (m.kind === 'robot') return t('flow.mismatch_robot', { file: m.file, current: m.current })
         if (m.kind === 'units') return t('flow.mismatch_units', { file: m.file, current: m.current })
@@ -315,7 +340,7 @@ const App = defineComponent({
         return { kind: 'empty', text: t('palette.empty') }
       }
       const when = a.fetched_at ? (' · ' + String(a.fetched_at).replace('T', ' ').slice(0, 19)) : ''
-      return { kind: 'ok', text: (a.source || a.name || '') + when }
+      return { kind: 'ok', text: (serverLabel(a.name) || a.name || '') + (a.target ? ' · ' + a.target : '') + when }
     })
     const typeLabel = (spec) => actionLabel(spec, locale.value)
     const filteredTypes = computed(() => {
@@ -330,7 +355,8 @@ const App = defineComponent({
       return GALLERY_STATE_DEFS.map(s => ({ ...s, word: t(s.key) }))
     })
     watch([leftOpen, rightW], () => writePanels(leftOpen.value, rightW.value))
-    watch(showMini, v => writeRaw(KEYS.grid, v ? '1' : '0'))
+    watch(showGrid, v => writeRaw(KEYS.grid, v ? '1' : '0'))
+    watch(showMini, v => writeRaw(KEYS.minimap, v ? '1' : '0'))
     watch(logFilter, v => writeRaw(KEYS.logFilter, v === 'error' ? 'error' : 'all'))
     const selectedSpec = computed(() => specOf(selectedNode.value))
     const deadlineAdapterOnly = computed(() => {
@@ -876,7 +902,7 @@ const App = defineComponent({
       else if ((ev.ctrlKey || ev.metaKey) && (ev.key === 'y' || (ev.shiftKey && ev.key === 'z'))) { ev.preventDefault(); applySnap(hist.redo(snap())) }
       else if ((ev.ctrlKey || ev.metaKey) && ev.key === 'g') { ev.preventDefault(); makeGroup() }
       else if (ev.key === 'm' || ev.key === 'M') { showMini.value = !showMini.value }
-      else if (ev.key === 'Escape') { addMenu.value = null; themeOpen.value = false; langOpen.value = false; motionOpen.value = false; exportOpen.value = false }
+      else if (ev.key === 'Escape') { addMenu.value = null; themeOpen.value = false; langOpen.value = false; motionOpen.value = false; exportOpen.value = false; nameEditing.value = false }
     }
 
     function onRightDown(ev) {
@@ -954,7 +980,7 @@ const App = defineComponent({
     function applyGrid() {
       const pane = document.querySelector('.vue-flow')
       if (!pane) return
-      if (showMini.value) {
+      if (showGrid.value) {
         pane.style.backgroundImage = 'radial-gradient(var(--grid) 1px, transparent 1px)'
         fitGrid(pane)
       } else {
@@ -981,7 +1007,7 @@ const App = defineComponent({
       applyGrid()
       persistViewport()
     }, { deep: true })
-    watch(showMini, () => applyGrid())
+    watch(showGrid, () => applyGrid())
 
     function onDocClick(ev) {
       const tWrap = ev.target && ev.target.closest && ev.target.closest('.theme-wrap')
@@ -1001,7 +1027,9 @@ const App = defineComponent({
         leftOpen.value = p.leftOpen
         rightW.value = p.rightW
       } else if (e.key === KEYS.grid) {
-        showMini.value = e.newValue !== '0'
+        showGrid.value = e.newValue !== '0'
+      } else if (e.key === KEYS.minimap) {
+        showMini.value = e.newValue === '1'
       } else if (e.key === KEYS.logFilter) {
         logFilter.value = e.newValue === 'error' ? 'error' : 'all'
       } else if (e.key && e.key.startsWith(KEYS.viewportPrefix) && e.newValue) {
@@ -1010,14 +1038,74 @@ const App = defineComponent({
       }
     }
     function groupTitle(name) {
+      void locale.value
       if (name === 'control') return t('palette.control')
-      return name
+      return serverLabel(name)
+    }
+    function jumpToFirst(ids) {
+      const id = (ids || [])[0]
+      if (!id) return
+      selected.value = id
+      const n = nodes.value.find(x => x.id === id)
+      if (n && vf.setCenter) {
+        const z = (vf.viewport.value && vf.viewport.value.zoom) || 1
+        vf.setCenter(n.position.x + 120, n.position.y + 40, { zoom: z, duration: 0 })
+      } else if (vf.fitView) {
+        vf.fitView({ nodes: [{ id }], padding: 0.45, duration: 0 })
+      }
+    }
+    function onNameClick() {
+      if (nameEditing.value) return
+      exportOpen.value = !exportOpen.value
+    }
+    function startNameEdit(ev) {
+      if (ev) ev.preventDefault()
+      exportOpen.value = false
+      nameEditing.value = true
+      nextTick(() => {
+        const el = document.querySelector('.top .name')
+        if (el) { el.focus(); el.select && el.select() }
+      })
+    }
+    function finishNameEdit() {
+      nameEditing.value = false
+      scheduleSave(true)
+    }
+    function fitTopBar() {
+      const top = topEl.value || document.querySelector('.top')
+      if (!top) return
+      top.dataset.collapse = ''
+      const left = top.querySelector('.top-left')
+      const ctrls = top.querySelector('.ctrls')
+      const right = top.querySelector('.right')
+      if (!left || !ctrls || !right) return
+      const overlaps = () => {
+        const L = left.getBoundingClientRect()
+        const C = ctrls.getBoundingClientRect()
+        const R = right.getBoundingClientRect()
+        return L.right + 8 > C.left || C.right + 8 > R.left
+      }
+      if (overlaps()) {
+        top.dataset.collapse = 'adapter'
+        if (overlaps()) top.dataset.collapse = 'adapter-ver'
+      }
     }
     function displayType(spec) { return typeLabel(spec) }
 
+    let topRo = null
+    watch([locale, actionGoneCount, missingInputCount, runLockedText, adapterLabel, flowNameLabel, () => meta.value && meta.value.version], () => nextTick(fitTopBar))
     onMounted(async () => {
       window.addEventListener('keydown', onKeyDown)
       document.addEventListener('click', onDocClick)
+      window.addEventListener('resize', fitTopBar)
+      nextTick(() => {
+        const el = topEl.value || document.querySelector('.top')
+        if (el && typeof ResizeObserver !== 'undefined') {
+          topRo = new ResizeObserver(() => fitTopBar())
+          topRo.observe(el)
+        }
+        fitTopBar()
+      })
       if (PERF_N) {
         nodeTypesList.value = [{ type: 'constant', name: 'constant', labels: { en: CATALOGS.en['perf.constant'], 'zh-CN': CATALOGS['zh-CN']['perf.constant'] }, inputs: [], outputs: [{ name: 'value', json_type: 'any', label: 'value' }], default_params: {} }]
         const g = stressGraph(PERF_N)
@@ -1091,6 +1179,8 @@ const App = defineComponent({
     onUnmounted(() => {
       window.removeEventListener('keydown', onKeyDown)
       document.removeEventListener('click', onDocClick)
+      window.removeEventListener('resize', fitTopBar)
+      if (topRo) topRo.disconnect()
       if (es) es.close()
       stopBeat()
       stopAdapterPoll()
@@ -1105,6 +1195,7 @@ const App = defineComponent({
       nodes, edges, run, adapter, doRun, cmd, toggleBp, vf, nodeStatus, decide, pausePending,
       slot1Label, slot1Disabled, slot2Disabled, banners, mismatch, pauseRun, runWord, runWordKind,
       runCheck, importErrors, exportFlow, importFlow, reviewEnable, updateParam,
+      jumpToFirst, runLocked, runLockedText, actionGoneCount, missingInputCount,
       adapterLost, uiLost, operatorLost, rejectedActions, resolveMotion, theme, themeMode, setThemeMode,
       applyTheme, selected, tab, toggleTheme, locale, localeMode, setLocaleMode, motion, motionMode,
       setMotionMode, t, leftOpen, rightW, showMini, meta, logFilter,
@@ -1114,7 +1205,9 @@ const App = defineComponent({
       nodeTypesList, tools, adapter, meta, nodes, edges, groups, leftOpen, rightW, tab, selected, selectedNode,
       run, records, runs, conn, theme, themeMode, themeOpen, setThemeMode, pickTheme, langOpen, locale, localeMode, pickLang,
       motion, motionMode, motionOpen, pickMotion, savedViewport, defaultViewport, persistViewportNow, logFilter,
-      showMini, addMenu, addQ, rejectMsg, overlay, specOf, t, displayType, fieldLabel, groupTitle, slot1Key,
+      showMini, showGrid, addMenu, addQ, rejectMsg, overlay, specOf, t, displayType, fieldLabel, groupTitle, slot1Key,
+      adapterLabel, flowNameLabel, nameEditing, topEl, runLocked, runLockedText, slot1Title,
+      actionGoneCount, missingInputCount, jumpToFirst, onNameClick, startNameEdit, finishNameEdit, fitTopBar,
       nodeRecords, logRecords, rounds, shownRec, viewRound, runActive, waitingApproval, confirmNote, versionWarn, stepsClass, stepsText,
       filteredTypes, paletteTypes, paletteGroups, paletteStatus, groupBoxes, portSources, stepLimit, overrides, singleRound, compareA, compareB, compareOut,
       deadlineAdapterOnly, outputImages, isReal, crashRecovery, selectedSpec,
@@ -1133,33 +1226,36 @@ const App = defineComponent({
   },
   template: `
   <div class="shell" :class="{ 'lod-low': lodLow }">
-    <div class="top">
-      <input class="name" v-model="meta.name" @change="scheduleSave(true)" />
-      <span class="ver">v{{ meta.version }}</span>
-      <span class="adapter-name" v-if="adapter.name">{{ adapter.name }}</span>
-      <span class="real-tag" v-if="isReal">{{ t('real_tag') }}</span>
-      <div class="ctrls">
-        <div class="slots">
-          <button class="primary slot-1" :disabled="slot1Disabled" @click="slot1Action">{{ slot1Label }} <span class="kbd" v-if="slot1Key==='run.start' || slot1Key==='run.resume'">F5</span></button>
-          <button class="slot-2" :disabled="slot2Disabled" @click="cmd('step')">{{ t('run.step') }} <span class="kbd" v-if="!slot2Disabled">F10</span></button>
-          <button class="slot-3" :disabled="slot3Disabled" :title="t('run.stop_title')" @click="cmd('stop')">{{ t('run.stop') }}</button>
-          <span class="run-word" :class="runWordKind">{{ runWord }}</span>
-          <span class="run-counts" v-if="runCheck.action_gone && runCheck.action_gone.length">{{ t('run.action_missing_count', { n: runCheck.action_gone.length }) }}</span>
-          <span class="run-counts" v-if="runCheck.missing_input && runCheck.missing_input.length">{{ t('run.missing_input_count', { n: runCheck.missing_input.length }) }}</span>
-        </div>
-        <div class="mismatch" :class="{ out: mismatchFade }" v-if="mismatch">{{ mismatch }}</div>
-      </div>
-      <div class="right">
-        <span :class="stepsClass">{{ stepsText }}</span>
-        <span><i class="dot-conn" :class="{off: conn!=='ok'}"></i> {{ conn==='ok' ? t('conn.ok') : t('conn.retry') }}</span>
+    <div class="top" ref="topEl">
+      <div class="top-left">
         <div class="pref-wrap flow-menu">
-          <button type="button" class="lang-btn" data-testid="flow-export" :title="t('flow.export_format')" :aria-expanded="exportOpen ? 'true' : 'false'" aria-haspopup="menu" @click="exportOpen = !exportOpen">{{ t('flow.export') }}</button>
+          <input v-if="nameEditing" class="name" v-model="meta.name" @change="finishNameEdit" @blur="finishNameEdit" @keydown.enter.prevent="finishNameEdit" />
+          <button v-else type="button" class="name-btn" data-testid="flow-export" :title="t('flow.export_format')" :aria-expanded="exportOpen ? 'true' : 'false'" aria-haspopup="menu" @click="onNameClick" @dblclick="startNameEdit">{{ flowNameLabel }}</button>
           <div class="menu theme-menu" v-if="exportOpen" role="menu">
             <button type="button" role="menuitem" data-testid="export-json" @click="exportFlow('json')">{{ t('flow.format_json') }}</button>
             <button type="button" role="menuitem" data-testid="export-yaml" @click="exportFlow('yaml')">{{ t('flow.format_yaml') }}</button>
             <label class="file-open" role="menuitem">{{ t('flow.import') }}<input type="file" accept=".json,.yaml,.yml,application/json,text/yaml" style="display:none" data-testid="flow-import" @change="importFlow"></label>
           </div>
         </div>
+        <span class="ver">v{{ meta.version }}</span>
+        <span class="adapter-name" v-if="adapterLabel">{{ adapterLabel }}</span>
+        <span class="real-tag" v-if="isReal">{{ t('real_tag') }}</span>
+      </div>
+      <div class="ctrls">
+        <div class="slots">
+          <button class="primary slot-1" :disabled="slot1Disabled" :title="slot1Title" @click="slot1Action">{{ slot1Label }} <span class="kbd" v-if="slot1Key==='run.start' || slot1Key==='run.resume'">F5</span></button>
+          <button class="slot-2" :disabled="slot2Disabled" @click="cmd('step')">{{ t('run.step') }} <span class="kbd" v-if="!slot2Disabled">F10</span></button>
+          <button class="slot-3" :disabled="slot3Disabled" :title="t('run.stop_title')" @click="cmd('stop')">{{ t('run.stop') }}</button>
+          <span class="run-word" :class="runWordKind">{{ runWord }}</span>
+          <span class="run-locked" v-if="runLockedText" data-testid="run-locked">{{ runLockedText }}</span>
+          <span class="run-counts" data-testid="count-action-gone" v-if="actionGoneCount" @click="jumpToFirst(runCheck.action_gone)">{{ actionGoneCount }}</span>
+          <span class="run-counts missing" data-testid="count-missing-input" v-if="missingInputCount" @click="jumpToFirst(runCheck.missing_input)">{{ missingInputCount }}</span>
+        </div>
+        <div class="mismatch" :class="{ out: mismatchFade }" v-if="mismatch">{{ mismatch }}</div>
+      </div>
+      <div class="right">
+        <span :class="stepsClass">{{ stepsText }}</span>
+        <span><i class="dot-conn" :class="{off: conn!=='ok'}"></i> {{ conn==='ok' ? t('conn.ok') : t('conn.retry') }}</span>
         <div class="pref-wrap lang-wrap">
           <button type="button" class="lang-btn" :title="t('lang.title')" aria-haspopup="menu" :aria-expanded="langOpen ? 'true' : 'false'" data-testid="lang-btn" @click="langOpen = !langOpen">{{ locale === 'zh-CN' ? 'ZH' : 'EN' }}</button>
           <div class="menu theme-menu" v-if="langOpen" role="menu">
@@ -1213,10 +1309,13 @@ const App = defineComponent({
         <template v-if="b.actions==='storage'"><button @click="cmd('continue')">{{ t('banner.continue') }}</button></template>
       </div>
     </div>
-    <div class="banner amber" v-if="mismatchLines.length" data-testid="flow-mismatch">
-      <span>{{ mismatchLines.join(' ') }}</span>
-      <span class="spacer"></span>
-      <button data-testid="review-enable" @click="reviewEnable">{{ t('flow.review_enable') }}</button>
+    <div class="banner amber mismatch-banner" v-if="mismatchLines.length" data-testid="flow-mismatch">
+      <div class="mismatch-lines">
+        <div class="mismatch-line" v-for="(line, i) in mismatchLines" :key="i">
+          <span class="mismatch-text">{{ line }}</span>
+          <button v-if="i===0" data-testid="review-enable" @click="reviewEnable">{{ t('flow.review_enable') }}</button>
+        </div>
+      </div>
     </div>
     <div class="banner" v-if="overlay && !banners.length">{{ overlay }}</div>
     <div class="import-dialog" v-if="importErrors" data-testid="import-errors" @click.self="importErrors=null">
@@ -1257,7 +1356,7 @@ const App = defineComponent({
                  @connect="onConnect" @node-drag-stop="onNodeDragStop" @nodes-change="onNodesChange"
                  @pane-click="onPaneClick" @node-click="e => selected = e.node.id"
                  @move-end="persistViewportNow">
-          <MiniMap v-if="showMini" pannable zoomable />
+          <MiniMap v-if="showMini" pannable zoomable position="bottom-right" />
         </VueFlow>
         <div class="group-box" v-for="g in groupBoxes" :key="g.id"
              :style="{left: g.x+'px', top: g.y+'px', width: g.w+'px', height: g.h+'px', display:'none'}">
