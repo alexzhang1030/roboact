@@ -1064,3 +1064,45 @@ def test_c12_counts_banner_lock_and_no_overlap(server, tmp_path):
         ctx.close()
         browser.close()
         pw.stop()
+
+
+def _menu_item_box(page, text: str) -> dict:
+    loc = page.locator('.flow-menu [role="menu"]').get_by_text(text, exact=True)
+    assert loc.is_visible(), text
+    box = loc.bounding_box()
+    assert box, text
+    return box
+
+
+def test_c12_flow_name_menu_visible_and_import(server):
+    """Shipped CSS: flow-name menu is on-screen; Import… opens the file chooser."""
+    base = server["base"]
+    pw, browser, ctx, page = _open_ui(base)
+    try:
+        page.set_viewport_size({"width": 1280, "height": 800})
+        inner = page.evaluate("() => ({w: window.innerWidth, h: window.innerHeight})")
+        assert inner == {"w": 1280, "h": 800}, inner
+        page.locator('[data-testid="flow-export"]').click()
+        page.wait_for_selector('.flow-menu [role="menu"]', timeout=5000)
+        items = page.evaluate(
+            """() => [...document.querySelectorAll('.flow-menu [role="menu"] > *')]
+              .map(el => (el.innerText || '').trim()).filter(Boolean)"""
+        )
+        assert items == ["Export…", "JSON", "YAML", "Import…"], items
+        for label in items:
+            box = _menu_item_box(page, label)
+            assert box["x"] >= 0, (label, box)
+            assert box["y"] >= 0, (label, box)
+            assert box["x"] + box["width"] <= 1280 + 1, (label, box)
+            assert box["y"] + box["height"] <= 800 + 1, (label, box)
+        menu = page.locator('.flow-menu [role="menu"]').bounding_box()
+        top = page.locator(".top").bounding_box()
+        assert menu and top
+        assert menu["y"] + menu["height"] > top["height"], (menu, top)
+        with page.expect_file_chooser() as chooser:
+            page.locator('.flow-menu [role="menu"] .file-open').click()
+        assert chooser.value is not None
+    finally:
+        ctx.close()
+        browser.close()
+        pw.stop()
