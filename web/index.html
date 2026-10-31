@@ -7,6 +7,11 @@
 <script>
 (function () {
   function detectLang() {
+    try {
+      var list = navigator.languages || [navigator.language]
+      var first = (list && list[0]) || ''
+      if (String(first).toLowerCase().indexOf('zh') === 0) return 'zh-CN'
+    } catch (e) {}
     return 'en'
   }
   try {

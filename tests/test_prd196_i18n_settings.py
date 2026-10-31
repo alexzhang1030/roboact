@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import pytest
 
-from tests.conftest import chrome_path
+from roboact import ADAPTER_HEARTBEAT_S, UI_LOST_TIMEOUT_S
 from tests.http_api import http_json, motion_graph, put_flow
 from tests.test_prd195_theme_contrast_fonts import _browser, _goto_ready, _wired_page
 from tests.test_ui import _launch
@@ -37,15 +37,36 @@ def test_prd196_default_locale_from_navigator(server):
         p.stop()
 
 
-def test_prd196_zh_navigator_first_load_is_english(server):
+def test_prd196_zh_navigator_first_load_is_chinese(server):
     p, _path = _launch()
     try:
         br = _browser(p)
         ctx = br.new_context(viewport={"width": 1280, "height": 800}, locale="zh-CN")
         page, _, _, _ = _wired_page(ctx, server["base"])
         _goto_ready(page, server["base"] + "/")
-        assert page.evaluate("() => document.documentElement.dataset.lang") == "en"
-        assert page.locator(".slot-1").inner_text().startswith("Run")
+        assert page.evaluate("() => localStorage.getItem('roboact.lang')") in (None, "system")
+        assert page.evaluate("() => document.documentElement.dataset.lang") == "zh-CN"
+        assert "运行" in page.locator(".slot-1").inner_text()
+        br.close()
+    finally:
+        p.stop()
+
+
+def test_prd196_storage_event_syncs_second_tab(server):
+    p, _path = _launch()
+    try:
+        br = _browser(p)
+        ctx = br.new_context(viewport={"width": 1280, "height": 800}, locale="en-US")
+        page_a, _, _, _ = _wired_page(ctx, server["base"])
+        _goto_ready(page_a, server["base"] + "/")
+        page_b = ctx.new_page()
+        page_b.goto(server["base"] + "/", wait_until="domcontentloaded")
+        page_b.wait_for_function("window.__ready === true", timeout=20000)
+        assert page_b.evaluate("() => document.documentElement.dataset.lang") == "en"
+        page_a.evaluate("() => window.__af.setLocaleMode('zh-CN')")
+        page_b.wait_for_function("() => document.documentElement.dataset.lang === 'zh-CN'", timeout=5000)
+        page_a.evaluate("() => window.__af.setThemeMode('dark')")
+        page_b.wait_for_function("() => document.documentElement.dataset.theme === 'dark'", timeout=5000)
         br.close()
     finally:
         p.stop()
@@ -199,8 +220,36 @@ def test_prd197_clear_storage_resets_prefs_not_timeouts(server):
         assert page.evaluate("() => localStorage.getItem('roboact.lang')") in (None, "system")
         assert page.evaluate("() => document.documentElement.dataset.theme") == "dark"
         assert page.evaluate("() => document.documentElement.dataset.lang") == "en"
+        stored = page.evaluate("() => Object.keys(localStorage)")
+        assert not any("timeout" in k or "pause" in k for k in stored)
         boot2 = http_json(server["base"], "/api/bootstrap")
         assert boot2.get("step_limit_default") == limit
+        assert ADAPTER_HEARTBEAT_S == 3.0
+        assert UI_LOST_TIMEOUT_S == 10.0
+        br.close()
+    finally:
+        p.stop()
+
+
+def test_prd197_clear_storage_zh_resets_to_browser_lang(server):
+    p, _path = _launch()
+    try:
+        br = _browser(p)
+        ctx = br.new_context(viewport={"width": 1280, "height": 800}, locale="zh-CN", color_scheme="light")
+        page, _, _, _ = _wired_page(ctx, server["base"])
+        _goto_ready(page, server["base"] + "/")
+        page.evaluate(
+            """() => {
+              window.__af.setThemeMode('dark')
+              window.__af.setLocaleMode('en')
+            }"""
+        )
+        page.evaluate("() => { localStorage.clear(); sessionStorage.clear() }")
+        page.reload(wait_until="domcontentloaded")
+        page.wait_for_function("window.__ready === true", timeout=20000)
+        assert page.evaluate("() => document.documentElement.dataset.theme") == "light"
+        assert page.evaluate("() => document.documentElement.dataset.lang") == "zh-CN"
+        assert "运行" in page.locator(".slot-1").inner_text()
         br.close()
     finally:
         p.stop()

@@ -29,10 +29,13 @@ export function readChoice(key, allowed, fallback) {
 }
 
 /** First-load language. One function so the rule is a one-line change.
- *  Current rule (Alex 2026-10-31): English regardless of browser language.
+ *  Current rule: first navigator.languages entry starting with `zh` → zh-CN,
+ *  otherwise English. English also if nothing can be read.
  */
-export function detectBrowserLang(_languages) {
-  return 'en'
+export function detectBrowserLang(languages) {
+  const list = languages || (typeof navigator !== 'undefined' ? navigator.languages : null) || []
+  const first = (list && list[0]) || (typeof navigator !== 'undefined' ? navigator.language : '') || ''
+  return String(first).toLowerCase().startsWith('zh') ? 'zh-CN' : 'en'
 }
 
 export function detectBrowserTheme() {

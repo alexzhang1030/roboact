@@ -11,7 +11,7 @@ These bind every session. They stay **outside** the PCR markers.
 - Display prefs live in the browser only (`roboact.*` keys in `localStorage`). Execution and safety stay on the server: 10 s page-disconnect, 3 s adapter silence, `timeout_s`, `precondition_wait_s`, expiry, adapter, flow, step limit.
 - Storage, SSE, the HTTP API, and exported flows carry **codes only**. The UI maps code → text by locale. Never persist display strings.
 - ui-spec **§17** is authoritative for fonts and themes. Latin UI and digits: Inter. Code, parameter values, times, step counts: JetBrains Mono with tabular digits. CJK is system-only. Themes swap CSS variables; status meanings do not change.
-- First-load language is `detectBrowserLang` in `web/js/prefs.js` (one function). Current rule: always English, regardless of browser language. Keep the matching one-liner in `web/index.html`. Do not scatter a second rule.
+- First-load language is `detectBrowserLang` in `web/js/prefs.js` (one function). First `navigator.languages` entry starting with `zh` → `zh-CN`, else English. Keep the matching one-liner in `web/index.html`. Do not scatter a second rule.
 - No `[VOUCHED …]` stamps unless Alex explicitly asks for one.
 
 <!-- PCR:START -->
