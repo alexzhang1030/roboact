@@ -18,6 +18,44 @@ def _catalog(path: Path) -> dict[str, str]:
     return ast.literal_eval(blob)
 
 
+# ui-spec v1 "Keys to add" (33). Kept here after that section was removed.
+UI_SPEC_KEYS = (
+    "run.target_sim",
+    "run.stop_rejected_note",
+    "run.action_missing_count",
+    "run.disabled_no_controller",
+    "error.readback_required",
+    "error.action_missing",
+    "readback.read",
+    "src.cache_time",
+    "edge.open_panel",
+    "edge.image_preview",
+    "group.back_edge",
+    "side.write_detail",
+    "params.no_expiry",
+    "params.no_range",
+    "palette.source",
+    "port.image_size",
+    "status.waiting",
+    "status.summary.result_unknown",
+    "status.summary.waiting_precondition",
+    "flow.export",
+    "flow.import",
+    "flow.export_format",
+    "flow.format_json",
+    "flow.format_yaml",
+    "flow.import_failed",
+    "flow.import_error",
+    "flow.mismatch_adapter",
+    "flow.mismatch_actions",
+    "flow.mismatch_robot",
+    "flow.review_enable",
+    "flow.mismatch_units",
+    "flow.run_locked",
+    "run.param_out_of_limit",
+)
+
+
 def test_catalogs_same_keys():
     en = _catalog(EN)
     zh = _catalog(ZH)
@@ -29,3 +67,15 @@ def test_catalogs_same_keys():
         assert isinstance(v, str) and v != "", k
     for k, v in zh.items():
         assert isinstance(v, str) and v != "", k
+
+
+def test_ui_spec_keys_present():
+    en = _catalog(EN)
+    zh = _catalog(ZH)
+    assert len(UI_SPEC_KEYS) == 33
+    assert "flow.read_only" not in en
+    assert "flow.read_only" not in zh
+    missing_en = [k for k in UI_SPEC_KEYS if k not in en]
+    missing_zh = [k for k in UI_SPEC_KEYS if k not in zh]
+    assert missing_en == []
+    assert missing_zh == []
