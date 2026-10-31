@@ -30,7 +30,7 @@ from .graph import params_changed
 from .nodes import bind_adapter, get_instance, list_specs, rejected_actions
 from .sse import SseHub
 from .store import open_store
-from .util import new_id, now_iso
+from .util import now_iso
 
 ROOT = Path(__file__).resolve().parent.parent
 PKG = Path(__file__).resolve().parent
@@ -368,7 +368,10 @@ class App:
             await self._json(writer, 200, {"flows": self.store.list_flows()})
             return
         if route == "/api/flows" and method == "POST":
-            flow = self.store.create_flow((data or {}).get("name") or zh("flow.untitled"), data)
+            body = dict(data or {})
+            body.pop("unlock_record", None)
+            body.pop("mismatch_unlocked", None)
+            flow = self.store.create_flow(body.get("name") or zh("flow.untitled"), body)
             await self._json(writer, 200, {"flow": flow})
             return
         if route == "/api/flows/export" and method == "POST":
@@ -736,9 +739,10 @@ class App:
                 "File not imported. Fix these errors:",
                 {"errors": [{"path": i.path, "message": i.message} for i in e.issues]},
             ) from e
-        store_id = new_id("fl_")
-        graph["id"] = store_id
-        graph["flow_id"] = store_id
+        graph.pop("unlock_record", None)
+        graph.pop("mismatch_unlocked", None)
+        graph.pop("id", None)
+        graph.pop("flow_id", None)
         graph.setdefault("adapter_id", self.adapter.adapter_id)
         created = self.store.create_flow(graph.get("name") or "Untitled flow", graph)
         blockers = inspect_run(created, self.adapter)

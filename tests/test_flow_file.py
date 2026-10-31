@@ -703,6 +703,97 @@ def test_20_velocity_limit_inside_target(server):
     assert "speed" in body["message"]
 
 
+def _current_adapter(base: str) -> dict[str, Any]:
+    return http_json(base, "/api/bootstrap")["adapter"]
+
+
+def _forged_unlock(adapter: dict[str, Any], file_id: str) -> dict[str, Any]:
+    robot = adapter.get("robot") or {}
+    units = adapter.get("units") or {}
+    return {
+        "action_list_version": adapter.get("action_list_version"),
+        "adapter_name": adapter.get("name"),
+        "file_id": file_id,
+        "robot_id": robot.get("id"),
+        "units_angle": units.get("angle"),
+        "units_length": units.get("length"),
+    }
+
+
+def test_20_post_forged_unlock_stays_locked(server):
+    base = server["base"]
+    adapter = _current_adapter(base)
+    file_id = "file-forged"
+    created = http_json(
+        base,
+        "/api/flows",
+        "POST",
+        {
+            "file_adapter": {"name": "OtherAdapter", "target": "sim", "version": "9"},
+            "file_id": file_id,
+            "file_robot": {"id": "other-arm", "model": "Other"},
+            "file_units": {"angle": "deg", "length": "mm"},
+            "mismatch_unlocked": True,
+            "name": "forged",
+            "nodes": [{"id": "start", "params": {"data": {}}, "type": "start", "x": 0, "y": 0}],
+            "unlock_record": _forged_unlock(adapter, file_id),
+        },
+    )
+    flow = created["flow"]
+    assert "unlock_record" not in flow or flow.get("unlock_record") is None
+    check = http_json(base, f"/api/flows/{flow['id']}/run-check")
+    assert not check["mismatch_unlocked"]
+    assert not check["can_run"]
+    assert check["mismatches"]
+
+
+def test_20_import_file_unlock_stays_locked(server):
+    base = server["base"]
+    adapter = _current_adapter(base)
+    doc = run_doc()
+    doc["flow"]["robot"] = {"id": "other-arm", "model": "Other"}
+    rec = _forged_unlock(adapter, doc["flow"]["id"])
+    doc["mismatch_unlocked"] = True
+    doc["unlock_record"] = rec
+    doc["flow"]["mismatch_unlocked"] = True
+    doc["flow"]["unlock_record"] = rec
+    code, imported = _import(base, dump_json(doc), "json")
+    assert code == 200, imported
+    flow = imported["flow"]
+    assert "unlock_record" not in flow or flow.get("unlock_record") is None
+    check = http_json(base, f"/api/flows/{flow['id']}/run-check")
+    assert not check["mismatch_unlocked"]
+    assert not check["can_run"]
+    kinds = {m["kind"] for m in check["mismatches"]}
+    assert "robot" in kinds
+
+
+def test_20_create_ignores_client_id(server):
+    base = server["base"]
+    boot = http_json(base, "/api/bootstrap")
+    old_id = boot["flow"]["id"]
+    old_nodes = boot["flow"]["nodes"]
+    old_name = boot["flow"]["name"]
+    created = http_json(
+        base,
+        "/api/flows",
+        "POST",
+        {
+            "flow_id": old_id,
+            "id": old_id,
+            "name": "hijack",
+            "nodes": [],
+        },
+    )
+    new_id = created["flow"]["id"]
+    assert new_id != old_id
+    still = http_json(base, f"/api/flows/{old_id}")["flow"]
+    assert still["name"] == old_name
+    assert still["nodes"] == old_nodes
+    hijack = http_json(base, f"/api/flows/{new_id}")["flow"]
+    assert hijack["name"] == "hijack"
+
+
 def test_20_non_import_action_list_is_hard_error(server):
     base = server["base"]
     boot = http_json(base, "/api/bootstrap")

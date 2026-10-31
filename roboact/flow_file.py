@@ -37,7 +37,7 @@ MAX_BODY_BYTES = MAX_FILE_BYTES
 MAX_DEPTH = 64
 MAX_STRING_CHARS = 65536
 JS_MAX_SAFE = 9007199254740991
-YAML_PARSE_TIMEOUT_S = 180.0
+YAML_PARSE_TIMEOUT_S = 10.0
 KNOWN_JSON_TYPES = frozenset(
     {
         "",
@@ -173,6 +173,7 @@ def parse_and_validate(
         )
     kind = _norm_fmt(fmt)
     tree = parse_yaml(text, version=yaml_version) if kind == "yaml" else parse_json(text)
+    _strip_client_unlock(tree)
     issues: list[FileIssue] = []
     _check_limits(tree, "", 1, issues)
     if issues:
@@ -659,6 +660,18 @@ def _check_limits(obj: Any, path: str, depth: int, issues: list[FileIssue]) -> N
     elif isinstance(obj, list):
         for i, val in enumerate(obj):
             _check_limits(val, f"{path}[{i}]", depth + 1, issues)
+
+
+def _strip_client_unlock(tree: Any) -> None:
+    """Drop client unlock fields so they cannot pass import or unknown-key checks."""
+    if not isinstance(tree, dict):
+        return
+    tree.pop("unlock_record", None)
+    tree.pop("mismatch_unlocked", None)
+    flow = tree.get("flow")
+    if isinstance(flow, dict):
+        flow.pop("unlock_record", None)
+        flow.pop("mismatch_unlocked", None)
 
 
 def _validate_document(tree: Any, issues: list[FileIssue]) -> None:

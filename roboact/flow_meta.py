@@ -17,6 +17,12 @@ def with_file_meta(graph: dict, body: dict | None) -> dict:
     for key in GRAPH_FILE_KEYS:
         if key in src:
             graph[key] = src[key]
-    if "unlock_record" in src:
-        graph["unlock_record"] = src["unlock_record"]
+    return graph
+
+
+def persist_unlock_record(graph: dict, body: dict | None) -> dict:
+    """Saves only. Create and import must never copy a client unlock_record."""
+    rec = (body or {}).get("unlock_record")
+    if rec is not None:
+        graph["unlock_record"] = rec
     return graph
