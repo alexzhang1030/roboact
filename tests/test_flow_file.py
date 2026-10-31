@@ -1058,8 +1058,10 @@ def test_c12_counts_banner_lock_and_no_overlap(server, tmp_path):
         assert page.locator(".top .lang-btn").count() == 1
         assert "Export" not in page.locator(".top .right").inner_text()
         page.locator('[data-testid="flow-export"]').click()
-        assert page.locator(".flow-menu .menu-label").inner_text() == "Export…"
-        assert page.locator(".flow-menu").inner_text().find("Import") >= 0
+        menu_text = page.locator(".flow-menu").inner_text()
+        assert "Export JSON…" in menu_text
+        assert "Export YAML…" in menu_text
+        assert "Import…" in menu_text
     finally:
         ctx.close()
         browser.close()
@@ -1075,7 +1077,7 @@ def _menu_item_box(page, text: str) -> dict:
 
 
 def test_c12_flow_name_menu_visible_and_import(server):
-    """Shipped CSS: flow-name menu is on-screen; Import… opens the file chooser."""
+    """Shipped CSS: Export JSON… / YAML… download; Import… opens the file chooser."""
     base = server["base"]
     pw, browser, ctx, page = _open_ui(base)
     try:
@@ -1084,12 +1086,20 @@ def test_c12_flow_name_menu_visible_and_import(server):
         assert inner == {"w": 1280, "h": 800}, inner
         page.locator('[data-testid="flow-export"]').click()
         page.wait_for_selector('.flow-menu [role="menu"]', timeout=5000)
-        items = page.evaluate(
-            """() => [...document.querySelectorAll('.flow-menu [role="menu"] > *')]
-              .map(el => (el.innerText || '').trim()).filter(Boolean)"""
+        kids = page.evaluate(
+            """() => [...document.querySelectorAll('.flow-menu [role="menu"] > *')].map(el => ({
+              role: el.getAttribute('role'),
+              text: (el.innerText || '').trim(),
+            }))"""
         )
-        assert items == ["Export…", "JSON", "YAML", "Import…"], items
-        for label in items:
+        assert [k["text"] or k["role"] for k in kids] == [
+            "Export JSON…",
+            "Export YAML…",
+            "separator",
+            "Import…",
+        ], kids
+        assert page.locator('.flow-menu [role="separator"]').count() == 1
+        for label in ("Export JSON…", "Export YAML…", "Import…"):
             box = _menu_item_box(page, label)
             assert box["x"] >= 0, (label, box)
             assert box["y"] >= 0, (label, box)
@@ -1099,9 +1109,103 @@ def test_c12_flow_name_menu_visible_and_import(server):
         top = page.locator(".top").bounding_box()
         assert menu and top
         assert menu["y"] + menu["height"] > top["height"], (menu, top)
+
+        with page.expect_download() as dl_json:
+            page.locator('[data-testid="export-json"]').click()
+        json_name = dl_json.value.suggested_filename or ""
+        json_bytes = Path(dl_json.value.path()).read_bytes()
+        assert json_name.endswith(".json"), json_name
+        json.loads(json_bytes.decode())
+
+        page.locator('[data-testid="flow-export"]').click()
+        page.wait_for_selector('[data-testid="export-yaml"]', timeout=5000)
+        with page.expect_download() as dl_yaml:
+            page.locator('[data-testid="export-yaml"]').click()
+        yaml_name = dl_yaml.value.suggested_filename or ""
+        yaml_bytes = Path(dl_yaml.value.path()).read_bytes()
+        assert yaml_name.endswith((".yaml", ".yml")), yaml_name
+        parsed = parse_yaml(yaml_bytes.decode())
+        assert parsed.get("format") == "roboact-flow", parsed
+
+        page.locator('[data-testid="flow-export"]').click()
+        page.wait_for_selector('.flow-menu [role="menu"]', timeout=5000)
         with page.expect_file_chooser() as chooser:
             page.locator('.flow-menu [role="menu"] .file-open').click()
         assert chooser.value is not None
+    finally:
+        ctx.close()
+        browser.close()
+        pw.stop()
+
+
+GONE_LONG_DESC = (
+    "This action is no longer provided by the adapter. "
+    "Replace the action or delete the node; Run stays locked while any missing "
+    "action remains. Extra words force the two-line clamp to overflow so the "
+    "ellipsis and the native title attribute can be checked."
+)
+
+
+def test_c13_gone_node_description_clamp(server, tmp_path):
+    """Gone-node description is at most two lines; title holds the full text."""
+    base = server["base"]
+    src = tmp_path / "gone.json"
+    src.write_text(dump_json(_gone_missing_doc()), encoding="utf-8")
+    pw, browser, ctx, page = _open_ui(base)
+    try:
+        page.set_viewport_size({"width": 1280, "height": 800})
+        _ui_import(page, src)
+        page.wait_for_function(
+            """() => {
+              const c = window.__af && window.__af.runCheck && window.__af.runCheck.value
+              return !!(c && (c.action_gone || []).includes('ghost'))
+            }""",
+            timeout=15000,
+        )
+        page.evaluate(
+            """async (text) => {
+              const m = await import('/js/i18n.js')
+              m.CATALOGS.en['error.action_missing'] = text
+              const cur = m.locale.value
+              m.locale.value = cur === 'en' ? 'zh-CN' : 'en'
+              await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)))
+              m.locale.value = 'en'
+            }""",
+            GONE_LONG_DESC,
+        )
+        page.wait_for_function(
+            """(text) => {
+              const el = document.querySelector(
+                '.fn[data-status="missing"] [data-testid="node-summary"]'
+              )
+              return !!(el && el.getAttribute('title') === text)
+            }""",
+            arg=GONE_LONG_DESC,
+            timeout=5000,
+        )
+        info = page.evaluate(
+            """() => {
+              const el = document.querySelector(
+                '.fn[data-status="missing"] [data-testid="node-summary"]'
+              )
+              const cs = getComputedStyle(el)
+              const lh = parseFloat(cs.lineHeight)
+              const pad = parseFloat(cs.paddingTop) + parseFloat(cs.paddingBottom)
+              return {
+                title: el.getAttribute('title'),
+                clientHeight: el.clientHeight,
+                scrollHeight: el.scrollHeight,
+                lineHeight: lh,
+                pad,
+                lines: lh ? (el.clientHeight - pad) / lh : null,
+                clamp: cs.webkitLineClamp || cs.lineClamp,
+              }
+            }"""
+        )
+        assert info["title"] == GONE_LONG_DESC, info
+        assert info["clamp"] == "2", info
+        assert info["lines"] is not None and info["lines"] <= 2.05, info
+        assert info["clientHeight"] <= info["lineHeight"] * 2 + info["pad"] + 1, info
     finally:
         ctx.close()
         browser.close()

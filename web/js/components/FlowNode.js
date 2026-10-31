@@ -162,7 +162,7 @@ export default markRaw(defineComponent({
         <span class="fn-st-word">{{ word }}</span>
       </span>
     </div>
-    <div class="fn-err" v-if="summary" :class="{ amber: kind === 'unknown' }">{{ summary }}</div>
+    <div class="fn-err" v-if="summary" :class="{ amber: kind === 'unknown' }" :title="summary" data-testid="node-summary">{{ summary }}</div>
     <div class="fn-ports">
       <div class="fn-port" v-for="n in rows" :key="n" :class="{ 'port-missing': portMissing(ins[n-1]) }">
         <template v-if="ins[n-1]">

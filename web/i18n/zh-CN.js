@@ -263,6 +263,8 @@ export default {
   'status.summary.result_unknown': '结果未知。继续前先读回。',
   'status.summary.waiting_precondition': '等待前提条件',
   'flow.export': '导出…',
+  'flow.export_json': '导出 JSON…',
+  'flow.export_yaml': '导出 YAML…',
   'flow.import': '导入…',
   'flow.export_format': '导出为',
   'flow.format_json': 'JSON',
