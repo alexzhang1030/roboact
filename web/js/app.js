@@ -96,6 +96,12 @@ const App = defineComponent({
     const storageErr = ref('')
     const mismatch = ref('')
     const mismatchFade = ref(false)
+    const exportOpen = ref(false)
+    const importErrors = ref(null)
+    const runCheck = ref({
+      action_gone: [], missing_input: [], mismatches: [], mismatch_unlocked: false,
+      type_errors: [], limit_errors: [], can_run: true,
+    })
     const bannerClock = { storage: 0, approval: 0, version: 0 }
     let mismatchTimer = null
     let mismatchFadeTimer = null
@@ -184,7 +190,14 @@ const App = defineComponent({
       return 'run.start'
     })
     const slot1Label = computed(() => { void locale.value; return t(slot1Key.value) })
-    const slot1Disabled = computed(() => controlsOff.value || pausePending.value || waitingApproval.value || needsReadback.value || (adapterLost.value && adapterDown.value))
+    const flowBlocked = computed(() => {
+      const c = runCheck.value || {}
+      if ((c.action_gone || []).length || (c.missing_input || []).length) return true
+      if ((c.type_errors || []).length || (c.limit_errors || []).length) return true
+      if ((c.mismatches || []).length && !c.mismatch_unlocked) return true
+      return false
+    })
+    const slot1Disabled = computed(() => controlsOff.value || pausePending.value || waitingApproval.value || needsReadback.value || (adapterLost.value && adapterDown.value) || (!isRunning.value && !isPaused.value && flowBlocked.value))
     const slot2Disabled = computed(() => controlsOff.value || !isPaused.value || waitingApproval.value || needsReadback.value || (adapterLost.value && adapterDown.value))
     const slot3Disabled = computed(() => controlsOff.value || !(isRunning.value || isPaused.value))
     const runWord = computed(() => {
@@ -239,6 +252,18 @@ const App = defineComponent({
       if (waitingApproval.value) list.push({ id: 'approval', at: bannerClock.approval, kind: 'amber', text: t('banner.approval', { name: confirmTitle.value }), actions: 'approval' })
       if (versionWarn.value) list.push({ id: 'version', at: bannerClock.version, kind: 'neutral', text: t('banner.version', { version: run.value.flow_version }), actions: 'version' })
       return list.sort((a, b) => b.at - a.at).slice(0, 2)
+    })
+    const mismatchLines = computed(() => {
+      void locale.value
+      const c = runCheck.value || {}
+      if (!(c.mismatches || []).length || c.mismatch_unlocked) return []
+      return c.mismatches.map(m => {
+        if (m.kind === 'adapter') return t('flow.mismatch_adapter', { file: m.file, current: m.current })
+        if (m.kind === 'actions') return t('flow.mismatch_actions', { file: m.file, current: m.current })
+        if (m.kind === 'robot') return t('flow.mismatch_robot', { file: m.file, current: m.current })
+        if (m.kind === 'units') return t('flow.mismatch_units', { file: m.file, current: m.current })
+        return m.kind
+      })
     })
     const selectedWait = computed(() => {
       const s = selected.value && nodeStatus[selected.value]
@@ -456,9 +481,11 @@ const App = defineComponent({
       if (!meta.value.id) return
       const body = { ...toFlow(meta.value, nodes.value, edges.value, groups.value), bump: !!bump }
       body.name = meta.value.name
+      body.step_limit = stepLimit.value
       try {
         const r = await send('/api/flows/' + meta.value.id, 'PUT', body)
         meta.value = { ...meta.value, version: r.flow.version, name: r.flow.name }
+        await refreshRunCheck()
       } catch (e) { overlay.value = mapError(e.code) || e.message }
     }
 
@@ -473,8 +500,32 @@ const App = defineComponent({
       if (adapterTimer) { clearInterval(adapterTimer); adapterTimer = null }
     }
 
-    async function loadAll() {
-      const b = await get('/api/bootstrap')
+    async function refreshRunCheck() {
+      if (!meta.value.id) return
+      try { runCheck.value = await get('/api/flows/' + meta.value.id + '/run-check') } catch (_) {}
+      applyImportMarks()
+    }
+
+    function applyImportMarks() {
+      const gone = new Set((runCheck.value && runCheck.value.action_gone) || [])
+      const missing = new Set((runCheck.value && runCheck.value.missing_input) || [])
+      for (const n of nodes.value) {
+        if (gone.has(n.id)) nodeStatus[n.id] = { status: 'action_missing', state: 'action_missing' }
+        else if (missing.has(n.id)) nodeStatus[n.id] = { status: 'missing_input', state: 'missing_input' }
+      }
+    }
+
+    function paramMark(key) {
+      const nid = selected.value
+      const types = (runCheck.value && runCheck.value.type_errors) || []
+      const limits = (runCheck.value && runCheck.value.limit_errors) || []
+      const hit = [...types, ...limits].some(e => e.param === key && (e.node === nid || (selectedNode.value && (selectedNode.value.data.title === e.node || selectedNode.value.id === e.node))))
+      return hit ? 'param-bad' : ''
+    }
+
+    async function loadAll(flowId) {
+      const q = flowId ? ('?flow_id=' + encodeURIComponent(flowId)) : ''
+      const b = await get('/api/bootstrap' + q)
       nodeTypesList.value = (b.node_types || []).map(t => ({ ...t, type: t.type || t.type_id, label: t.label || t.title }))
       tools.value = b.tools || []
       adapter.value = b.adapter || { name: '', status: 'disconnected', target: 'sim' }
@@ -497,11 +548,8 @@ const App = defineComponent({
       groups.value = converted.groups
       runs.value = b.runs || []
       pins.value = b.pins || []
-      for (const n of nodes.value) {
-        if (!nodeTypesList.value.find(t => t.type === n.data.nodeType)) {
-          nodeStatus[n.id] = { status: 'action_missing', state: 'action_missing' }
-        }
-      }
+      if (b.flow && b.flow.step_limit) stepLimit.value = b.flow.step_limit
+      await refreshRunCheck()
       if (b.run) {
         run.value = normalizeRun(b.run)
         records.value = b.records || []
@@ -734,24 +782,40 @@ const App = defineComponent({
       await doRun('all')
     }
 
-    function downloadFlow() {
-      const blob = new Blob([JSON.stringify(toFlow(meta.value, nodes.value, edges.value, groups.value), null, 2)], { type: 'application/json' })
-      const a = document.createElement('a')
-      a.href = URL.createObjectURL(blob)
-      a.download = (meta.value.name || 'flow') + '.json'
-      a.click()
+    async function exportFlow(fmt) {
+      exportOpen.value = false
+      try {
+        await saveFlow(true)
+        const r = await send('/api/flows/export', 'POST', { flow_id: meta.value.id, format: fmt })
+        const blob = new Blob([r.text], { type: 'application/octet-stream' })
+        const a = document.createElement('a')
+        a.href = URL.createObjectURL(blob)
+        a.download = r.filename || ((meta.value.name || 'flow') + (fmt === 'yaml' ? '.yaml' : '.json'))
+        a.click()
+      } catch (e) { overlay.value = mapError(e.code) || e.message }
     }
-    function uploadFlow(ev) {
+    async function importFlow(ev) {
+      exportOpen.value = false
       const f = ev.target.files && ev.target.files[0]
+      ev.target.value = ''
       if (!f) return
-      const rd = new FileReader()
-      rd.onload = async () => {
-        const body = JSON.parse(rd.result)
-        const r = await send('/api/flows/' + meta.value.id, 'PUT', { ...body, bump: true })
-        await loadAll()
-        meta.value.version = r.flow.version
+      const ext = (f.name.split('.').pop() || '').toLowerCase()
+      const format = (ext === 'yaml' || ext === 'yml') ? 'yaml' : 'json'
+      try {
+        const text = await f.text()
+        const r = await send('/api/flows/import', 'POST', { text, format })
+        importErrors.value = null
+        await loadAll(r.flow && r.flow.id)
+      } catch (e) {
+        const errs = e.body && e.body.detail && e.body.detail.errors
+        importErrors.value = errs || [{ path: '', message: mapError(e.code) || e.message }]
       }
-      rd.readAsText(f)
+    }
+    async function reviewEnable() {
+      try {
+        await send('/api/flows/' + meta.value.id + '/review-enable', 'POST', {})
+        await refreshRunCheck()
+      } catch (e) { overlay.value = mapError(e.code) || e.message }
     }
 
     async function doCompare() {
@@ -786,7 +850,7 @@ const App = defineComponent({
       else if ((ev.ctrlKey || ev.metaKey) && (ev.key === 'y' || (ev.shiftKey && ev.key === 'z'))) { ev.preventDefault(); applySnap(hist.redo(snap())) }
       else if ((ev.ctrlKey || ev.metaKey) && ev.key === 'g') { ev.preventDefault(); makeGroup() }
       else if (ev.key === 'm' || ev.key === 'M') { showMini.value = !showMini.value }
-      else if (ev.key === 'Escape') { addMenu.value = null; themeOpen.value = false; langOpen.value = false; motionOpen.value = false }
+      else if (ev.key === 'Escape') { addMenu.value = null; themeOpen.value = false; langOpen.value = false; motionOpen.value = false; exportOpen.value = false }
     }
 
     function onRightDown(ev) {
@@ -897,9 +961,11 @@ const App = defineComponent({
       const tWrap = ev.target && ev.target.closest && ev.target.closest('.theme-wrap')
       const lWrap = ev.target && ev.target.closest && ev.target.closest('.lang-wrap')
       const mWrap = ev.target && ev.target.closest && ev.target.closest('.motion-wrap')
+      const fWrap = ev.target && ev.target.closest && ev.target.closest('.flow-menu')
       if (!tWrap) themeOpen.value = false
       if (!lWrap) langOpen.value = false
       if (!mWrap) motionOpen.value = false
+      if (!fWrap) exportOpen.value = false
     }
     function onStorage(e) {
       applyStorageEvent(e)
@@ -979,12 +1045,6 @@ const App = defineComponent({
         vf.onNodesInitialized(() => { window.__ready = true })
         return
       }
-      try {
-        await loadAll()
-        startAdapterPoll()
-      } catch (e) {
-        overlay.value = mapError(e.code) || e.message
-      }
       vf.onNodesInitialized(() => {
         restoreCanvas()
         nextTick(() => {
@@ -995,6 +1055,12 @@ const App = defineComponent({
           })
         })
       })
+      try {
+        await loadAll()
+        startAdapterPoll()
+      } catch (e) {
+        overlay.value = mapError(e.code) || e.message
+      }
     })
     onUnmounted(() => {
       window.removeEventListener('keydown', onKeyDown)
@@ -1012,6 +1078,7 @@ const App = defineComponent({
     window.__af = {
       nodes, edges, run, adapter, doRun, cmd, toggleBp, vf, nodeStatus, decide, pausePending,
       slot1Label, slot1Disabled, slot2Disabled, banners, mismatch, pauseRun, runWord, runWordKind,
+      runCheck, importErrors, exportFlow, importFlow, reviewEnable,
       adapterLost, uiLost, operatorLost, rejectedActions, resolveMotion, theme, themeMode, setThemeMode,
       applyTheme, selected, tab, toggleTheme, locale, localeMode, setLocaleMode, motion, motionMode,
       setMotionMode, t, leftOpen, rightW, showMini, meta, logFilter,
@@ -1028,12 +1095,12 @@ const App = defineComponent({
       lodLow, nodeTypes: { agent: FlowNode }, edgeTypes: { loop: LoopEdge },
       slot1Label, slot1Disabled, slot2Disabled, slot3Disabled, slot1Action, pauseRun,
       runWord, runWordKind, banners, mismatch, mismatchFade, selectedUnknown, selectedWait, writeTimeoutHint, selectedCancelRejected,
-      adapterLost, uiLost, operatorLost,
+      adapterLost, uiLost, operatorLost, runCheck, importErrors, exportOpen, paramMark, mismatchLines,
       rejectedActions, needsReadback, readback, readingState, resolveMotion,
       isGallery: GALLERY, galleryStates,
       addNode, onPaletteDrag, onDrop, toggleBp, setBpRound, removeSelected, makeGroup, scheduleSave,
       onConnect, onNodeDragStop, onNodesChange, onPaneClick, onCanvasDbl,
-      doRun, cmd, rerunNew, downloadFlow, uploadFlow, doCompare, onRightDown, updateParam,
+      doRun, cmd, rerunNew, exportFlow, importFlow, reviewEnable, doCompare, onRightDown, updateParam,
       pinShown, runSingle, runFrom, runGroup, really, decide, toggleTheme, isValidConnection,
       MarkerType,
     }
@@ -1051,14 +1118,22 @@ const App = defineComponent({
           <button class="slot-2" :disabled="slot2Disabled" @click="cmd('step')">{{ t('run.step') }} <span class="kbd" v-if="!slot2Disabled">F10</span></button>
           <button class="slot-3" :disabled="slot3Disabled" :title="t('run.stop_title')" @click="cmd('stop')">{{ t('run.stop') }}</button>
           <span class="run-word" :class="runWordKind">{{ runWord }}</span>
+          <span class="run-counts" v-if="runCheck.action_gone && runCheck.action_gone.length">{{ t('run.action_missing_count', { n: runCheck.action_gone.length }) }}</span>
+          <span class="run-counts" v-if="runCheck.missing_input && runCheck.missing_input.length">{{ t('run.missing_input_count', { n: runCheck.missing_input.length }) }}</span>
         </div>
         <div class="mismatch" :class="{ out: mismatchFade }" v-if="mismatch">{{ mismatch }}</div>
       </div>
       <div class="right">
         <span :class="stepsClass">{{ stepsText }}</span>
         <span><i class="dot-conn" :class="{off: conn!=='ok'}"></i> {{ conn==='ok' ? t('conn.ok') : t('conn.retry') }}</span>
-        <button @click="downloadFlow">{{ t('file.save') }}</button>
-        <label class="file-open">{{ t('file.open') }}<input type="file" accept="application/json" style="display:none" @change="uploadFlow"></label>
+        <div class="pref-wrap flow-menu">
+          <button type="button" class="lang-btn" data-testid="flow-export" :title="t('flow.export_format')" :aria-expanded="exportOpen ? 'true' : 'false'" aria-haspopup="menu" @click="exportOpen = !exportOpen">{{ t('flow.export') }}</button>
+          <div class="menu theme-menu" v-if="exportOpen" role="menu">
+            <button type="button" role="menuitem" data-testid="export-json" @click="exportFlow('json')">{{ t('flow.format_json') }}</button>
+            <button type="button" role="menuitem" data-testid="export-yaml" @click="exportFlow('yaml')">{{ t('flow.format_yaml') }}</button>
+            <label class="file-open" role="menuitem">{{ t('flow.import') }}<input type="file" accept=".json,.yaml,.yml,application/json,text/yaml" style="display:none" data-testid="flow-import" @change="importFlow"></label>
+          </div>
+        </div>
         <div class="pref-wrap lang-wrap">
           <button type="button" class="lang-btn" :title="t('lang.title')" aria-haspopup="menu" :aria-expanded="langOpen ? 'true' : 'false'" data-testid="lang-btn" @click="langOpen = !langOpen">{{ locale === 'zh-CN' ? 'ZH' : 'EN' }}</button>
           <div class="menu theme-menu" v-if="langOpen" role="menu">
@@ -1112,7 +1187,21 @@ const App = defineComponent({
         <template v-if="b.actions==='storage'"><button @click="cmd('continue')">{{ t('banner.continue') }}</button></template>
       </div>
     </div>
+    <div class="banner amber" v-if="mismatchLines.length" data-testid="flow-mismatch">
+      <span>{{ mismatchLines.join(' ') }}</span>
+      <span class="spacer"></span>
+      <button data-testid="review-enable" @click="reviewEnable">{{ t('flow.review_enable') }}</button>
+    </div>
     <div class="banner" v-if="overlay && !banners.length">{{ overlay }}</div>
+    <div class="import-dialog" v-if="importErrors" data-testid="import-errors" @click.self="importErrors=null">
+      <div class="box">
+        <p>{{ t('flow.import_failed') }}</p>
+        <ul>
+          <li v-for="(e, i) in importErrors" :key="i">{{ t('flow.import_error', { path: e.path, message: e.message }) }}</li>
+        </ul>
+        <button @click="importErrors=null">OK</button>
+      </div>
+    </div>
     <div class="body">
       <aside class="left" :class="{collapsed: !leftOpen}">
         <h2>{{ t('palette.title') }}</h2>
@@ -1220,7 +1309,7 @@ const App = defineComponent({
             </template>
             <template v-if="tab==='params'">
               <div v-if="specOf(selectedNode)">
-                <div v-for="(prop, key) in (specOf(selectedNode).params_schema.properties || {})" :key="key">
+                <div v-for="(prop, key) in (specOf(selectedNode).params_schema.properties || {})" :key="key" :class="paramMark(key)">
                   <label>{{ fieldLabel(key, prop.title) }}</label>
                   <select v-if="key==='op'" :value="selectedNode.data.params[key]" @change="updateParam(key, $event.target.value)">
                     <option value="eq">{{ t('params.op.eq') }}</option><option value="ne">{{ t('params.op.ne') }}</option>

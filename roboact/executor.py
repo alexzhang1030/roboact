@@ -17,6 +17,7 @@ from .adapter import (
     image_summary,
 )
 from .errors import ApiError
+from .flow_file import inspect_run
 from .graph import (
     connected_types,
     cycle_exit_details,
@@ -441,25 +442,43 @@ class Executor:
             raise ApiError(
                 409, "adapter_disconnected", "未连上机器人控制器。流程可以打开，但不能运行。"
             )
-        saved = graph.get("action_list_version")
-        current = getattr(self.adapter, "action_list_version", None)
-        if saved and current and saved != current:
-            raise ApiError(
-                409,
-                "action_list_mismatch",
-                "适配器动作列表已变，无法按这版流程运行。",
-                {
-                    "saved": saved,
-                    "current": current,
-                },
-            )
-        missing = [n["id"] for n in graph.get("nodes") or [] if not known_type(n["type"])]
-        if missing:
+        blockers = inspect_run(graph, self.adapter)
+        if blockers.action_gone:
             raise ApiError(
                 409,
                 "action_missing",
                 "有节点的动作已不存在。",
-                {"nodes": missing, "node_ids": missing},
+                {"nodes": blockers.action_gone, "node_ids": blockers.action_gone},
+            )
+        if blockers.missing_input:
+            raise ApiError(
+                409,
+                "missing_input",
+                f"{len(blockers.missing_input)} nodes need input",
+                {"nodes": blockers.missing_input, "node_ids": blockers.missing_input},
+            )
+        if blockers.type_errors:
+            err = blockers.type_errors[0]
+            raise ApiError(
+                409,
+                "param_type_mismatch",
+                f"{err['node']}: {err['param']} must be {err['type']}",
+                {"errors": blockers.type_errors},
+            )
+        if blockers.limit_errors:
+            err = blockers.limit_errors[0]
+            raise ApiError(
+                409,
+                "param_out_of_limit",
+                f"{err['node']}: {err['param']} is outside this robot's limits",
+                {"errors": blockers.limit_errors},
+            )
+        if blockers.mismatches and not graph.get("mismatch_unlocked"):
+            raise ApiError(
+                409,
+                "run_locked",
+                "Review the differences above before running.",
+                {"mismatches": blockers.mismatches},
             )
 
     def _validate_graph(self, graph: dict[str, Any]) -> None:

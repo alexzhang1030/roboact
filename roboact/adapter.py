@@ -7,7 +7,7 @@ import struct
 import time
 import zlib
 from collections.abc import Awaitable, Callable
-from typing import Any, Literal
+from typing import Any, ClassVar, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -25,6 +25,7 @@ class ParamSpec(BaseModel):
     enum: list[Any] | None = None
     default: Any = None
     required: bool = True
+    secret: bool = False
     title: str | None = None
 
 
@@ -157,6 +158,18 @@ class Adapter:
     action_list_version: str = "v0"
     connected: bool = True
     heartbeat_timeout_s: float = 3.0
+    robot_id: str = "adapter-robot"
+    robot_model: str = "generic"
+    units_angle: str = "rad"
+    units_length: str = "m"
+    _DEFAULT_JOINT_LIMITS: ClassVar[dict[str, tuple[float, float]]] = {}
+    _DEFAULT_VELOCITY_LIMITS: ClassVar[dict[str, tuple[float, float]]] = {}
+
+    def robot(self) -> dict[str, str]:
+        return {"id": self.robot_id, "model": self.robot_model}
+
+    def units(self) -> dict[str, str]:
+        return {"angle": self.units_angle, "length": self.units_length}
 
     def __init__(self) -> None:
         self.rejected_actions: list[dict[str, Any]] = []
@@ -171,6 +184,10 @@ class Adapter:
         self.goals_cancelled_by_lost_heartbeat = 0
         self.last_precondition_wait_s: float | None = None
         self.last_precondition_state: dict[str, Any] | None = None
+        self.joint_limits: dict[str, tuple[float, float]] = dict(type(self)._DEFAULT_JOINT_LIMITS)
+        self.velocity_limits: dict[str, tuple[float, float]] = dict(
+            type(self)._DEFAULT_VELOCITY_LIMITS
+        )
 
     def info(self) -> AdapterInfo:
         return AdapterInfo(
@@ -205,6 +222,8 @@ class Adapter:
             "version": self.version,
             "target": self.target,
             "action_list_version": self.action_list_version,
+            "robot": self.robot(),
+            "units": self.units(),
             "connected": self.connected,
             "status": "disconnected" if not self.connected else ("empty" if not actions else "ok"),
             "source": f"{self.name} · {self.target}",
@@ -673,6 +692,35 @@ FAKE_ACTIONS: list[ActionDescriptor] = [
         side_effect_note="会读外部：生成一张测试图，不写盘",
         icon="node-model",
     ),
+    ActionDescriptor(
+        id="fake_note",
+        version="fake-v1",
+        title="假·备注",
+        name="Note",
+        labels={"en": "Note", "zh-CN": "假·备注"},
+        params=[
+            ParamSpec(name="mode", type="string", default="on", required=False, title="Mode"),
+            ParamSpec(name="ver", type="string", default="1.10", required=False, title="Ver"),
+            ParamSpec(
+                name="token",
+                type="string",
+                default=None,
+                required=False,
+                secret=True,
+                title="Token",
+            ),
+        ],
+        outputs=[OutputSpec(name="ok", type="boolean", title="OK")],
+        side_effect="none",
+        return_mode="blocking",
+        timeout_s=5,
+        typical_s=0.01,
+        cancel=CancelSpec(cancellable=True, post_cancel="finish_step"),
+        preconditions=[],
+        read_state=False,
+        expiry="adapter_only",
+        icon="node-constant",
+    ),
 ]
 
 
@@ -684,6 +732,16 @@ class FakeAdapter(Adapter):
     version = "0.2"
     target = "sim"
     action_list_version = "fake-v1"
+    robot_id = "fake-1"
+    robot_model = "FakeArm"
+    units_angle = "rad"
+    units_length = "m"
+    _DEFAULT_JOINT_LIMITS: ClassVar[dict[str, tuple[float, float]]] = {
+        "x": (-2.0, 2.0),
+        "y": (-2.0, 2.0),
+        "z": (0.0, 2.0),
+    }
+    _DEFAULT_VELOCITY_LIMITS: ClassVar[dict[str, tuple[float, float]]] = {"speed": (0.0, 2.0)}
 
     def __init__(self) -> None:
         super().__init__()
@@ -763,6 +821,8 @@ class FakeAdapter(Adapter):
                 if handle.cancelled:
                     return ActionResult(success=False, message="cancelled")
                 await asyncio.sleep(0.02)
+        if action_id == "fake_note":
+            return ActionResult(success=True, outputs={"ok": True})
         if action_id == "fake_read_pose":
             return ActionResult(
                 success=True, outputs={"pose": dict(self.pose)}, measured={"pose": dict(self.pose)}

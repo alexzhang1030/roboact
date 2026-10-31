@@ -20,6 +20,7 @@ const ICONS = {
   interrupted_unknown: 'state-unknown',
   cancel_rejected: 'state-running',
   action_missing: 'state-error',
+  missing_input: 'state-unknown',
 }
 
 const KIND = {
@@ -32,6 +33,7 @@ const KIND = {
   interrupted_unknown: 'unknown',
   cancel_rejected: 'running',
   action_missing: 'missing',
+  missing_input: 'missing_input',
 }
 
 export default markRaw(defineComponent({

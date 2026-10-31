@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Any, Protocol
 
 from . import FORMAT_VERSION
+from .flow_meta import with_file_meta
 from .util import dump, new_id, now_iso, sha256_text
 
 
@@ -171,6 +172,7 @@ class MemoryStore:
             "adapter_id": (body or {}).get("adapter_id"),
             "action_list_version": (body or {}).get("action_list_version"),
         }
+        with_file_meta(graph, body)
         self._write()
         self._flows[flow_id] = {
             "flow_id": flow_id,
@@ -199,6 +201,7 @@ class MemoryStore:
             "adapter_id": body.get("adapter_id"),
             "action_list_version": body.get("action_list_version"),
         }
+        with_file_meta(graph, body)
         self._write()
         self._flows[flow_id] = {
             **meta,

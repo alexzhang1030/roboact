@@ -15,11 +15,13 @@ from . import DEFAULT_STEP_LIMIT, SSE_RETRY_MS
 from .adapter import FakeAdapter
 from .errors import ApiError
 from .executor import Executor
+from .flow_file import FlowFileRejected, export_flow, import_flow, inspect_run
+from .flow_meta import GRAPH_FILE_KEYS
 from .graph import params_changed
 from .nodes import bind_adapter, get_instance, list_specs, rejected_actions
 from .sse import SseHub
 from .store import open_store
-from .util import now_iso
+from .util import new_id, now_iso
 
 ROOT = Path(__file__).resolve().parent.parent
 PKG = Path(__file__).resolve().parent
@@ -357,6 +359,24 @@ class App:
             flow = self.store.create_flow((data or {}).get("name") or "未命名流程", data)
             await self._json(writer, 200, {"flow": flow})
             return
+        if route == "/api/flows/export" and method == "POST":
+            await self._export_flow(data or {}, writer)
+            return
+        if route == "/api/flows/import" and method == "POST":
+            await self._import_flow(data or {}, writer)
+            return
+        if route.startswith("/api/flows/") and route.endswith("/run-check") and method == "GET":
+            fid = route[len("/api/flows/") : -len("/run-check")]
+            await self._run_check(fid, writer)
+            return
+        if (
+            route.startswith("/api/flows/")
+            and route.endswith("/review-enable")
+            and method == "POST"
+        ):
+            fid = route[len("/api/flows/") : -len("/review-enable")]
+            await self._review_enable(fid, writer)
+            return
         if route.startswith("/api/flows/") and "/breakpoints/" in route:
             await self._breakpoints(method, route, data, writer)
             return
@@ -382,6 +402,15 @@ class App:
             old = self.store.latest_graph(fid)
             bump = bool((data or {}).get("bump", True))
             body = dict(data or {})
+            if old:
+                for key in GRAPH_FILE_KEYS:
+                    if key not in body:
+                        body[key] = old.get(key)
+            if bump:
+                prev = body.get("revision")
+                if prev is None:
+                    prev = (old or {}).get("revision") or (old or {}).get("version") or 0
+                body["revision"] = int(prev) + 1
             body.setdefault("adapter_id", self.adapter.adapter_id)
             body.setdefault("action_list_version", self.adapter.action_list_version)
             flow = self.store.save_flow(fid, body, bump=bump)
@@ -617,6 +646,29 @@ class App:
                 self.adapter.async_sleep_s = float(data["async_sleep_s"])
             if "block_s" in data:
                 self.adapter.block_s = float(data["block_s"])
+            if "joint_limits" in data:
+                self.adapter.joint_limits = {
+                    str(k): (float(v[0]), float(v[1]))
+                    for k, v in (data["joint_limits"] or {}).items()
+                }
+            if "velocity_limits" in data:
+                self.adapter.velocity_limits = {
+                    str(k): (float(v[0]), float(v[1]))
+                    for k, v in (data["velocity_limits"] or {}).items()
+                }
+            if "robot_id" in data:
+                self.adapter.robot_id = str(data["robot_id"])
+            if "robot_model" in data:
+                self.adapter.robot_model = str(data["robot_model"])
+            if "units" in data and isinstance(data["units"], dict):
+                if "angle" in data["units"]:
+                    self.adapter.units_angle = str(data["units"]["angle"])
+                if "length" in data["units"]:
+                    self.adapter.units_length = str(data["units"]["length"])
+            if "action_list_version" in data:
+                self.adapter.action_list_version = str(data["action_list_version"])
+            if "name" in data:
+                self.adapter.name = str(data["name"])
             await self._json(
                 writer,
                 200,
@@ -625,6 +677,9 @@ class App:
                     "async_steps": self.adapter.async_steps,
                     "async_sleep_s": getattr(self.adapter, "async_sleep_s", 0.04),
                     "block_s": self.adapter.block_s,
+                    "robot": self.adapter.robot(),
+                    "units": self.adapter.units(),
+                    "action_list_version": self.adapter.action_list_version,
                 },
             )
             return
@@ -632,6 +687,98 @@ class App:
             await self._static(writer, route)
             return
         raise ApiError(404, "not_found", "找不到接口")
+
+    async def _export_flow(self, data: dict[str, Any], writer: asyncio.StreamWriter) -> None:
+        fid = data.get("flow_id") or self._ensure_flow()["id"]
+        graph = self.store.latest_graph(str(fid))
+        if not graph:
+            raise ApiError(404, "not_found", "找不到流程")
+        fmt = str(data.get("format") or "json")
+        try:
+            text, filename = export_flow(graph, fmt, self.adapter)
+        except FlowFileRejected as e:
+            raise ApiError(
+                422,
+                "import_failed",
+                "File not exported.",
+                {"errors": [{"path": i.path, "message": i.message} for i in e.issues]},
+            ) from e
+        kind = "yaml" if fmt.lower() in ("yaml", "yml") else "json"
+        await self._json(writer, 200, {"text": text, "format": kind, "filename": filename})
+
+    async def _import_flow(self, data: dict[str, Any], writer: asyncio.StreamWriter) -> None:
+        text = data.get("text")
+        fmt = str(data.get("format") or "json")
+        if not isinstance(text, str):
+            raise ApiError(400, "invalid_graph", "import text must be a string")
+        try:
+            graph = import_flow(text, fmt, self.adapter)
+        except FlowFileRejected as e:
+            raise ApiError(
+                422,
+                "import_failed",
+                "File not imported. Fix these errors:",
+                {"errors": [{"path": i.path, "message": i.message} for i in e.issues]},
+            ) from e
+        store_id = new_id("fl_")
+        graph["id"] = store_id
+        graph["flow_id"] = store_id
+        graph.setdefault("adapter_id", self.adapter.adapter_id)
+        created = self.store.create_flow(graph.get("name") or "Untitled flow", graph)
+        blockers = inspect_run(created, self.adapter)
+        await self._json(
+            writer,
+            200,
+            {
+                "flow": created,
+                "action_gone": blockers.action_gone,
+                "missing_input": blockers.missing_input,
+                "mismatches": blockers.mismatches,
+                "type_errors": blockers.type_errors,
+                "limit_errors": blockers.limit_errors,
+            },
+        )
+
+    async def _run_check(self, fid: str, writer: asyncio.StreamWriter) -> None:
+        graph = self.store.latest_graph(fid)
+        if not graph:
+            raise ApiError(404, "not_found", "找不到流程")
+        blockers = inspect_run(graph, self.adapter)
+        unlocked = bool(graph.get("mismatch_unlocked"))
+        await self._json(
+            writer,
+            200,
+            {
+                "action_gone": blockers.action_gone,
+                "missing_input": blockers.missing_input,
+                "mismatches": blockers.mismatches,
+                "mismatch_unlocked": unlocked,
+                "type_errors": blockers.type_errors,
+                "limit_errors": blockers.limit_errors,
+                "can_run": not blockers.blocks_run(unlocked),
+            },
+        )
+
+    async def _review_enable(self, fid: str, writer: asyncio.StreamWriter) -> None:
+        graph = self.store.latest_graph(fid)
+        if not graph:
+            raise ApiError(404, "not_found", "找不到流程")
+        body = dict(graph)
+        body["mismatch_unlocked"] = True
+        saved = self.store.save_flow(fid, body, bump=False)
+        blockers = inspect_run(saved, self.adapter)
+        await self._json(
+            writer,
+            200,
+            {
+                "flow": saved,
+                "action_gone": blockers.action_gone,
+                "missing_input": blockers.missing_input,
+                "mismatches": blockers.mismatches,
+                "mismatch_unlocked": True,
+                "can_run": not blockers.blocks_run(True),
+            },
+        )
 
     async def _breakpoints(
         self,

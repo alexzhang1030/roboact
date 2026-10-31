@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from . import FORMAT_VERSION, SQLITE_BUSY_TIMEOUT_MS
+from .flow_meta import with_file_meta
 from .util import dump, load, new_id, now_iso, sha256_text
 
 SCHEMA = f"""
@@ -182,6 +183,7 @@ class SqliteStore:
             "adapter_id": (body or {}).get("adapter_id"),
             "action_list_version": (body or {}).get("action_list_version"),
         }
+        with_file_meta(graph, body)
         raw = dump(graph)
 
         def go(conn: sqlite3.Connection) -> dict[str, Any]:
@@ -216,6 +218,7 @@ class SqliteStore:
             "adapter_id": body.get("adapter_id"),
             "action_list_version": body.get("action_list_version"),
         }
+        with_file_meta(graph, body)
         raw = dump(graph)
 
         def go(conn: sqlite3.Connection) -> dict[str, Any]:
