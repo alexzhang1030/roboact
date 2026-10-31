@@ -60,3 +60,33 @@ def test_package_fonts_are_in_manifest_with_ofl():
     assert sizes["roboact/static/fonts/InterVariable.woff2"] == 352240
     assert sizes["roboact/static/fonts/JetBrainsMono-Regular.woff2"] == 92164
     assert sizes["roboact/static/fonts/JetBrainsMono-Medium.woff2"] == 93824
+
+
+def test_type_scale_is_exactly_five_sizes():
+    for px, lh, weight_hint in (
+        ("16", "24", "600"),
+        ("14", "20", "600"),
+        ("13", "20", "400"),
+        ("12", "18", None),
+        ("11", "16", "400"),
+    ):
+        assert f"--fs-{px}: {px}px" in CSS
+        assert f"--lh-{px}: {lh}px" in CSS
+    assert CSS.count("font-size: 11px") == 0 or ".kbd" in CSS
+    assert 'font-size: var(--fs-11)' in CSS
+    assert 'font-size: var(--fs-16)' in CSS
+
+
+def test_fonts_array_merged_as_is_and_sha256_matches_shipped():
+    man = json.loads((ROOT / "vendor-manifest.json").read_text(encoding="utf-8"))
+    src = json.loads((ROOT / "fonts" / "vendor-manifest.fonts.json").read_text(encoding="utf-8"))
+    assert man["fonts"] == src["fonts"]
+    shipped = ROOT / "roboact" / "static" / "fonts"
+    for row in src["fonts"]:
+        path = shipped / row["file"]
+        assert path.is_file(), row["file"]
+        assert path.stat().st_size == row["bytes"]
+        assert hashlib.sha256(path.read_bytes()).hexdigest() == row["sha256"]
+        assert row["license"] == "OFL-1.1"
+        assert row["version"]
+        assert row["source"].startswith("https://")

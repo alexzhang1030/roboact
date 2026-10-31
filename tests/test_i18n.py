@@ -56,8 +56,14 @@ def test_no_hardcoded_cjk_in_frontend_source():
 def test_detect_browser_lang_rule():
     src = (ROOT / "web" / "js" / "prefs.js").read_text(encoding="utf-8")
     assert "function detectBrowserLang" in src
-    assert "startsWith('zh')" in src
-    assert "'zh-CN' : 'en'" in src or "return 'en'" in src
+    # First load is English regardless of browser language (one-line rule).
+    assert "return 'en'" in src
+
+
+def test_head_script_defaults_english():
+    html = (FRONT / "index.html").read_text(encoding="utf-8")
+    assert "function detectLang()" in html
+    assert "return 'en'" in html
 
 
 def test_no_rtoken_catalog_keys():

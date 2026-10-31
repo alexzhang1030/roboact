@@ -37,18 +37,118 @@ def test_prd196_default_locale_from_navigator(server):
         p.stop()
 
 
-def test_prd196_zh_navigator_first_load(server):
+def test_prd196_zh_navigator_first_load_is_english(server):
     p, _path = _launch()
     try:
         br = _browser(p)
         ctx = br.new_context(viewport={"width": 1280, "height": 800}, locale="zh-CN")
         page, _, _, _ = _wired_page(ctx, server["base"])
         _goto_ready(page, server["base"] + "/")
-        assert page.evaluate("() => document.documentElement.dataset.lang") == "zh-CN"
-        assert "运行" in page.locator(".slot-1").inner_text()
+        assert page.evaluate("() => document.documentElement.dataset.lang") == "en"
+        assert page.locator(".slot-1").inner_text().startswith("Run")
         br.close()
     finally:
         p.stop()
+
+
+OVERFLOW_SEL = (
+    ".slot-1, .slot-2, .slot-3, .run-word, .real-tag, .gstate, .gstate-word, "
+    ".fn-st-word, .file-open, .top .right > button, [data-testid=theme-btn], [data-testid=lang-btn]"
+)
+
+OVERFLOW_JS = """(sel) => {
+  return [...document.querySelectorAll(sel)].map(el => ({
+    t: (el.textContent || '').trim().slice(0, 48),
+    cls: el.className,
+    sw: el.scrollWidth, cw: el.clientWidth,
+  })).filter(x => x.cw > 0 && x.sw > x.cw + 1)
+}"""
+
+
+def _apply_screen(page, name: str) -> None:
+    if name == "idle":
+        return
+    if name == "gallery":
+        return
+    if name == "paused-breakpoint":
+        page.evaluate("() => window.__af.setThemeMode && 0")
+        _set_run(page, "paused", "breakpoint")
+        return
+    if name == "running":
+        _set_run(page, "running")
+        return
+    if name == "waiting":
+        _set_run(page, "running")
+        page.evaluate("() => { if (window.__af.selected) window.__af.selected.value = 'go'; if (window.__af.tab) window.__af.tab.value = 'rec' }")
+        _set_node(page, "go", {
+            "status": "running", "state": "running",
+            "phase": "waiting_precondition", "wait_s": 3, "wait_max_s": 8,
+        })
+        return
+    if name == "unknown":
+        _set_run(page, "paused", "motion_timeout")
+        _set_node(page, "go", {"status": "interrupted_unknown", "state": "interrupted_unknown"})
+        return
+    if name == "unknown-reading":
+        _set_run(page, "paused", "motion_timeout")
+        page.evaluate("() => { if (window.__af.selected) window.__af.selected.value = 'go'; if (window.__af.tab) window.__af.tab.value = 'rec' }")
+        _set_node(page, "go", {"status": "interrupted_unknown", "state": "interrupted_unknown"})
+        return
+    if name == "cancel-rejected":
+        _set_run(page, "running")
+        _set_node(page, "go", {"status": "cancel_rejected", "state": "cancel_rejected"})
+        return
+    if name == "operator-lost":
+        _set_run(page, "paused", "operator_lost")
+        return
+    if name == "adapter-lost":
+        _set_run(page, "paused", "adapter_lost")
+        return
+    if name == "action-missing":
+        _set_node(page, "go", {"status": "action_missing", "state": "action_missing"})
+        return
+    if name == "camera":
+        page.evaluate("() => { if (window.__af.selected) window.__af.selected.value = 'cam'; if (window.__af.tab) window.__af.tab.value = 'out' }")
+        return
+    raise AssertionError("unknown screen " + name)
+
+
+def _set_run(page, status, reason=None):
+    page.evaluate(
+        """({status, reason}) => {
+          const cur = window.__af.run.value || { id: 'shot', run_id: 'shot' }
+          const pause = reason ? { reason, node_id: 'go', when: 'before' } : null
+          window.__af.run.value = { ...cur, status, pause, paused_node: pause && pause.node_id }
+        }""",
+        {"status": status, "reason": reason},
+    )
+    page.wait_for_timeout(40)
+
+
+def _set_node(page, nid, payload):
+    page.evaluate(
+        """({nid, payload}) => {
+          if (window.__af.nodeStatus) window.__af.nodeStatus[nid] = payload
+        }""",
+        {"nid": nid, "payload": payload},
+    )
+    page.wait_for_timeout(30)
+
+
+EN_SCREENS = (
+    "idle",
+    "paused-breakpoint",
+    "running",
+    "waiting",
+    "unknown",
+    "unknown-reading",
+    "cancel-rejected",
+    "operator-lost",
+    "adapter-lost",
+    "action-missing",
+    "camera",
+    "gallery",
+)
 
 
 def test_prd196_english_no_clip_on_screens(server):
@@ -59,16 +159,19 @@ def test_prd196_english_no_clip_on_screens(server):
         page, _, _, _ = _wired_page(ctx, server["base"])
         _goto_ready(page, server["base"] + "/")
         page.evaluate("() => window.__af.setLocaleMode('en')")
-        overflow = page.evaluate(
-            """() => {
-              const sel = '.slot-1, .slot-2, .slot-3, .run-word, .real-tag, .gstate-word, [data-testid=theme-btn], [data-testid=lang-btn]'
-              return [...document.querySelectorAll(sel)].map(el => ({
-                t: (el.textContent || '').trim().slice(0, 40),
-                sw: el.scrollWidth, cw: el.clientWidth,
-              })).filter(x => x.sw > x.cw + 1)
-            }"""
-        )
-        assert overflow == [], overflow
+        clipped = []
+        for name in EN_SCREENS:
+            if name == "gallery":
+                page.goto(server["base"] + "/?gallery=1", wait_until="domcontentloaded")
+                page.wait_for_function("window.__ready === true", timeout=20000)
+                page.evaluate("() => window.__af.setLocaleMode('en')")
+            else:
+                _apply_screen(page, name)
+            page.wait_for_timeout(40)
+            overflow = page.evaluate(OVERFLOW_JS, OVERFLOW_SEL)
+            if overflow:
+                clipped.append({"screen": name, "overflow": overflow})
+        assert clipped == [], clipped
         br.close()
     finally:
         p.stop()

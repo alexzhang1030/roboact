@@ -10,7 +10,7 @@ import { createHistory } from './history.js'
 import {
   t, locale, localeMode, theme, themeMode, motionMode, motion,
   setLocaleMode, setThemeMode, setMotionMode, applyTheme, applyLocale, applyMotion,
-  applyStorageEvent, syncAll, actionLabel, mapError,
+  applyStorageEvent, syncAll, actionLabel, mapError, fieldLabel, CATALOGS,
 } from './i18n.js'
 import { KEYS, writeRaw, readRaw, detectBrowserMotionReduce } from './prefs.js'
 
@@ -873,7 +873,7 @@ const App = defineComponent({
       window.addEventListener('keydown', onKeyDown)
       document.addEventListener('click', onDocClick)
       if (PERF_N) {
-        nodeTypesList.value = [{ type: 'constant', name: 'Constant', labels: { en: 'Constant' }, inputs: [], outputs: [{ name: 'value', json_type: 'any', label: 'value' }], default_params: {} }]
+        nodeTypesList.value = [{ type: 'constant', name: 'constant', labels: { en: CATALOGS.en['perf.constant'], 'zh-CN': CATALOGS['zh-CN']['perf.constant'] }, inputs: [], outputs: [{ name: 'value', json_type: 'any', label: 'value' }], default_params: {} }]
         const g = stressGraph(PERF_N)
         nodes.value = g.nodes
         edges.value = g.edges
@@ -909,7 +909,7 @@ const App = defineComponent({
         return
       }
       if (GALLERY) {
-        nodeTypesList.value = [{ type: 'constant', name: 'Constant', labels: { en: 'Constant' }, inputs: [], outputs: [{ name: 'value', json_type: 'any', label: 'value' }], default_params: {} }]
+        nodeTypesList.value = [{ type: 'constant', name: 'constant', labels: { en: CATALOGS.en['perf.constant'], 'zh-CN': CATALOGS['zh-CN']['perf.constant'] }, inputs: [], outputs: [{ name: 'value', json_type: 'any', label: 'value' }], default_params: {} }]
         const g = galleryGraph()
         nodes.value = g.nodes
         edges.value = g.edges
@@ -952,7 +952,7 @@ const App = defineComponent({
     return {
       nodeTypesList, tools, adapter, meta, nodes, edges, groups, leftOpen, rightW, tab, selected, selectedNode,
       run, records, runs, conn, theme, themeMode, themeOpen, setThemeMode, pickTheme, langOpen, locale, localeMode, pickLang,
-      showMini, addMenu, addQ, rejectMsg, overlay, specOf, t, displayType, groupTitle, slot1Key,
+      showMini, addMenu, addQ, rejectMsg, overlay, specOf, t, displayType, fieldLabel, groupTitle, slot1Key,
       nodeRecords, rounds, shownRec, viewRound, runActive, waitingApproval, confirmNote, versionWarn, stepsClass, stepsText,
       filteredTypes, paletteTypes, paletteGroups, paletteStatus, groupBoxes, portSources, stepLimit, overrides, singleRound, compareA, compareB, compareOut,
       deadlineAdapterOnly, outputImages, isReal, crashRecovery, selectedSpec,
@@ -989,7 +989,7 @@ const App = defineComponent({
         <span :class="stepsClass">{{ stepsText }}</span>
         <span><i class="dot-conn" :class="{off: conn!=='ok'}"></i> {{ conn==='ok' ? t('conn.ok') : t('conn.retry') }}</span>
         <button @click="downloadFlow">{{ t('file.save') }}</button>
-        <label style="margin:0">{{ t('file.open') }}<input type="file" accept="application/json" style="display:none" @change="uploadFlow"></label>
+        <label class="file-open">{{ t('file.open') }}<input type="file" accept="application/json" style="display:none" @change="uploadFlow"></label>
         <div class="pref-wrap lang-wrap">
           <button type="button" class="lang-btn" :title="t('lang.title')" aria-haspopup="menu" :aria-expanded="langOpen ? 'true' : 'false'" data-testid="lang-btn" @click="langOpen = !langOpen">{{ locale === 'zh-CN' ? 'ZH' : 'EN' }}</button>
           <div class="menu theme-menu" v-if="langOpen" role="menu">
@@ -1137,7 +1137,7 @@ const App = defineComponent({
             <template v-if="tab==='params'">
               <div v-if="specOf(selectedNode)">
                 <div v-for="(prop, key) in (specOf(selectedNode).params_schema.properties || {})" :key="key">
-                  <label>{{ prop.title || key }}</label>
+                  <label>{{ fieldLabel(key, prop.title) }}</label>
                   <select v-if="key==='op'" :value="selectedNode.data.params[key]" @change="updateParam(key, $event.target.value)">
                     <option value="eq">{{ t('params.op.eq') }}</option><option value="ne">{{ t('params.op.ne') }}</option>
                     <option value="gt">{{ t('params.op.gt') }}</option><option value="gte">{{ t('params.op.gte') }}</option>
@@ -1145,7 +1145,7 @@ const App = defineComponent({
                     <option value="contains">{{ t('params.op.contains') }}</option><option value="truthy">{{ t('params.op.truthy') }}</option><option value="falsy">{{ t('params.op.falsy') }}</option>
                   </select>
                   <select v-else-if="key==='tool'" :value="selectedNode.data.params[key]" @change="updateParam(key, $event.target.value)">
-                    <option v-for="t in tools" :key="t.name" :value="t.name">{{ t.name }}（{{ t.side_effect }}）</option>
+                    <option v-for="tool in tools" :key="tool.name" :value="tool.name">{{ tool.name }} ({{ tool.side_effect }})</option>
                   </select>
                   <select v-else-if="key==='value_type'" :value="selectedNode.data.params[key]" @change="updateParam(key, $event.target.value)">
                     <option value="string">{{ t('params.type.string') }}</option><option value="number">{{ t('params.type.number') }}</option><option value="boolean">{{ t('params.type.boolean') }}</option><option value="json">{{ t('params.type.json') }}</option>

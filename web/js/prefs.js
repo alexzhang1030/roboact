@@ -28,11 +28,11 @@ export function readChoice(key, allowed, fallback) {
   return allowed.includes(v) ? v : fallback
 }
 
-/** First-load language. One-line change if Alex flips to always-English. */
-export function detectBrowserLang(languages) {
-  const list = languages || (typeof navigator !== 'undefined' ? navigator.languages : null) || []
-  const first = (list && list[0]) || (typeof navigator !== 'undefined' ? navigator.language : '') || ''
-  return String(first).toLowerCase().startsWith('zh') ? 'zh-CN' : 'en'
+/** First-load language. One function so the rule is a one-line change.
+ *  Current rule (Alex 2026-10-31): English regardless of browser language.
+ */
+export function detectBrowserLang(_languages) {
+  return 'en'
 }
 
 export function detectBrowserTheme() {

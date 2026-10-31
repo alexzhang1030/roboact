@@ -85,19 +85,42 @@ export function setMotionMode(mode) {
 }
 
 export function t(key, params) {
-  const primary = CATALOGS[locale.value] || CATALOGS.en
+  return catalogLookup(key, locale.value, params)
+}
+
+export function catalogLookup(key, loc, params) {
+  const L = loc || locale.value
+  const primary = CATALOGS[L] || CATALOGS.en
   let raw
   if (primary && Object.prototype.hasOwnProperty.call(primary, key)) raw = primary[key]
   else if (Object.prototype.hasOwnProperty.call(CATALOGS.en, key)) raw = CATALOGS.en[key]
-  else raw = ''
+  else return ''
   return interpolate(raw, params)
 }
 
 export function actionLabel(spec, loc) {
   if (!spec) return ''
   const L = loc || locale.value
+  const type = spec.type || spec.type_id || spec.id
+  if (type) {
+    const named = catalogLookup('node.' + type, L)
+    if (named) return named
+  }
   const labels = spec.labels || (spec.action && spec.action.labels) || {}
   return labels[L] || labels.en || spec.name || spec.title || spec.id || spec.type || ''
+}
+
+export function portLabel(port, loc) {
+  if (!port) return ''
+  const named = catalogLookup('port.' + (port.name || ''), loc)
+  if (named) return named
+  return port.label || port.name || ''
+}
+
+export function fieldLabel(key, fallback, loc) {
+  const named = catalogLookup('field.' + key, loc)
+  if (named) return named
+  return fallback || key
 }
 
 export function mapError(code, params) {

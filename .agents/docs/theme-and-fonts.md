@@ -20,7 +20,7 @@ The control is the far-right top-bar button (half-filled circle). Three choices:
 
 Themes swap **CSS variables only**. Status meanings stay the same (running blue, pause/unknown amber, error/controller-lost/REAL red, done green). Dark uses no shadows; layering is 1px borders and surface steps.
 
-`--control` is the button/input border (`#A8A8A2` light, `#52524C` dark). Light amber is `#8F6000` (contrast vs bg/surface 5.05 / 5.47). Contrast tests import `docs/design/contrast.py`. Grid dots are decorative — do not assert 3:1 on `--grid`.
+`--control` is the button/input border (`#85857F` light, `#73736C` dark). Light amber is `#8F6000`. `--onblue` is the primary-button label. Contrast tests import `docs/design/contrast.py` and assert the §17.4 table (grid dots decorative, skipped). Font rows from `fonts/vendor-manifest.fonts.json` are merged as-is into `vendor-manifest.json`.
 
 Rams sheets: `docs/design/r-*.png` and `r-*-dark.png`. Compare live shots to sheets and **report** mismatches; do not restyle in a loop to match the mock chrome (logo, crumb, example graph).
 

@@ -10,7 +10,7 @@
 - r-operator-lost：已暂停 · 页面断开（琥珀，可继续）
 - r-adapter-lost：已暂停 · 机器人控制器断开（红，继续置灰），真机红框
 - r-missing：动作已不存在，节点面板「来自控制器」+ 六个控制节点，运行置灰
-- r-token：401 访问令牌整屏（历史稿；A39 认证延后，产品没有这一屏）
+- r-token：401 访问令牌整屏
 - r-waiting：运行中 · 等待前提条件（exec-model v0.2.1 §2.5.5）
 
 每张都有一张 `-dark` 深色版。字体：Inter + JetBrains Mono（`../fonts/`，OFL），中文用系统字体。见 ui-spec 第 17 节。

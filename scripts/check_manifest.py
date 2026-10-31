@@ -52,6 +52,25 @@ def collect_errors(data: dict, root: Path = ROOT) -> list[str]:
         size = path.stat().st_size
         if entry.get("bytes") not in (None, size):
             errors.append(f"size mismatch: {rel} manifest={entry.get('bytes')} actual={size}")
+    for entry in data.get("fonts") or []:
+        name = entry.get("file") or "<missing font file>"
+        want = entry.get("sha256", "")
+        want_bytes = entry.get("bytes")
+        found = False
+        for folder in (root / "roboact" / "static" / "fonts", root / "fonts", root / "docs" / "design" / "fonts"):
+            path = folder / name
+            if not path.is_file():
+                continue
+            found = True
+            got = sha256(path)
+            if got != want:
+                errors.append(f"font sha256 mismatch: {path}\n  manifest: {want}\n  actual:   {got}")
+            if want_bytes not in (None, path.stat().st_size):
+                errors.append(f"font size mismatch: {path} manifest={want_bytes} actual={path.stat().st_size}")
+        if not found:
+            errors.append(f"missing shipped font: {name}")
+        if entry.get("license") != "OFL-1.1":
+            errors.append(f"font license must be OFL-1.1: {name}")
     return errors
 
 
@@ -65,7 +84,12 @@ def main(argv: list[str] | None = None) -> int:
         for e in errors:
             print(e, file=sys.stderr)
         return 1
-    print(f"ok: {len(data.get('files') or [])} files match vendor-manifest.json (hashes + licenses)")
+    nfonts = len(data.get("fonts") or [])
+    print(
+        f"ok: {len(data.get('files') or [])} files"
+        + (f" + {nfonts} fonts" if nfonts else "")
+        + " match vendor-manifest.json (hashes + licenses)"
+    )
     return 0
 
 

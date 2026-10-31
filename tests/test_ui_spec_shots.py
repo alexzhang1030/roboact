@@ -16,9 +16,26 @@ except ImportError:
 
 pw = pytest.importorskip("playwright.sync_api")
 
-ART = Path("/opt/cursor/artifacts")
 ROOT = Path(__file__).resolve().parents[1]
 SHEETS = ROOT / "docs" / "design"
+
+
+def _art_dir() -> Path:
+    for p in (Path("/opt/cursor/artifacts"), ROOT / ".playwright-mcp"):
+        try:
+            p.mkdir(parents=True, exist_ok=True)
+            probe = p / ".write-probe"
+            probe.write_text("ok", encoding="utf-8")
+            probe.unlink()
+            return p
+        except OSError:
+            continue
+    p = ROOT / "shots"
+    p.mkdir(parents=True, exist_ok=True)
+    return p
+
+
+ART = _art_dir()
 
 # Rams sheet stem → live app screenshot stem (without -light/-dark).
 SHEET_TO_APP = {
@@ -35,9 +52,11 @@ SHEET_TO_APP = {
 }
 
 
-def _shot(page, screen: str, state: str, theme: str) -> None:
+def _shot(page, screen: str, state: str, theme: str, locale: str = "en") -> None:
     ART.mkdir(parents=True, exist_ok=True)
-    page.screenshot(path=str(ART / f"uispec-{screen}-{state}-{theme}.png"), full_page=True)
+    page.screenshot(path=str(ART / f"uispec-{screen}-{state}-{locale}-{theme}.png"), full_page=True)
+    if locale == "en":
+        page.screenshot(path=str(ART / f"uispec-{screen}-{state}-{theme}.png"), full_page=True)
 
 
 def _open(br, base, path="/"):
@@ -83,10 +102,25 @@ def _set_node(page, nid, payload):
     page.wait_for_timeout(40)
 
 
+def _locale(page, mode: str) -> None:
+    page.evaluate(
+        """(mode) => {
+          if (window.__af && window.__af.setLocaleMode) window.__af.setLocaleMode(mode)
+        }""",
+        mode,
+    )
+    page.wait_for_timeout(40)
+
+
 def _both(page, screen, state):
+    _locale(page, "en")
     for theme in ("light", "dark"):
         _theme(page, theme)
-        _shot(page, screen, state, theme)
+        _shot(page, screen, state, theme, "en")
+    _theme(page, "light")
+    _locale(page, "zh-CN")
+    _shot(page, screen, state, "light", "zh")
+    _locale(page, "en")
 
 
 def test_ui_spec_screenshots_one_pass(server):
@@ -249,12 +283,14 @@ def test_ui_spec_screenshots_one_pass(server):
         br.close()
     finally:
         p.stop()
-    names = sorted(p.name for p in ART.glob("uispec-*-light.png"))
-    darks = sorted(p.name for p in ART.glob("uispec-*-dark.png"))
+    names = sorted(p.name for p in ART.glob("uispec-*-en-light.png"))
+    darks = sorted(p.name for p in ART.glob("uispec-*-en-dark.png"))
+    zhs = sorted(p.name for p in ART.glob("uispec-*-zh-light.png"))
     assert any("waiting" in n for n in names), names
     assert len(names) >= 12, names
     assert len(darks) >= 12, darks
-    assert len(names) == len(darks)
+    assert len(zhs) >= 12, zhs
+    assert len(names) == len(darks) == len(zhs)
     _write_sheet_compare_report()
 
 
@@ -324,7 +360,7 @@ def _write_sheet_compare_report() -> None:
         "## Expected structural mismatches (not tuned)",
         "",
         "- Sheets include a logo, flow crumb (`/ 取杯子`), and a 7-node example graph. The live app shows the FakeAdapter demo (start / 假·到点 / 假·夹爪 / 假·相机).",
-        "- Sheets put 仿真/真机 and adapter name in the top-right cluster; the live app puts 保存文件 / 打开 before the appearance control.",
+        "- Sheets put 仿真/真机 and adapter name in the top-right cluster; the live app puts Save / Open and the language control before appearance.",
         "- Appearance control matches §17 (half-filled circle, far right, follow system / light / dark).",
         "- Sheets use `--hair` / `--surface2` for some separators; live chrome still uses `--border` for top/left/right edges.",
         "- Fonts: live UI is Inter + JetBrains Mono from `roboact/static/fonts/` with system CJK fallback, as §17.",

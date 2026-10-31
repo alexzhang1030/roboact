@@ -6,7 +6,7 @@ One-line gist per route. Open the record before changing that area. There is no 
 |---|---|---|
 | What this is / non-goals | [../README.md](../../README.md) (enrolled) | Offline robot flow canvas; not a chat LLM; v1 is FakeAdapter only. |
 | Fonts, Inter / JBM, light/dark | [theme-and-fonts.md](theme-and-fonts.md) | §17 is current. Package-static OFL fonts. Three-way appearance, no white flash. |
-| Locale, catalogs, codes-only | [i18n.md](i18n.md) | `navigator.languages`; catalogs as ES modules; codes on the wire; missing zh → en. |
+| Locale, catalogs, codes-only | [i18n.md](i18n.md) | First load English; catalogs as ES modules; codes on the wire; missing zh → en. |
 | What the browser may store | [settings-split.md](settings-split.md) | `roboact.*` display prefs only. Timeouts and safety stay on the server. |
 | Bind, Host/Origin, no auth | [auth-and-network.md](auth-and-network.md) | Loopback only. A40 checks. A39 deferred. SSH forward to open remotely. |
 | MIT, GitHub, no PyPI | [licence-and-repo.md](licence-and-repo.md) | Copyright line is exact. First push is `main`; then branch + PR. |

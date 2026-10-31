@@ -14,7 +14,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 
-# 10.0.0.0/8, 172.16.0.0–172.31.255.255, 192.168.0.0/16
+# RFC1918: 10/8, 172.16–31/12, 192.168/16
 PRIVATE = re.compile(
     r"(?<![\d.])("
     r"10\.\d{1,3}\.\d{1,3}\.\d{1,3}"

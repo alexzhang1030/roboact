@@ -2,7 +2,7 @@ import { defineComponent, markRaw, computed, inject } from 'vue'
 import { Handle, Position } from '@vue-flow/core'
 import { nodeStatus } from '../status-store.js'
 import { inputPorts } from '../graph-utils.js'
-import { t, locale, actionLabel, statusWord, mapError } from '../i18n.js'
+import { t, locale, actionLabel, statusWord, mapError, portLabel } from '../i18n.js'
 
 const ICONS = {
   idle: 'state-idle',
@@ -114,7 +114,7 @@ export default markRaw(defineComponent({
     const bpAfterTitle = computed(() => { void locale.value; return bpAfter.value.enabled ? t('bp.after_on') : t('bp.after_off') })
     return {
       Position, ins, outs, st, word, write, rows, spec, bpBefore, bpAfter, srcOf, toggleBp,
-      kind, icon, typeIcon, iconBase, icoUrl, summary, title, sideTitle, bpBeforeTitle, bpAfterTitle, t, locale,
+      kind, icon, typeIcon, iconBase, icoUrl, summary, title, sideTitle, bpBeforeTitle, bpAfterTitle, t, locale, portLabel,
     }
   },
   template: `
@@ -144,12 +144,12 @@ export default markRaw(defineComponent({
         <template v-if="ins[n-1]">
           <Handle type="target" :position="Position.Left" :id="ins[n-1].name"
                   :class="(srcOf(ins[n-1].name) && srcOf(ins[n-1].name).kind) || ''" />
-          <span class="fn-port-name">{{ ins[n-1].label || ins[n-1].name }}</span>
+          <span class="fn-port-name">{{ portLabel(ins[n-1]) }}</span>
           <span class="src" v-if="srcOf(ins[n-1].name)">{{ srcOf(ins[n-1].name).text }}</span>
         </template>
         <span style="flex:1"></span>
         <template v-if="outs[n-1]">
-          <span class="fn-port-name">{{ outs[n-1].label || outs[n-1].name }}</span>
+          <span class="fn-port-name">{{ portLabel(outs[n-1]) }}</span>
           <Handle type="source" :position="Position.Right" :id="outs[n-1].name" />
         </template>
       </div>
