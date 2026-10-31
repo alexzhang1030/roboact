@@ -276,4 +276,7 @@ export default {
   'flow.mismatch_units': '单位不同：文件 {file}，已连接 {current}',
   'flow.run_locked': '运行前请先审阅上面的差异。',
   'run.param_out_of_limit': '{node}：{param} 超出这台机器人的限制',
+  'run.param_type_mismatch': '{node}：{param} 必须是 {type}',
+  'run.missing_input_count': '{n} 个节点需要输入',
+  'status.missing_input': '需要输入',
 }

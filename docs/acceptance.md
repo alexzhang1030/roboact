@@ -54,7 +54,7 @@ Version 1.5 (2026-10-31). Companion to `prd-en-v1.5.md` section 4. exec-model = 
 <a id="9"></a>
 ## 9. Version lock
 1. While stopped at a breakpoint, edit the canvas.
-2. Pass: the run continues on the old version; `banner.rerun` "Rerun from the new version" (rerun from new version) appears.
+2. Pass: the run continues on the old version; `从新版本重跑` (rerun from new version) appears.
 
 <a id="10"></a>
 ## 10. Color-blind check
@@ -71,12 +71,12 @@ Version 1.5 (2026-10-31). Companion to `prd-en-v1.5.md` section 4. exec-model = 
 ## 12. Snapshot staleness
 1. Use two nodes not in the same loop.
 2. Change only the downstream node's params; rerun it. Pass: upstream snapshot not marked "maybe stale".
-3. Change an upstream node's param. Pass: downstream snapshot marked "maybe stale"; slash and `src.stale` "Cache · upstream changed" shown.
+3. Change an upstream node's param. Pass: downstream snapshot marked "maybe stale"; slash and `缓存 · 上游已改` shown.
 
 <a id="13"></a>
 ## 13. Human approval
 1. Run a flow with a Human approval node in the middle.
-2. Pass: run stops there, state "waiting for approval" (`status.awaiting` "Awaiting confirmation"); no new downstream records.
+2. Pass: run stops there, state "waiting for approval" (`等待确认`); no new downstream records.
 3. Click Reject. Pass: only the reject branch runs; approve-branch nodes show "skipped".
 4. Click from two pages at once. Pass: first wins; second is told it was already handled.
 
@@ -88,7 +88,7 @@ Version 1.5 (2026-10-31). Companion to `prd-en-v1.5.md` section 4. exec-model = 
 <a id="15"></a>
 ## 15. Step limit
 1. Run a loop whose exit never holds, with total step limit 10.
-2. Pass: stops after step 10; state "step limit exceeded" (`run.word.step_limit` "Step limit reached"); no step 11 record.
+2. Pass: stops after step 10; state "step limit exceeded" (`超出步数上限`); no step 11 record.
 
 <a id="16"></a>
 ## 16. Loop breakpoints
@@ -206,13 +206,15 @@ Version 1.5 (2026-10-31). Companion to `prd-en-v1.5.md` section 4. exec-model = 
 <a id="20"></a>
 ## 20 Flow file import / export
 
-1. Build a flow with at least one loop, one breakpoint, one control node and one `motion` node.
-2. Export it as JSON, import the file: nodes, params, positions, edges, breakpoints and adapter fields match the original; exporting again gives a byte-identical file.
-3. Export the same flow as YAML and import it: the loaded flow equals the one from step 2.
-4. Check both files contain no run records, cached outputs, pinned inputs, UI text, UI settings or server address.
-5. Import a file with a wrong format version, a schema error, and an unknown action, one at a time: each is refused, nothing is loaded, and the message names the line or JSON path.
-6. Import a file whose action-list version differs: it loads read-only with the differences listed; Run is disabled until the user confirms.
-7. Import a YAML file containing a custom tag (for example `!!python/object`): refused, nothing constructed.
-8. Import a file whose flow name already exists: a new flow is created with a suffix; the existing one is unchanged.
-9. Importing never starts a run: the run list has no new entry.
-
+1. Build a flow with a loop, a control node, a `motion` node and a param marked secret.
+2. Export as JSON, import, export again: the two files are byte-identical; the secret param is `null` and its node shows "missing input" with Run disabled until it is filled in.
+3. Export as YAML, convert to JSON: equals the JSON export from step 2.
+4. Files contain no run records, pins, images, breakpoints, undo history, zoom, theme, language or server address.
+5. Import a hand-written `.yml` file with unquoted `mode: on`: it stays a string (swap the parser to YAML 1.1 rules: this must fail). In the same file, unquoted `ver: 1.10` for a string param imports, but Run is blocked and names that node and param; quoted `"1.10"` runs with `1.10`.
+6. Import, one at a time, files with a newer `format_version`, an unknown field, a duplicate id, an edge to a missing port, mismatched port types, a loop without an exit, a custom tag, an alias: each is refused, nothing changes, the dialog shows the path of each error.
+7. Import a file with an older `format_version`: it is migrated and loads.
+8. Import a file with an unknown action: that node shows "action gone"; the Run button shows 1 remaining. "Review and enable run" does not enable Run; replacing the action or deleting the node does.
+9. Import a file from a different robot, adapter, `action_list_version` or units: the amber bar lists each difference; Run is disabled until "Review and enable run".
+10. Import while a flow is open: a new flow is created; the old one is unchanged; the run list has no new entry.
+11. Set a `motion` param above the connected robot's joint or velocity limit, press Run: the run is blocked and the node and param are named. Switch to a robot with wider limits: the same flow runs.
+12. Import a file over 5 MiB: refused before parsing.

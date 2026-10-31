@@ -1,6 +1,6 @@
 # Agent notes
 
-How to run and test this repo. Product spec: [docs/prd.md](../../docs/prd.md).
+How to run and test this repo. Product spec: [docs/prd.md](../../docs/prd.md). Acceptance: [docs/acceptance.md](../../docs/acceptance.md). Flow file: [docs/flow-file.md](../../docs/flow-file.md).
 
 | Topic | File |
 |---|---|

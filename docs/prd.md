@@ -17,17 +17,17 @@ First run
 2. Infinite canvas, one Start node.
 3. Add nodes (sidebar, double-click), drag edges. Zoomed out: title and state; zoomed in: ports. Params in right panel.
 4. Breakpoint: click node's left edge; before-run and after-run separate.
-5. Run. States: idle `status.idle` "Idle", queued `status.queued` "Queued", running `run.start` "Run", at breakpoint `停在断点`, waiting for approval `status.awaiting` "Awaiting confirmation", done `status.done` "Done", error `status.error` "Error", skipped `status.skipped` "Skipped", stopped `status.stopped` "Stopped" (user Stop), interrupted `status.interrupted` "Interrupted" (crash only), interrupted · result unknown `status.interrupted_unknown` "Interrupted · result unknown" (exec-model failure table). None auto-rerun.
+5. Run. States: idle `空闲`, queued `排队`, running `运行`, at breakpoint `停在断点`, waiting for approval `等待确认`, done `完成`, error `出错`, skipped `跳过`, stopped `已停止` (user Stop), interrupted `中断` (crash only), interrupted · result unknown `中断 · 结果未知` (exec-model failure table). None auto-rerun.
    - Timeout: plain node → error "timeout"; `write`/`motion` → result unknown, run pauses.
    - Result unknown (`write`/`motion` only): `read_state`, then user picks rerun or mark done; own icon.
    - Only the active edge animates.
 6. At breakpoint: Continue, Step, Stop; panel shows input, output, duration; edit input, continue.
-7. Run one node with past-run, manual or pinned input; upstream not rerun. Pins only in single-node/group runs; full runs mark them `src.pinned_unused` "Pin unused this run". Cached input port: hollow circle naming its source run.
+7. Run one node with past-run, manual or pinned input; upstream not rerun. Pins only in single-node/group runs; full runs mark them `本次未用固定值`. Cached input port: hollow circle naming its source run.
 8. Run group: box-select; incoming edges become pinnable entry ports; outside nodes don't run.
 9. Error: red plus icon and text; panel shows I/O and error; rerun from here, upstream not rerun.
 10. Side-effect node (email, file write, external write API): title mark; replay mocked (`模拟`) unless user clicks real run.
 11. Loop: dashed back edge routed below, labeled "round 3" (target's run count); exit via condition node; top bar "steps 37 / limit N"; node shows latest round, panel lists all.
-12. Run locks flow version; editing while paused offers `banner.rerun` "Rerun from the new version" (new run from start; old stays paused).
+12. Run locks flow version; editing while paused offers `从新版本重跑` (new run from start; old stays paused).
 
 12.1 Human approval: run waits; panel shows input, Approve, Reject, note; chosen branch continues. Every run.
 
@@ -37,7 +37,7 @@ Daily use
 
 Disconnects
 
-14. Refresh or disconnect ≤ 10 s: run unaffected. Page disconnected > 10 s: finish current node (not cancelled), then pause; top bar `run.word.paused_operator_lost` "Paused · page disconnected". Same state on return.
+14. Refresh or disconnect ≤ 10 s: run unaffected. Page disconnected > 10 s: finish current node (not cancelled), then pause; top bar `已暂停 · 页面断开`. Same state on return.
 
 ## 3. Requirements
 
@@ -95,19 +95,19 @@ Executor
 - Input source: real upstream, cache, manual pin, manual entry.
 - HTTP: run all, run from, run subgraph, pause before/after, resume, step, stop.
 - SSE batched per 100 ms, last state per node; pause, breakpoint, step flush immediately; records stay one per step; reconnect fetches state first.
-- Node types from adapter at startup; none → `palette.disconnected` "Robot controller not connected", flows can't run; removed → red `status.action_missing` "Action no longer exists" (ui-spec §16), kept.
+- Node types from adapter at startup; none → `未连上机器人控制器`, flows can't run; removed → red `动作已不存在` (ui-spec §16), kept.
 - Action fields: `id`, list `version`, `params`, `outputs` (incl. image), `side_effect` (none/read/motion; default motion), `return_mode` (blocking/poll), `timeout_s`, optional `typical_s`, `cancel`, `preconditions`, optional `precondition_wait_s`, `read_state` (required for motion).
 - `params` entry: name, type, unit, range or options, default, required.
 - `cancel`: cancellable or not; where the robot stops; per-cancel accepted flag.
 - Result carries measured end state.
 - Missing required field → no node; panel names it. Names and types from interface, rest hand-written; param form generated from it.
 - Action-list version locked with flow; mismatch fails before start (inference).
-- Stop and cancel outcome per action; refused cancel keeps node running, shows `status.cancel_rejected` "Cancel rejected"; non-cancellable runs to end.
+- Stop and cancel outcome per action; refused cancel keeps node running, shows `取消被拒`; non-cancellable runs to end.
 - Node stays running until final result.
 - Camera node: `read`, one image in Output tab with time, round, step (ui-spec §16); no thumbnail; memory only; log dimensions, time, size.
 - Running label: "running · 40%" or "running · 12 s"; no progress bars.
 - Snapshot = run-record input plus upstream-config fingerprint; upstream param/code change → maybe stale, still usable, not deleted.
-- Entry ports: cache (hollow, run time); stale (slashed, `src.stale` "Cache · upstream changed", hover lists changed nodes, no red); pinned (filled with pin, `src.pinned` "Pinned", never expires).
+- Entry ports: cache (hollow, run time); stale (slashed, `缓存 · 上游已改`, hover lists changed nodes, no red); pinned (filled with pin, `已固定`, never expires).
 - Pause on `asyncio.Event`; restart resumes before next node; no data via process memory.
 - Pydantic → JSON Schema; same-type ports only; images as metadata (exec-model v0.2 §2.2); large outputs path + hash (inference).
 - Side effects: `none`, `read` (cached replay), `motion` (real, confirm first), `write` (test, mock, idempotency key); adapter `write` → `rejected_actions`.
@@ -115,7 +115,7 @@ Executor
 
 Loops (§5.1)
 
-- Stop: condition exit, step limit (`run.word.step_limit` "Step limit reached"), user. No exit: warn on save, refuse run.
+- Stop: condition exit, step limit (`超出步数上限`), user. No exit: warn on save, refuse run.
 - Step limit default 1000 (Steve, 2026-10-31, temporary). No round limit.
 - Breakpoints every round, or "only round N", or condition comparing existing input fields (no Python); Step over back edge enters next round.
 - Record key run id + global step, plus node and round; no overwrite; unread edge data persisted.
@@ -127,7 +127,7 @@ Control nodes (§5.2)
 
 - Start, Output, Constant, Condition (only loop exit), Merge, Human approval (exec-model §2.4); `none`. Test group: "text template", "model call", "tool call".
 - No seventh "wait" node (Tedrake). Reach goal: `return_mode = blocking`; JTC succeeds within goal tolerance and `constraints.goal_time` ([JTC](https://control.ros.org/master/doc/ros2_controllers/joint_trajectory_controller/doc/userdoc.html)); Nav2 goal checker accepts position and heading ([SimpleGoalChecker](https://docs.nav2.org/configuration/packages/nav2_controller-plugins/simple_goal_checker.html)). Wait for person: Human approval. Long or non-robot waits: not v1.
-- `precondition_wait_s`: poll `read_state` until true, else `precondition_failed`; absent → check once; shows `status.running_wait` "Running · waiting for precondition"; `timeout_s` starts at send; Stop → stopped, no read-back; resume restarts wait; restart → pending (exec-model v0.2.1 §2.5.5, A38); one record. Poll interval and fields: adapter author.
+- `precondition_wait_s`: poll `read_state` until true, else `precondition_failed`; absent → check once; shows `运行中 · 等待前提条件`; `timeout_s` starts at send; Stop → stopped, no read-back; resume restarts wait; restart → pending (exec-model v0.2.1 §2.5.5, A38); one record. Poll interval and fields: adapter author.
 - Blocking returns before stable and no stable field in `read_state` → adapter must add one (pre-real-robot check).
 
 Hardware
@@ -137,12 +137,12 @@ Hardware
 - Canvas Stop is not e-stop; e-stop is the robot's hardware path, never web or HTTP; no UI e-stop button. Proposed: IEC 60204-1 category 2 (hold, motors on; Thompson's suggestion, not certified).
 - After cancel: robot state and gripper hold read back and shown.
 - Adapter reports `name`, `version`, `target` (sim/real, a field, not name-guessed), action-list version.
-- No per-run sim/real toggle; adapter name right of flow name; red `real_tag` "REAL" tag when real.
+- No per-run sim/real toggle; adapter name right of flow name; red `真机` tag when real.
 - v1: fake adapter, invented actions named as fake (sim).
 - Adapter heartbeat; loss cancels active goals (ROS 2 goals outlive clients, [rclcpp #2241](https://github.com/ros2/rclcpp/issues/2241)).
 - `timeout_s` → controller expiry; controller without it: description says "expiry by adapter only", UI flags it.
 - Crash: `motion` → result unknown; poll actions query goal, blocking use `read_state`; human confirms.
-- Adapter silent 3 s → pause, `run.word.paused_adapter_lost` "Paused · robot controller lost"; deadline sent to adapter; 60 s Python timer as backup. Defaults adjustable, no source (Torvalds).
+- Adapter silent 3 s → pause, `已暂停 · 机器人控制器断开`; deadline sent to adapter; 60 s Python timer as backup. Defaults adjustable, no source (Torvalds).
 - Listen 127.0.0.1 only; no `--host`; remote browser via SSH forwarding.
 - Network loss: each action's adapter-defined behavior.
 - LAN access later: `--host` and tokens ship together.
@@ -150,14 +150,17 @@ Hardware
 
 ### Flow file (import / export) — added 2026-10-31 at Alex's request
 
-- Export the current flow as JSON or YAML; the user picks the format. JSON is the canonical format; YAML holds the same data.
-- Import a `.json`, `.yaml` or `.yml` flow file. Import only loads the flow onto the canvas and never starts a run.
-- The file contains the file format version, the flow name, nodes (type, params, position), edges (data and control), breakpoints, and the name and action-list version of the adapter it was built against.
-- The file never contains run records, cached outputs, pinned inputs, UI text, UI settings, secrets or the server address. Status values are stored as codes only.
-- Import checks the format version, the schema, and that every action exists in the current adapter's action list. If anything fails, nothing is loaded and the error names the file line or JSON path.
-- If the adapter name or action-list version differs, the flow loads read-only and shows what differs; running it needs an explicit confirmation.
-- YAML is parsed on the server with a safe loader (no custom tags, no object construction). The browser does not parse YAML.
-- Import never overwrites an existing flow; it creates a new one, and a name clash gets a suffix.
+- Format: `flow-file-format-v1.md` (Thompson); where it differs, this PRD wins. JSON and YAML share one schema; JSON is canonical.
+- Export the current flow as `.json` or `.yaml`; default file name is the flow name. Import accepts `.json`, `.yaml` and `.yml`.
+- The file holds `format_version`, `flow.revision`, the adapter's `action_list_version`, the robot and adapter it came from, angle and length units, nodes (`id`, `kind`, `action`, `params`, `position`) and edges by node id and port name (loop back-edges are ordinary edges).
+- Not in the file: run records, pins, images, breakpoints, undo history, zoom, theme, language. Params marked secret export as `null`; after import that node shows "missing input" and Run stays disabled until the value is filled in.
+- Import creates a new flow and opens it; it never overwrites an existing flow and never starts a run.
+- All checks run before anything changes. Rejected (canvas unchanged, dialog lists each error with its path, e.g. `nodes[3].params.speed`): newer `format_version`, unknown fields, duplicate ids, edges to missing nodes or ports, mismatched port types, loops without an exit. Older `format_version` is migrated step by step.
+- Actions the current adapter lacks load as "action gone". Run stays disabled while any such node remains; the user must replace its action or delete it. The Run button shows how many remain.
+- A different robot, adapter, `action_list_version` or units shows an amber bar listing each difference; Run stays disabled until "Review and enable run". This button clears only this lock, never "action gone" or "missing input".
+- Import checks file structure only (version, fields, edges). Before every run, each param is checked against its action's JSON Schema type: a hand-written unquoted `1.10` for a string param (YAML reads it as the number 1.1) blocks the run and names the node and param. `motion` params are checked before every run against the connected robot's joint and velocity limits; any out-of-limit param blocks the run and names the node and param.
+- Limits (inference, no source): file ≤ 5 MiB checked before parsing; nesting depth ≤ 64; string ≤ 65536 chars.
+- YAML is parsed on the server only, with YAML 1.2 core rules, safe mode, no custom tags, no anchors or aliases (ruamel.yaml `YAML(typ='safe', pure=True)`, version locked with uv; it allows aliases by default, so the server rejects them itself). Export quotes every string.
 
 ## 4. Acceptance criteria
 
@@ -227,7 +230,7 @@ Hardware
 
 19.10 `scripts/check.sh` passes on clean clone and aarch64; failures block merge except 19. Steps: acceptance.md#19.10
 
-20. Flow file: export then import gives an identical flow; JSON and YAML exports of one flow load to the same flow; bad or mismatched files are refused or loaded read-only as specified. Steps: acceptance.md#20
+20. Flow file: export, import, export is byte-identical; YAML converted to JSON equals the JSON export; unquoted `mode: on` stays a string; bad files change nothing; "action gone", "missing input" and mismatched files all lock Run. Steps: acceptance.md#20
 
 A6: failing (see 5). A38: 19.4. A40: 19.9. R1–R6 include two checks; Steps: acceptance.md#r1-r6
 
@@ -246,4 +249,4 @@ A6: failing (see 5). A38: 19.4. A40: 19.9. R1–R6 include two checks; Steps: ac
 - Rams: English status words and buttons in the zh table; verify English fits nodes and top bar.
 - Tedrake: once vendor known, cite stop, controller power-loss and gripper power-loss behavior (adapter acceptance, not blocking v1).
 - Tedrake: confirm control nodes; `node-list-v0.md` obsolete (9 nodes kept for executor tests).
-- Flow file (added 2026-10-31): Torvalds, which YAML library and whether it is vendored; Thompson, a file size limit and whether imported `motion` params need extra review; Alex, whether exported files should be diff-friendly for git (stable key order, no positions).
+- Flow file (added 2026-10-31): Alex, whether exported files should be diff-friendly for git (stable key order, no positions).

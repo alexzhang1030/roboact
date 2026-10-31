@@ -63,6 +63,7 @@ Icon + word + border; icons alone must separate states in greyscale. Each `statu
 - Amber, emphasis: `status.paused_before`, `status.paused_after`, `status.paused` (after restart), `status.interrupted_unknown` (`state-unknown`), `status.awaiting`.
 - Red, emphasis: `status.error` plus summary.
 - 1px red dashed, no fill: `status.action_missing` (`state-unknown`).
+- 1px amber dashed, no fill: `status.missing_input` (`state-unknown`), same treatment as action missing but amber.
 
 Rules:
 - Interrupted: crash only; non-motion nodes rerun on continue.
@@ -73,6 +74,7 @@ Rules:
 - Precondition wait: `status.running_wait`, blue; log `rec.waited`. Stop gives stopped; limit gives error `error.precondition_failed`; pause or disconnect requeues and restarts the wait at zero.
 - Cancel rejected: still running, `status.cancel_rejected` amber; top bar adds `run.stop_rejected_note`. Retry = Stop again.
 - Action missing: panel `error.action_missing`. Run is blocked while any exists; `run.action_missing_count` next to Run jumps to the first. Cleared only by replacing the action or deleting the node.
+- Missing input: a required value is empty (e.g. a secret param imported as `null`). Run is blocked until filled; `run.missing_input_count` sits next to Run beside the action-missing count.
 
 ## 4. Breakpoints
 
@@ -195,11 +197,12 @@ Measured with HarfBuzz, `InterVariable.woff2`, weight 400, current `en.js`.
 ## 17. Flow import / export (UI)
 
 - `flow.export` and `flow.import` in the top-bar flow menu; no large buttons.
-- Export asks `flow.export_format` (`flow.format_json`, `flow.format_yaml`); default filename = flow name. Node positions are exported. Not in the file: breakpoints, pins, run records, images, undo, zoom, theme, language. Secret params export as `null`.
+- Export asks `flow.export_format` (`flow.format_json`, `flow.format_yaml`); default filename = flow name. Node positions are exported. Not in the file: breakpoints, pins, run records, images, undo, zoom, theme, language. Secret params export as `null`; on import their node shows `status.missing_input` (§3).
 - Import accepts `.json`, `.yaml`, `.yml`. It always creates and opens a new flow, never overwrites, never starts a run. No grey-out during a run, no replace confirm.
 - Rejected, canvas unchanged: newer format version, unknown field, duplicate id, edge to a missing port, port type mismatch, loop with no exit, YAML custom tag or alias. The dialog stays open with `flow.import_failed` and one `flow.import_error` per error, by path (e.g. `nodes[3].params.speed`).
-- Unknown action: imported anyway; the node shows `error.action_missing` (§3). Run is blocked while any such node exists, with `run.action_missing_count` next to Run. Only replacing the action or deleting the node unblocks it; `flow.review_enable` does not.
+- Unknown action: imported anyway; the node shows `error.action_missing` (§3). Run is blocked while any such node exists, with `run.action_missing_count` next to Run. Only replacing the action or deleting the node unblocks it. `flow.review_enable` clears neither this nor missing input.
 - Robot, adapter, action-list version or unit mismatch: an amber banner at the top lists each one (`flow.mismatch_robot`, `flow.mismatch_adapter`, `flow.mismatch_actions`, `flow.mismatch_units`) with one button `flow.review_enable`. Run is disabled (`flow.run_locked`) until it is pressed.
+- Param types are not checked at import. Before each run every param is checked against its action's JSON Schema type (e.g. unquoted `1.10` in a string param reads as 1.1); a mismatch blocks Run and marks the node and param (`run.param_type_mismatch`).
 - `motion` param limits are checked before each run against the connected robot, not at import. The failing node and param are marked (`run.param_out_of_limit`).
 - File format and versioning are defined elsewhere.
 
@@ -218,3 +221,44 @@ Glow, gradients, frosted glass, layered shadows (one node shadow `0 1px 2px rgb(
 
 - Auth: the token screen (`r-token`) is not built and has no keys yet.
 - The post-restart display follows §1 and §3 until the execution model settles.
+
+## Keys to add (both catalogs)
+
+```
+run.target_sim: "Sim"
+run.stop_rejected_note: "The robot is still moving. Use the hardware button for e-stop."
+run.action_missing_count: "{n} nodes use an action that no longer exists"
+run.disabled_no_controller: "Robot controller not connected. Run is disabled."
+error.readback_required: "Read back the robot's state, then retry or mark as done."
+error.action_missing: "This action is no longer provided by the adapter."
+readback.read: "Read back"
+src.cache_time: "Cache · {time} · round {round}"
+edge.open_panel: "Open in right panel"
+edge.image_preview: "Image · {w}×{h} · {at}"
+group.back_edge: "Back edge · round {round}"
+side.write_detail: "Writes outside: {what}"
+params.no_expiry: "The controller takes no expiry. If the backend hangs, this step cannot stop."
+params.no_range: "Controller gave no range"
+palette.source: "From controller · fetched {time}"
+port.image_size: "Image · {w}×{h}"
+status.waiting: "Waiting"
+status.summary.result_unknown: "Result unknown. Read back before continuing."
+status.summary.waiting_precondition: "Waiting for precondition"
+flow.export: "Export…"
+flow.import: "Import…"
+flow.export_format: "Export as"
+flow.format_json: "JSON"
+flow.format_yaml: "YAML"
+flow.import_failed: "File not imported. Fix these errors:"
+flow.import_error: "{path}: {message}"
+flow.mismatch_adapter: "Adapter differs: file {file}, connected {current}"
+flow.mismatch_actions: "Action list version differs: file {file}, connected {current}"
+flow.mismatch_robot: "Robot differs: file {file}, connected {current}. Joint positions were calibrated on another robot."
+flow.review_enable: "Review and enable run"
+flow.mismatch_units: "Units differ: file {file}, connected {current}"
+flow.run_locked: "Review the differences above before running."
+run.param_out_of_limit: "{node}: {param} is outside this robot's limits"
+run.param_type_mismatch: "{node}: {param} must be {type}"
+run.missing_input_count: "{n} nodes need input"
+status.missing_input: "Needs input"
+```

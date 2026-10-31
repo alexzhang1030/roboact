@@ -18,7 +18,7 @@ def _catalog(path: Path) -> dict[str, str]:
     return ast.literal_eval(blob)
 
 
-# ui-spec v1 "Keys to add" (33). Kept here after that section was removed.
+# ui-spec v1 "Keys to add" (36).
 UI_SPEC_KEYS = (
     "run.target_sim",
     "run.stop_rejected_note",
@@ -53,6 +53,9 @@ UI_SPEC_KEYS = (
     "flow.mismatch_units",
     "flow.run_locked",
     "run.param_out_of_limit",
+    "run.param_type_mismatch",
+    "run.missing_input_count",
+    "status.missing_input",
 )
 
 
@@ -72,7 +75,7 @@ def test_catalogs_same_keys():
 def test_ui_spec_keys_present():
     en = _catalog(EN)
     zh = _catalog(ZH)
-    assert len(UI_SPEC_KEYS) == 33
+    assert len(UI_SPEC_KEYS) == 36
     assert "flow.read_only" not in en
     assert "flow.read_only" not in zh
     missing_en = [k for k in UI_SPEC_KEYS if k not in en]
