@@ -1,6 +1,6 @@
 # PRD v1：roboact（Agent 流程画布，第一期：flow）
 
-日期：2026-10-31　状态：v1.4.12（20:16 19.10 改：`rclpy` 不写进 `pyproject.toml`，Tedrake；pyright 规则和 Python 3.12，Torvalds）；v1.4.11（18:58 决定记录改放 `.agents/docs/`，按 PCR；开发工具链 uv、ruff、类型检查）；v1.4.10（18:42 去掉 `--host`，加 Host/Origin/Content-Type 检查，对齐 exec-model v0.2.3）；v1.4.9（v1 不做鉴权，令牌暂不实现）；v1.4.8（18:30 访问令牌按 Thompson exec-model v0.2.2 第 0.2 节）；v1.4.7（18:25 设置表、词表文件名、docs/decisions）；v1.4.6（18:20 界面设置统一：先读浏览器设置，再存本地；多语言对齐 Steve、Tedrake、Thompson）；v1.4.5（18:15 加界面语言：英文默认，可切中文）；v1.4.4（18:10 加浅色/深色和字体要求，18:12 字体对齐 Rams 第 17 节；第 5.2 节对齐 exec-model v0.2.1 第 2.5.5 节）；v1.4.3（18:05 第 5.2 节定稿：不加「等待」节点，动作说明加 `precondition_wait_s`，Tedrake）；v1.4.2（17:40 加第 5.2 节手写控制节点）；v1.4.1 定稿（17:25 按 Thompson exec-model v0.2 对齐 11 处）；v1.4 定稿（Alex 2026-10-31 答完具身问题：程序跑在机器人控制器上，节点由 adapter 交出的原子动作生成，运行日志保留），画布库定为 Vue Flow 1.48.2　仓库：`alexzhang1030/roboact`（公开，Alex 2026-10-31 定名）　负责：Fadell · PRD
+日期：2026-10-31　状态：v1.4.13（20:40 许可证定为 MIT，Alex）；v1.4.12（20:16 19.10 改：`rclpy` 不写进 `pyproject.toml`，Tedrake；pyright 规则和 Python 3.12，Torvalds）；v1.4.11（18:58 决定记录改放 `.agents/docs/`，按 PCR；开发工具链 uv、ruff、类型检查）；v1.4.10（18:42 去掉 `--host`，加 Host/Origin/Content-Type 检查，对齐 exec-model v0.2.3）；v1.4.9（v1 不做鉴权，令牌暂不实现）；v1.4.8（18:30 访问令牌按 Thompson exec-model v0.2.2 第 0.2 节）；v1.4.7（18:25 设置表、词表文件名、docs/decisions）；v1.4.6（18:20 界面设置统一：先读浏览器设置，再存本地；多语言对齐 Steve、Tedrake、Thompson）；v1.4.5（18:15 加界面语言：英文默认，可切中文）；v1.4.4（18:10 加浅色/深色和字体要求，18:12 字体对齐 Rams 第 17 节；第 5.2 节对齐 exec-model v0.2.1 第 2.5.5 节）；v1.4.3（18:05 第 5.2 节定稿：不加「等待」节点，动作说明加 `precondition_wait_s`，Tedrake）；v1.4.2（17:40 加第 5.2 节手写控制节点）；v1.4.1 定稿（17:25 按 Thompson exec-model v0.2 对齐 11 处）；v1.4 定稿（Alex 2026-10-31 答完具身问题：程序跑在机器人控制器上，节点由 adapter 交出的原子动作生成，运行日志保留），画布库定为 Vue Flow 1.48.2　仓库：`alexzhang1030/roboact`（公开，Alex 2026-10-31 定名）　负责：Fadell · PRD
 
 ## 1. 用户和场景
 
@@ -56,6 +56,7 @@
   - 状态词两种语言一一对应，英文由 Rams 定，写进 `ui-spec-v0.md`，和中文表同一张。后端只发状态码（比如 `operator_lost`），由前端翻成当前语言。SQLite 运行记录、导出的流程文件、接口里只存代码（`interrupted_unknown`、`waiting_precondition`、`precondition_failed`、`operator_lost`、`adapter_lost` 等），不存任何界面文字；否则重启时判断不了这一步要不要先读回机器人（Thompson）。
   - 不翻的：adapter 交出的动作名、参数名和说明，按 adapter 写的原样显示（adapter 可以在动作说明里加可选的 `labels`，按语言给，如 `{"en": ..., "zh": ...}`，给了就按当前语言选，没给就显示动作的 `name`，`name` 也没有才显示 `id`，不显示空白；单位如 `rad`、`m/s` 不翻（Tedrake、Thompson））；用户在画布上写的节点名和备注；输入输出的值；日期数字格式跟着语言走。
   - 仓库 README 用英文，`docs/` 里的 PRD 和规格暂时只有中文。
+- 许可证：MIT（Alex 2026-10-31 20:39「mit是对的」）。仓库根目录放 `LICENSE`，`pyproject.toml` 的 `license` 字段写 MIT；`vendor/licenses/` 里第三方字体等的许可证原文（OFL）保留。
 - 仓库里放什么（Alex 2026-10-31「必要的交流信息以及 design 等信息可以存到 GitHub 上」）：`docs/` 放 PRD、执行模型、系统设计、界面规格、设计图和图的源文件。讨论结果每个决定一份短记录，按 PCR（project-context-records，在仓库里记定了什么、为什么的 Markdown 记录）放 `.agents/docs/`，每个主题一份，`.agents/docs/README.md` 当目录；写定了什么、为什么、谁定的、日期，链到 PRD 或规格对应章节。不再建 `docs/decisions/`。「已认可」标记只由 Alex 加。原始聊天、机器人和控制器的 IP 或主机名、厂商非公开文档、令牌不放（Thompson：公开仓库的提交历史删不掉）。推之前除了 gitleaks，再扫 `git ls-files` 列出的全部文件（含 `.agents/`）里的私网 IP（`10.`、`192.168.`、`172.16–31.`），扫到就不推。
 - 界面设置怎么记（Alex 2026-10-31「所有配置都可以 storage & 读取浏览器配置」，Steve 定）：只管界面偏好。没手动选过就读浏览器自己的设置；手动选过就存进 `localStorage`，之后以存的为准。两个页面同时开着，监听 `storage` 事件，一边改了另一边跟着变（Thompson）。所有键用 `roboact.` 开头；读到坏值就丢掉，按下表「读不到时」处理，不报错。
 

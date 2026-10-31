@@ -9,9 +9,9 @@ Offline, zero-build robot flow canvas. Wire the atomic actions an adapter expose
 - Adapter: one interface in front of an SDK or ROS 2. v1 ships `FakeAdapter` only (`target=sim`).
 - **Offline**: frontend, icons, and fonts live in the repo; Python deps are local wheels. Latin UI and digits use Inter; code, parameter values, times, and step counts use JetBrains Mono (both in `roboact/static/fonts/`, SIL OFL 1.1). CJK falls back to system PingFang SC / Microsoft YaHei / Noto Sans CJK SC — not bundled.
 
-Licence for Roboact itself is **not decided yet**. There is no LICENSE file. Third-party texts stay under `vendor/licenses/`. This repo is not published to PyPI and has no publish config.
+Roboact is licensed under the **MIT** License (`LICENSE`, Copyright (c) 2026 alexzhang1030). Third-party texts stay under `vendor/licenses/`. This repo is not published to PyPI and has no publish config.
 
-Specs in this tree: [PRD v1.4.12](docs/prd.md), [exec-model v0.2.3](docs/exec-model.md) (token §0.2 / A39 ignored — auth deferred), [system-design](docs/system-design.md), [UI spec](docs/ui-spec.md) (**§17 fonts/themes, §18 language**), [Rams design sheets](docs/design/), [diagrams](docs/diagrams/). History: `docs/prd-v1.md`, `docs/exec-model-v0.md`, `docs/ui-spec-v0.md`, `docs/system-design-v0.md`. Decision records are PCR in [`.agents/docs/`](.agents/docs/).
+Specs in this tree: [PRD v1.4.13](docs/prd.md), [exec-model v0.2.3](docs/exec-model.md) (token §0.2 / A39 ignored — auth deferred), [system-design](docs/system-design.md), [UI spec](docs/ui-spec.md) (**§17 fonts/themes, §18 language**), [Rams design sheets](docs/design/), [diagrams](docs/diagrams/). History: `docs/prd-v1.md`, `docs/exec-model-v0.md`, `docs/ui-spec-v0.md`, `docs/system-design-v0.md`. Decision records are PCR in [`.agents/docs/`](.agents/docs/).
 
 ## Install and run
 
@@ -122,7 +122,7 @@ v1 uses `FakeAdapter` (`target=sim`). These must pass before a real robot. Sourc
 ## Layout
 
 ```
-(no LICENSE file)       Roboact licence not decided yet
+LICENSE                 MIT (Copyright (c) 2026 alexzhang1030)
 AGENTS.md               Project rules + PCR block
 .agents/docs/           Project Context Records (map in README.md)
 roboact/                Python package (adapter, nodes, graph, executor, Store, HTTP+SSE)
@@ -131,7 +131,7 @@ web/                    Static frontend, served by the backend
 web/i18n/               en.js and zh-CN.js catalogs (ES modules, no build)
 web/vendor/             Vue / Vue Flow / icons (unmodified upstream files)
 assets/logo.svg         Brand mark (favicon is the same drawing)
-docs/prd.md             PRD v1.4.12 (current product doc in this tree; token rows ignored)
+docs/prd.md             PRD v1.4.13 (current product doc in this tree; token rows ignored)
 docs/system-design.md
 docs/ui-spec.md         §17 fonts and themes, §18 language
 docs/design/            Rams light + `-dark` sheets

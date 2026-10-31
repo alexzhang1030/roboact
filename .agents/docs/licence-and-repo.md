@@ -1,6 +1,8 @@
 # Licence and repo
 
-**Current conclusion.** Roboact's own licence is **not decided yet**. Do not add a LICENSE file. Do not claim MIT (or any other licence) for this project. Third-party licence texts stay under `vendor/licenses/` and are recorded per file in `vendor-manifest.json`.
+**Current conclusion.** Roboact's own licence is **MIT**. `LICENSE` is the standard MIT text, `Copyright (c) 2026 alexzhang1030`. Third-party licence texts stay under `vendor/licenses/` and are recorded per file in `vendor-manifest.json`.
+
+Alex 2026-10-31 在 RoboAct 房间回复：mit是对的
 
 The public GitHub repository is `alexzhang1030/roboact`. The product name is Roboact. This tree is not published to PyPI.
 
@@ -15,11 +17,10 @@ PCR records live in `.agents/docs/`. Do not add `docs/decisions/`.
 
 ## Why
 
-Licence choice is not on record. The repository is public. A leaked controller address or token cannot be unpublished from git history. `rg` and many globs skip dot-directories; `git ls-files` does not.
+The repository is public. A leaked controller address or token cannot be unpublished from git history. `rg` and many globs skip dot-directories; `git ls-files` does not.
 
 ## Rejected
 
-- Shipping a LICENSE file or calling Roboact MIT before Alex confirms.
 - A PyPI publish config.
 - Scanning a directory glob that silently skips `.agents/`.
 

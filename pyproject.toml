@@ -4,7 +4,7 @@ version = "0.1.0"
 description = "Offline, zero-build robot flow canvas"
 readme = "README.md"
 requires-python = ">=3.12"
-license = { text = "License not decided" }
+license = { text = "MIT" }
 authors = [{ name = "alexzhang1030" }]
 dependencies = [
     "pydantic==2.14.2",

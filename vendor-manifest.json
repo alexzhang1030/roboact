@@ -1,6 +1,6 @@
 {
   "generated": "2026-10-31",
-  "project_license": "not decided",
+  "project_license": "MIT",
   "note": "Roboact's own licence is not decided yet. Third-party licence texts stay under vendor/licenses/. 运行时只读这些本地文件。前端不走 CDN；Python 用 pip install --no-index --find-links vendor/wheels。",
   "files": [
     {
