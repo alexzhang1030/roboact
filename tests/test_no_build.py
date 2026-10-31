@@ -1,10 +1,23 @@
 """PRD 1 零构建：仓库里没有给浏览器用的 TS 编译步骤，也没有 bundler 脚本。"""
+
 from __future__ import annotations
 
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-SKIP = {".git", "uploads", "agent-tools", "__pycache__", ".pytest_cache", "data"}
+SKIP = {
+    ".git",
+    ".venv",
+    "venv",
+    ".ruff_cache",
+    ".pytest_cache",
+    "__pycache__",
+    "uploads",
+    "agent-tools",
+    "data",
+    ".cache",
+    ".cursor",
+}
 
 
 def test_no_typescript_sources():
@@ -13,7 +26,13 @@ def test_no_typescript_sources():
 
 
 def test_no_bundler_config():
-    for name in ("package.json", "vite.config.js", "webpack.config.js", "rollup.config.js", "tsconfig.json"):
+    for name in (
+        "package.json",
+        "vite.config.js",
+        "webpack.config.js",
+        "rollup.config.js",
+        "tsconfig.json",
+    ):
         assert not (ROOT / name).exists()
 
 

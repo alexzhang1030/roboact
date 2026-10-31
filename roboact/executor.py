@@ -1,14 +1,24 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import copy
+import inspect
 import time
 from dataclasses import dataclass, field
 from typing import Any
 
 from . import ADAPTER_HEARTBEAT_S, DEFAULT_STEP_LIMIT, NODE_TIMEOUT_S, UI_LOST_TIMEOUT_S
+from .adapter import (
+    Adapter,
+    CrashBetweenWriteAndKey,
+    Progress,
+    WaitAborted,
+    image_summary,
+)
 from .errors import ApiError
 from .graph import (
+    connected_types,
     cycle_exit_details,
     cycle_exit_errors,
     incoming,
@@ -17,11 +27,8 @@ from .graph import (
     node_map,
     outgoing,
     types_compatible,
-    connected_types,
 )
-from .adapter import ActionResult, Adapter, CancelResult, CrashBetweenWriteAndKey, Progress, WaitAborted, image_summary
 from .nodes import (
-    EXTERNAL_SIDES,
     NodeType,
     RunContext,
     SideEffect,
@@ -33,12 +40,11 @@ from .nodes import (
     parse_inputs,
     parse_params,
 )
-
-MOTION_RESOLVE_REASONS = {"motion_timeout", "adapter_lost", "restart"}
 from .sse import SseHub
-from .store import Store
+from .store import StoreLike
 from .util import compare, dump, get_path, new_id, now_iso, sha256_text
 
+MOTION_RESOLVE_REASONS = {"motion_timeout", "adapter_lost", "restart"}
 
 TERMINAL = {"completed", "error", "stopped", "step_limit"}
 SEED_TYPES = {"start", "constant", "nop", "sleep"}
@@ -78,7 +84,7 @@ class RunCtrl:
     entry_sources: dict[tuple[str, str], str] = field(default_factory=dict)
     base_rounds: dict[str, int] = field(default_factory=dict)
     unused_pins: list[dict[str, str]] = field(default_factory=list)
-    ignore_bp: tuple[str, str] | None = None
+    ignore_bp: tuple[Any, Any] | None = None
     last_used_pause_id: str | None = None
     abandoned: bool = False
     current_inst: Any = None
@@ -114,11 +120,12 @@ class RunCtrl:
         class C:
             def __init__(self, rnd: int):
                 self.round = rnd
+
         return C((self.pause or {}).get("round") or 0)
 
 
 class Executor:
-    def __init__(self, store: Store, adapter: Adapter, hub: SseHub, data_dir: str) -> None:
+    def __init__(self, store: StoreLike, adapter: Adapter, hub: SseHub, data_dir: str) -> None:
         self.store = store
         self.adapter = adapter
         self.tools = adapter
@@ -166,7 +173,12 @@ class Executor:
                 return existing
         graph = self.store.get_version(flow_id, flow_version)
         if graph is None:
-            raise ApiError(400, "invalid_graph", "找不到这个流程版本。", {"flow_id": flow_id, "flow_version": flow_version})
+            raise ApiError(
+                400,
+                "invalid_graph",
+                "找不到这个流程版本。",
+                {"flow_id": flow_id, "flow_version": flow_version},
+            )
         graph = copy.deepcopy(graph)
         self._check_adapter(graph)
         self._validate_graph(graph)
@@ -195,7 +207,9 @@ class Executor:
         run_id = new_id("rn_")
         unused = []
         if kind == "full":
-            unused = [{"node_id": p["node_id"], "port": p["port"]} for p in self.store.list_pins(flow_id)]
+            unused = [
+                {"node_id": p["node_id"], "port": p["port"]} for p in self.store.list_pins(flow_id)
+            ]
         ctrl = RunCtrl(
             run_id=run_id,
             kind=kind,
@@ -215,18 +229,32 @@ class Executor:
         )
         ctrl.influencing = influencing_map(graph)
         self.runs[run_id] = ctrl
-        self.store.insert_run({
-            "run_id": run_id, "kind": kind, "flow_id": flow_id, "flow_version": flow_version,
-            "parent_run_id": parent_run_id, "base_step": base_step, "status": "running",
-            "max_steps": ctrl.max_steps, "steps_used": 0, "side_effects": side_effects,
-        })
+        self.store.insert_run(
+            {
+                "run_id": run_id,
+                "kind": kind,
+                "flow_id": flow_id,
+                "flow_version": flow_version,
+                "parent_run_id": parent_run_id,
+                "base_step": base_step,
+                "status": "running",
+                "max_steps": ctrl.max_steps,
+                "steps_used": 0,
+                "side_effects": side_effects,
+            }
+        )
         if request_id:
             self.store.remember_request(request_id, run_id)
         if seed_pending:
             for it in seed_pending:
                 self.store.add_pending(
-                    run_id, it.get("edge_id") or "", it["to_node"], it["to_port"],
-                    it["payload"], it.get("produced_step") or 0, it.get("retry_idem_key"),
+                    run_id,
+                    it.get("edge_id") or "",
+                    it["to_node"],
+                    it["to_port"],
+                    it["payload"],
+                    it.get("produced_step") or 0,
+                    it.get("retry_idem_key"),
                 )
         ctrl.task = asyncio.create_task(self._loop(ctrl))
         return run_id
@@ -257,11 +285,21 @@ class Executor:
         ):
             self._check_confirm(node, confirm)
         inputs, source = self._resolve_node_input(flow_id, node, input_spec)
-        seed = [{"to_node": node_id, "to_port": k, "payload": v, "edge_id": "", "produced_step": 0} for k, v in (inputs or {}).items()]
+        seed = [
+            {"to_node": node_id, "to_port": k, "payload": v, "edge_id": "", "produced_step": 0}
+            for k, v in (inputs or {}).items()
+        ]
         return await self.start_full(
-            flow_id, flow_version, kind="node", node_id=node_id,
-            seed_pending=seed, side_effects=side_effects, confirm=confirm,
-            client_id=client_id, request_id=request_id, max_steps=max_steps or 1,
+            flow_id,
+            flow_version,
+            kind="node",
+            node_id=node_id,
+            seed_pending=seed,
+            side_effects=side_effects,
+            confirm=confirm,
+            client_id=client_id,
+            request_id=request_id,
+            max_steps=max_steps or 1,
             input_source_hint=source,
         )
 
@@ -290,19 +328,31 @@ class Executor:
                 continue
             spec = (entries or {}).get(e.get("id") or "") or {}
             val, source = self._resolve_entry(flow_id, graph, e, spec, source_run_id)
-            seed.append({
-                "edge_id": e.get("id") or "", "to_node": e["target"],
-                "to_port": e.get("target_port") or "in", "payload": val, "produced_step": 0,
-            })
+            seed.append(
+                {
+                    "edge_id": e.get("id") or "",
+                    "to_node": e["target"],
+                    "to_port": e.get("target_port") or "in",
+                    "payload": val,
+                    "produced_step": 0,
+                }
+            )
             entry_sources[(e["target"], e.get("target_port") or "in")] = source
             echo[e.get("id") or f"{e['source']}-{e['target']}"] = {"source": source, "value": val}
         if side_effects == "real":
             for nid in node_ids:
                 self._check_confirm(node_map(graph)[nid], confirm)
         rid = await self.start_full(
-            flow_id, flow_version, kind="group", node_ids=node_ids,
-            seed_pending=seed, side_effects=side_effects, confirm=confirm,
-            client_id=client_id, request_id=request_id, max_steps=max_steps,
+            flow_id,
+            flow_version,
+            kind="group",
+            node_ids=node_ids,
+            seed_pending=seed,
+            side_effects=side_effects,
+            confirm=confirm,
+            client_id=client_id,
+            request_id=request_id,
+            max_steps=max_steps,
             entry_sources=entry_sources,
         )
         return rid, echo
@@ -322,71 +372,119 @@ class Executor:
         if not rec:
             raise ApiError(400, "invalid_graph", f"找不到第 {step} 步")
         pending = self.store.pending_before(parent_id, step)
-        seed = [{
-            "edge_id": p.get("edge_id") or "",
-            "to_node": p["to_node"],
-            "to_port": p["to_port"],
-            "payload": p["payload"],
-            "produced_step": 0,
-            "retry_idem_key": p.get("retry_idem_key"),
-        } for p in pending]
+        seed = [
+            {
+                "edge_id": p.get("edge_id") or "",
+                "to_node": p["to_node"],
+                "to_port": p["to_port"],
+                "payload": p["payload"],
+                "produced_step": 0,
+                "retry_idem_key": p.get("retry_idem_key"),
+            }
+            for p in pending
+        ]
         base: dict[str, int] = {}
         for s in self.store.list_steps(parent_id, limit=10000):
             if s["step"] < step and s["status"] == "done":
                 base[s["node_id"]] = base.get(s["node_id"], 0) + 1
         return await self.start_full(
-            parent["flow_id"], parent["flow_version"], kind="rerun",
-            parent_run_id=parent_id, base_step=step - 1, seed_pending=seed,
-            side_effects=side_effects, confirm=confirm, client_id=client_id,
-            base_rounds=base, input_source_hint="cache",
+            parent["flow_id"],
+            parent["flow_version"],
+            kind="rerun",
+            parent_run_id=parent_id,
+            base_step=step - 1,
+            seed_pending=seed,
+            side_effects=side_effects,
+            confirm=confirm,
+            client_id=client_id,
+            base_rounds=base,
+            input_source_hint="cache",
         )
 
     def _check_cycles(self, graph: dict[str, Any], kind: str, node_ids: list[str] | None) -> None:
         if kind == "group" and node_ids:
             allowed = set(node_ids)
-            for d in cycle_exit_details({
-                **graph,
-                "nodes": [n for n in graph["nodes"] if n["id"] in allowed],
-                "edges": [e for e in graph["edges"] if e["source"] in allowed],
-            }):
+            for d in cycle_exit_details(
+                {
+                    **graph,
+                    "nodes": [n for n in graph["nodes"] if n["id"] in allowed],
+                    "edges": [e for e in graph["edges"] if e["source"] in allowed],
+                }
+            ):
                 if set(d["node_ids"]) <= allowed:
-                    outs = [e for e in graph["edges"] if e["source"] in d["node_ids"] and e["target"] not in allowed]
+                    outs = [
+                        e
+                        for e in graph["edges"]
+                        if e["source"] in d["node_ids"] and e["target"] not in allowed
+                    ]
                     conds = [i for i in d["node_ids"] if node_map(graph)[i]["type"] == "condition"]
                     if not conds and not outs:
-                        raise ApiError(400, "loop_without_exit", "这个环没有条件判断节点作出口。", {"node_ids": d["node_ids"]})
+                        raise ApiError(
+                            400,
+                            "loop_without_exit",
+                            "这个环没有条件判断节点作出口。",
+                            {"node_ids": d["node_ids"]},
+                        )
             return
         if kind == "full":
             bad = cycle_exit_details(graph)
             if bad:
-                raise ApiError(400, "loop_without_exit", cycle_exit_errors(graph)[0], {"node_ids": bad[0]["node_ids"]})
+                raise ApiError(
+                    400,
+                    "loop_without_exit",
+                    cycle_exit_errors(graph)[0],
+                    {"node_ids": bad[0]["node_ids"]},
+                )
 
     def _check_adapter(self, graph: dict[str, Any]) -> None:
         if not getattr(self.adapter, "connected", True):
-            raise ApiError(409, "adapter_disconnected", "未连上机器人控制器。流程可以打开，但不能运行。")
+            raise ApiError(
+                409, "adapter_disconnected", "未连上机器人控制器。流程可以打开，但不能运行。"
+            )
         saved = graph.get("action_list_version")
         current = getattr(self.adapter, "action_list_version", None)
         if saved and current and saved != current:
-            raise ApiError(409, "action_list_mismatch", "适配器动作列表已变，无法按这版流程运行。", {
-                "saved": saved, "current": current,
-            })
+            raise ApiError(
+                409,
+                "action_list_mismatch",
+                "适配器动作列表已变，无法按这版流程运行。",
+                {
+                    "saved": saved,
+                    "current": current,
+                },
+            )
         missing = [n["id"] for n in graph.get("nodes") or [] if not known_type(n["type"])]
         if missing:
-            raise ApiError(409, "action_missing", "有节点的动作已不存在。", {"nodes": missing, "node_ids": missing})
+            raise ApiError(
+                409,
+                "action_missing",
+                "有节点的动作已不存在。",
+                {"nodes": missing, "node_ids": missing},
+            )
 
     def _validate_graph(self, graph: dict[str, Any]) -> None:
         missing = [n for n in graph.get("nodes") or [] if not known_type(n["type"])]
         for n in missing:
             # marked by the caller via node_state if a run already exists
-            raise ApiError(409, "action_missing", f"动作已不存在：{n.get('type')}", {"node_id": n.get("id")})
+            raise ApiError(
+                409, "action_missing", f"动作已不存在：{n.get('type')}", {"node_id": n.get("id")}
+            )
         for n in graph.get("nodes") or []:
             try:
                 get_type(n["type"])
             except KeyError as e:
-                raise ApiError(409, "action_missing", "动作已不存在。", {"node_id": n.get("id")}) from e
+                raise ApiError(
+                    409, "action_missing", "动作已不存在。", {"node_id": n.get("id")}
+                ) from e
             try:
                 parse_params(n["type"], n.get("params"))
             except Exception as e:
-                raise ApiError(400, "invalid_graph", f"节点 {n.get('id')} 参数无效：{e}", {"node_id": n.get("id")}) from e
+                raise ApiError(
+                    400,
+                    "invalid_graph",
+                    f"节点 {n.get('id')} 参数无效：{e}",
+                    {"node_id": n.get("id")},
+                ) from e
         for e in graph.get("edges") or []:
             src_t, dst_t = connected_types(graph, e)
             if not types_compatible(src_t, dst_t):
@@ -394,7 +492,10 @@ class Executor:
 
     def _check_confirm(self, node: dict[str, Any], confirm: str | None) -> None:
         cls = get_type(node["type"])
-        if cls.side_effect == SideEffect.motion and getattr(self.adapter, "target", "sim") == "real":
+        if (
+            cls.side_effect == SideEffect.motion
+            and getattr(self.adapter, "target", "sim") == "real"
+        ):
             text = cls.confirm_text or "将让机器人执行这个动作。"
             if confirm != text:
                 raise ApiError(422, "confirm_required", "真机重跑会动的节点需要确认。")
@@ -405,7 +506,9 @@ class Executor:
         if confirm != text:
             raise ApiError(422, "invalid_graph", "真执行需要确认文字与节点声明一致。")
 
-    def _resolve_node_input(self, flow_id: str, node: dict[str, Any], spec: dict | None) -> tuple[dict[str, Any], str]:
+    def _resolve_node_input(
+        self, flow_id: str, node: dict[str, Any], spec: dict | None
+    ) -> tuple[dict[str, Any], str]:
         spec = spec or {"kind": "default"}
         kind = spec.get("kind") or "default"
         if kind == "manual":
@@ -437,19 +540,28 @@ class Executor:
                 return (rec.get("input") or {}).get(pin["port"])
         return None
 
-    def _resolve_entry(self, flow_id: str, graph: dict, edge: dict, spec: dict, source_run_id: str | None) -> tuple[Any, str]:
+    def _resolve_entry(
+        self, flow_id: str, graph: dict, edge: dict, spec: dict, source_run_id: str | None
+    ) -> tuple[Any, str]:
         kind = spec.get("kind") or "default"
         port = edge.get("source_port")
         if kind == "manual":
             return spec.get("value"), "manual"
         if kind == "pinned":
-            pins = [p for p in self.store.list_pins(flow_id) if p["node_id"] == edge["target"] and p["port"] == edge.get("target_port")]
+            pins = [
+                p
+                for p in self.store.list_pins(flow_id)
+                if p["node_id"] == edge["target"] and p["port"] == edge.get("target_port")
+            ]
             if pins:
                 return self._pin_value(pins[0]), "pinned"
         if kind == "record" or (spec.get("run_id") and spec.get("step")):
-            rec = self.store.get_step(spec.get("run_id") or spec.get("from", {}).get("run_id"), spec.get("step"))
-            if rec:
-                return (rec.get("output") or {}).get(port), "cache"
+            run_key = spec.get("run_id") or spec.get("from", {}).get("run_id")
+            step = spec.get("step")
+            if isinstance(run_key, str) and isinstance(step, int):
+                rec = self.store.get_step(run_key, step)
+                if rec:
+                    return (rec.get("output") or {}).get(port), "cache"
         run_id = spec.get("run_id") or source_run_id
         if run_id:
             rec = self.store.last_step_for_node(run_id, edge["source"], spec.get("round"))
@@ -490,7 +602,12 @@ class Executor:
             if waiting and mode != "approve":
                 raise ApiError(409, "awaiting_approval", "这一步在等人工确认，先通过或驳回。")
             if not ctrl.pause or ctrl.pause.get("pause_id") != pause_id:
-                raise ApiError(409, "pause_mismatch", "另一个页面已经继续了这次运行。", {"pause_id": (ctrl.pause or {}).get("pause_id") or ctrl.last_used_pause_id})
+                raise ApiError(
+                    409,
+                    "pause_mismatch",
+                    "另一个页面已经继续了这次运行。",
+                    {"pause_id": (ctrl.pause or {}).get("pause_id") or ctrl.last_used_pause_id},
+                )
             if ctrl.status != "paused":
                 raise ApiError(409, "not_paused", "这次运行当前没有停住。")
             reason = ctrl.pause.get("reason")
@@ -498,16 +615,29 @@ class Executor:
             if reason in MOTION_RESOLVE_REASONS and side == "motion":
                 rb = (ctrl.pause or {}).get("readback") or {}
                 if not readback_id or readback_id != rb.get("readback_id"):
-                    raise ApiError(409, "readback_required", "先读回机器人状态，再选重做或当作已做完。")
+                    raise ApiError(
+                        409, "readback_required", "先读回机器人状态，再选重做或当作已做完。"
+                    )
                 if resolution == "mark_done":
                     self._apply_mark_done(ctrl, edits)
                 elif resolution != "retry":
                     raise ApiError(409, "readback_required", "需要 resolution=retry 或 mark_done")
-            if edits and not (reason in MOTION_RESOLVE_REASONS and side == "motion" and resolution == "mark_done"):
+            if edits and not (
+                reason in MOTION_RESOLVE_REASONS and side == "motion" and resolution == "mark_done"
+            ):
                 self._apply_edits(ctrl, edits)
             if reason == "adapter_lost" and not getattr(self.adapter, "connected", True):
                 raise ApiError(409, "adapter_disconnected", "机器人控制器仍未连上，不能继续。")
-            if reason in ("breakpoint", "restart", "user", "storage_error", "write_timeout", "adapter_lost", "operator_lost", "motion_timeout"):
+            if reason in (
+                "breakpoint",
+                "restart",
+                "user",
+                "storage_error",
+                "write_timeout",
+                "adapter_lost",
+                "operator_lost",
+                "motion_timeout",
+            ):
                 ctrl.ignore_bp = (ctrl.pause.get("node_id"), ctrl.pause.get("when"))
             ctrl.last_used_pause_id = pause_id
             ctrl.step_mode = mode == "step"
@@ -515,7 +645,9 @@ class Executor:
             ctrl.status = "running"
             self.store.update_run(run_id, status="running", pause=None)
             self.store.add_command(run_id, client_id, mode, pause_id, "200")
-            self.hub.emit(run_id, "resumed", {"mode": mode, "by_client": client_id, "at": now_iso()})
+            self.hub.emit(
+                run_id, "resumed", {"mode": mode, "by_client": client_id, "at": now_iso()}
+            )
             ctrl.pause = None
             ctrl.resume.set()
             return {"status": "running"}
@@ -530,8 +662,13 @@ class Executor:
         readback_id: str | None = None,
     ) -> dict[str, Any]:
         return await self.continue_run(
-            run_id, pause_id, client_id, edits, mode="step",
-            resolution=resolution, readback_id=readback_id,
+            run_id,
+            pause_id,
+            client_id,
+            edits,
+            mode="step",
+            resolution=resolution,
+            readback_id=readback_id,
         )
 
     async def stop_run(self, run_id: str, client_id: str = "") -> dict[str, Any]:
@@ -563,7 +700,11 @@ class Executor:
                     if ctrl.current_nid:
                         rnd = (ctrl.node_state.get(ctrl.current_nid) or {}).get("round") or 0
                         self._set_node(
-                            ctrl, ctrl.current_nid, "cancel_rejected", rnd, ctrl.steps_used,
+                            ctrl,
+                            ctrl.current_nid,
+                            "cancel_rejected",
+                            rnd,
+                            ctrl.steps_used,
                             error_summary="cancel_rejected",
                         )
                     return {"status": "running", "cancel": "rejected"}
@@ -583,13 +724,26 @@ class Executor:
     def _record_not_cancelled(self, ctrl: RunCtrl, nid: str | None) -> None:
         label = nid or ""
         ctrl.not_cancelled.append(label)
-        self.store.add_change(ctrl.run_id, "run_log", nid, {"event": "not cancelled", "node_id": nid})
+        self.store.add_change(
+            ctrl.run_id, "run_log", nid, {"event": "not cancelled", "node_id": nid}
+        )
         recs = self.store.running_steps(ctrl.run_id)
         for rec in recs:
             if not nid or rec["node_id"] == nid:
-                self.store.update_step(ctrl.run_id, rec["step"], error={"type": "not_cancelled", "message": "not cancelled"})
+                self.store.update_step(
+                    ctrl.run_id,
+                    rec["step"],
+                    error={"type": "not_cancelled", "message": "not cancelled"},
+                )
 
-    async def approve(self, run_id: str, pause_id: str, decision: str, client_id: str = "", comment: str | None = None) -> dict[str, Any]:
+    async def approve(
+        self,
+        run_id: str,
+        pause_id: str,
+        decision: str,
+        client_id: str = "",
+        comment: str | None = None,
+    ) -> dict[str, Any]:
         ctrl = self._need(run_id)
         async with ctrl.cmd_lock:
             if not ctrl.pause or ctrl.pause.get("pause_id") != pause_id:
@@ -600,12 +754,18 @@ class Executor:
                 raise ApiError(409, "not_paused", "当前不是在等待确认。")
             if decision not in ("approve", "reject"):
                 raise ApiError(422, "invalid_graph", "decision 必须是 approve 或 reject")
-            ctrl.decision = {"decision": decision, "comment": comment, "node_id": ctrl.pause.get("node_id")}
+            ctrl.decision = {
+                "decision": decision,
+                "comment": comment,
+                "node_id": ctrl.pause.get("node_id"),
+            }
             ctrl.last_used_pause_id = pause_id
             ctrl.status = "running"
             self.store.update_run(run_id, status="running", pause=None)
             self.store.add_command(run_id, client_id, "approve", pause_id, "200")
-            self.hub.emit(run_id, "resumed", {"mode": "approve", "by_client": client_id, "at": now_iso()})
+            self.hub.emit(
+                run_id, "resumed", {"mode": "approve", "by_client": client_id, "at": now_iso()}
+            )
             ctrl.pause = None
             ctrl.resume.set()
             return {"status": "running"}
@@ -627,16 +787,23 @@ class Executor:
                 if cls.side_effect == SideEffect.motion:
                     raise ApiError(422, "motion_output_readonly", "动作节点的输出不能改。")
             step = pause.get("step")
+            if not isinstance(step, int):
+                ctrl.edits = None
+                return
             rec = self.store.get_step(ctrl.run_id, step)
             if rec:
                 original = rec.get("output")
-                self.store.update_step(ctrl.run_id, step, output=edits["outputs"], edited={"original": original})
+                self.store.update_step(
+                    ctrl.run_id, step, output=edits["outputs"], edited={"original": original}
+                )
                 for e in outgoing(ctrl.flow, rec["node_id"]):
                     port = e.get("source_port")
                     val = (edits["outputs"] or {}).get(port)
                     if val is None:
                         continue
-                    self.store.update_unconsumed_from_step(ctrl.run_id, step, e.get("id") or "", val)
+                    self.store.update_unconsumed_from_step(
+                        ctrl.run_id, step, e.get("id") or "", val
+                    )
             ctrl.edits = None
 
     # ----- recovery -----
@@ -663,7 +830,6 @@ class Executor:
             )
             crashed_nid = None
             mid_action = False
-            mid_action_adapter = False
             recovery: dict[str, Any] | None = None
             waiting_nid = None
             for rec in self.store.running_steps(ctrl.run_id):
@@ -679,10 +845,16 @@ class Executor:
                 if known_type(node.get("type") or ""):
                     from_adapter = bool(getattr(get_type(node["type"]), "from_adapter", False))
                 new_status = "interrupted_unknown" if side in ("write", "motion") else "interrupted"
-                self.store.update_step(ctrl.run_id, rec["step"], status=new_status, ended_at=now_iso(),
-                                       error={"type": "crash", "message": "crash"})
+                self.store.update_step(
+                    ctrl.run_id,
+                    rec["step"],
+                    status=new_status,
+                    ended_at=now_iso(),
+                    error={"type": "crash", "message": "crash"},
+                )
                 # Never auto-retry. Write fixtures keep the idempotency key so a later
-                # human continue can retry once; motion nodes only read state / goal status.
+                # human continue can retry once; motion nodes only read state /
+                # goal status.
                 if side == "write" and not from_adapter:
                     self.store.unconsume_items(ctrl.run_id, rec["step"])
                     if rec.get("idem_key"):
@@ -691,19 +863,29 @@ class Executor:
                 elif side == "motion":
                     self.store.unconsume_items(ctrl.run_id, rec["step"])
                 recovery = await self._recover_action(rec, node)
-                self._set_node(ctrl, rec["node_id"], new_status, rec["round"], rec["step"],
-                               error_summary="中断 · 结果未知" if new_status == "interrupted_unknown" else "中断",
-                               recovery=recovery)
+                self._set_node(
+                    ctrl,
+                    rec["node_id"],
+                    new_status,
+                    rec["round"],
+                    rec["step"],
+                    error_summary="中断 · 结果未知"
+                    if new_status == "interrupted_unknown"
+                    else "中断",
+                    recovery=recovery,
+                )
                 crashed_nid = rec["node_id"]
                 mid_action = True
                 if from_adapter:
-                    mid_action_adapter = True
+                    pass
             old_pause = row.get("pause") or {}
             node_id = crashed_nid or waiting_nid or old_pause.get("node_id")
             when = old_pause.get("when") or "before"
             reason = "restart"
             ctrl.recovery = recovery
-            ctrl.pause = self._make_pause(ctrl, reason, node_id, when, old_pause.get("inputs"), old_pause.get("round") or 0)
+            ctrl.pause = self._make_pause(
+                ctrl, reason, node_id, when, old_pause.get("inputs"), old_pause.get("round") or 0
+            )
             if recovery:
                 ctrl.pause["recovery"] = recovery
                 ctrl.pause["goal_check"] = recovery.get("goal_status")
@@ -714,7 +896,13 @@ class Executor:
             ctrl.resume = asyncio.Event()
             ctrl.influencing = influencing_map(graph)
             for s in self.store.list_steps(ctrl.run_id, limit=10000):
-                if s["status"] in ("done", "error", "stopped", "interrupted", "interrupted_unknown"):
+                if s["status"] in (
+                    "done",
+                    "error",
+                    "stopped",
+                    "interrupted",
+                    "interrupted_unknown",
+                ):
                     ctrl.done_counts[s["node_id"]] = ctrl.done_counts.get(s["node_id"], 0) + 1
             self.runs[ctrl.run_id] = ctrl
             ctrl.task = asyncio.create_task(self._loop(ctrl))
@@ -723,7 +911,12 @@ class Executor:
 
     async def _recover_action(self, rec: dict[str, Any], node: dict[str, Any]) -> dict[str, Any]:
         """Restart: async → goal status; blocking → read_state only. Never auto-retry."""
-        info: dict[str, Any] = {"active_goals": [], "read_state": None, "goal_status": None, "return_mode": None}
+        info: dict[str, Any] = {
+            "active_goals": [],
+            "read_state": None,
+            "goal_status": None,
+            "return_mode": None,
+        }
         adapter = self.adapter
         list_fn = getattr(adapter, "list_active_goals", None)
         if callable(list_fn):
@@ -737,27 +930,21 @@ class Executor:
         if desc is not None:
             info["return_mode"] = desc.return_mode
             if desc.return_mode in ("goal_progress", "async"):
-                goal_fn = getattr(adapter, "goal_status", None)
-                if callable(goal_fn):
-                    try:
-                        info["goal_status"] = await goal_fn(idem_key=rec.get("idem_key"))
-                    except Exception as e:
-                        info["goal_status"] = {"found": False, "error": str(e)}
-            else:
-                read_fn = getattr(adapter, "read_state", None)
-                if callable(read_fn) and desc.read_state:
-                    try:
-                        info["read_state"] = await read_fn(desc.id)
-                    except Exception as e:
-                        info["read_state"] = {"error": str(e)}
+                try:
+                    info["goal_status"] = await adapter.goal_status(idem_key=rec.get("idem_key"))
+                except Exception as e:
+                    info["goal_status"] = {"found": False, "error": str(e)}
+            elif desc.read_state:
+                try:
+                    info["read_state"] = await adapter.read_state(desc.id)
+                except Exception as e:
+                    info["read_state"] = {"error": str(e)}
             if desc.return_mode in ("goal_progress", "async") and desc.read_state:
-                read_fn = getattr(adapter, "read_state", None)
-                if callable(read_fn):
-                    try:
-                        info["read_state"] = await read_fn(desc.id)
-                    except Exception as e:
-                        info["read_state"] = {"error": str(e)}
-        elif hasattr(adapter, "read_state"):
+                try:
+                    info["read_state"] = await adapter.read_state(desc.id)
+                except Exception as e:
+                    info["read_state"] = {"error": str(e)}
+        else:
             try:
                 info["read_state"] = await adapter.read_state(node.get("type") or "")
             except Exception:
@@ -775,14 +962,10 @@ class Executor:
     async def stop_background(self) -> None:
         if self._hb_task:
             self._hb_task.cancel()
-            try:
+            with contextlib.suppress(asyncio.CancelledError):
                 await self._hb_task
-            except asyncio.CancelledError:
-                pass
             self._hb_task = None
-        stop = getattr(self.adapter, "stop_watchdog", None)
-        if callable(stop):
-            await stop()
+        await self.adapter.stop_watchdog()
 
     async def _heartbeat_loop(self) -> None:
         try:
@@ -804,7 +987,7 @@ class Executor:
         if ping is None:
             return True
         try:
-            if asyncio.iscoroutinefunction(ping):
+            if inspect.iscoroutinefunction(ping):
                 return bool(await ping())
             return bool(ping())
         except Exception:
@@ -824,7 +1007,7 @@ class Executor:
             ctrl.last_ui_at = time.monotonic()
 
     def ui_subscribers(self, run_id: str) -> int:
-        return len(self.hub._subs.get(run_id) or [])
+        return self.hub.subscriber_count(run_id)
 
     # ----- main loop -----
 
@@ -858,12 +1041,13 @@ class Executor:
                     peeked = ctrl.edits["inputs"]
                     original = ctrl.edits.get("original")
                     ctrl.edits = {"original": original, "used": True}
-                if node["type"] == "human_confirm" and not (
-                    ctrl.decision and ctrl.decision.get("node_id") in (None, nid)
+                if (
+                    node["type"] == "human_confirm"
+                    and not (ctrl.decision and ctrl.decision.get("node_id") in (None, nid))
+                    and not ctrl.decision
                 ):
-                    if not ctrl.decision:
-                        await self._pause(ctrl, "approval", nid, "before", peeked, nxt_round)
-                        continue
+                    await self._pause(ctrl, "approval", nid, "before", peeked, nxt_round)
+                    continue
                 if self._hit_bp(ctrl, nid, "before", nxt_round, peeked):
                     await self._pause(ctrl, "breakpoint", nid, "before", peeked, nxt_round)
                     continue
@@ -888,7 +1072,14 @@ class Executor:
                 if ctrl.step_mode:
                     nxt = self._ready_nodes(ctrl)
                     nn = nxt[0] if nxt else None
-                    await self._pause(ctrl, "step_done", nn, "before", None, self._next_round(ctrl, nn) if nn else 0)
+                    await self._pause(
+                        ctrl,
+                        "step_done",
+                        nn,
+                        "before",
+                        None,
+                        self._next_round(ctrl, nn) if nn else 0,
+                    )
                     ctrl.step_mode = False
                     continue
                 if ctrl.adapter_lost_flag:
@@ -914,7 +1105,9 @@ class Executor:
             ctrl.error = {"type": type(e).__name__, "message": str(e)}
             self._finish(ctrl, "error")
 
-    async def _dispatch(self, ctrl: RunCtrl, nid: str, inputs: dict[str, Any], item_ids: list[int], rnd: int) -> None:
+    async def _dispatch(
+        self, ctrl: RunCtrl, nid: str, inputs: dict[str, Any], item_ids: list[int], rnd: int
+    ) -> None:
         if ctrl.stop_flag or ctrl.abandoned or ctrl.run_id not in self.runs:
             if ctrl.stop_flag and ctrl.status not in TERMINAL:
                 self._finish(ctrl, "stopped")
@@ -953,17 +1146,35 @@ class Executor:
             fps[i] = h
         desc = getattr(cls, "action_desc", None)
         start_phase = None
-        if desc is not None and (desc.precondition_wait_s is not None or any(p.check for p in desc.preconditions)):
+        if desc is not None and (
+            desc.precondition_wait_s is not None or any(p.check for p in desc.preconditions)
+        ):
             start_phase = "waiting_precondition"
         try:
-            self.store.add_step({
-                "run_id": ctrl.run_id, "step": step, "node_id": nid, "round": rnd, "status": "running",
-                "input": inputs, "input_source": source, "output": None, "started_at": now_iso(),
-                "config_hash": config_hash(node), "upstream_hashes": fps, "input_sha256": sha256_text(dump(inputs)),
-                "side_effect": side, "side_effect_mode": mode, "idem_key": idem, "retry_of": retry_of,
-                "edited": {"original": ctrl.edits.get("original")} if ctrl.edits and ctrl.edits.get("used") else None,
-                "phase": start_phase,
-            })
+            self.store.add_step(
+                {
+                    "run_id": ctrl.run_id,
+                    "step": step,
+                    "node_id": nid,
+                    "round": rnd,
+                    "status": "running",
+                    "input": inputs,
+                    "input_source": source,
+                    "output": None,
+                    "started_at": now_iso(),
+                    "config_hash": config_hash(node),
+                    "upstream_hashes": fps,
+                    "input_sha256": sha256_text(dump(inputs)),
+                    "side_effect": side,
+                    "side_effect_mode": mode,
+                    "idem_key": idem,
+                    "retry_of": retry_of,
+                    "edited": {"original": ctrl.edits.get("original")}
+                    if ctrl.edits and ctrl.edits.get("used")
+                    else None,
+                    "phase": start_phase,
+                }
+            )
             self.store.consume_items(ctrl.run_id, item_ids, step)
             self.store.update_run(ctrl.run_id, steps_used=step)
         except Exception as e:
@@ -971,17 +1182,27 @@ class Executor:
             return
         ctrl.steps_used = step
         ctrl.edits = None
-        inst._idem = idem
+        inst.idem = idem
         ctrl.current_inst = inst
         ctrl.current_nid = nid
         ctrl.current_started = time.monotonic()
         ctrl.step_phase = start_phase
         ctrl.wait_started = time.monotonic()
-        ctrl.wait_max_s = float(desc.precondition_wait_s) if desc and desc.precondition_wait_s is not None else None
+        ctrl.wait_max_s = (
+            float(desc.precondition_wait_s)
+            if desc and desc.precondition_wait_s is not None
+            else None
+        )
         if start_phase == "waiting_precondition":
             self._set_node(
-                ctrl, nid, "running", rnd, step,
-                phase=start_phase, wait_s=0, wait_max_s=ctrl.wait_max_s,
+                ctrl,
+                nid,
+                "running",
+                rnd,
+                step,
+                phase=start_phase,
+                wait_s=0,
+                wait_max_s=ctrl.wait_max_s,
             )
         else:
             self._set_node(ctrl, nid, "running", rnd, step)
@@ -997,8 +1218,13 @@ class Executor:
             nonlocal saw_progress
             saw_progress = True
             self._set_node(
-                ctrl, nid, "running", rnd, step,
-                progress=p.percent, feedback=p.text,
+                ctrl,
+                nid,
+                "running",
+                rnd,
+                step,
+                progress=p.percent,
+                feedback=p.text,
             )
 
         elapsed_task: asyncio.Task | None = None
@@ -1010,9 +1236,14 @@ class Executor:
                     if ctrl.step_phase == "waiting_precondition":
                         secs = int(time.monotonic() - (ctrl.wait_started or ctrl.current_started))
                         self._set_node(
-                            ctrl, nid, "running", rnd, step,
+                            ctrl,
+                            nid,
+                            "running",
+                            rnd,
+                            step,
                             phase="waiting_precondition",
-                            wait_s=secs, wait_max_s=ctrl.wait_max_s,
+                            wait_s=secs,
+                            wait_max_s=ctrl.wait_max_s,
                         )
                         continue
                     if saw_progress:
@@ -1025,37 +1256,64 @@ class Executor:
         try:
             elapsed_task = asyncio.create_task(_elapsed())
             if mode == "mock":
-                out_m = inst.mock(_coerce_inputs(inst, inputs), parse_params(node["type"], node.get("params")))
+                out_m = inst.mock(
+                    _coerce_inputs(inst, inputs), parse_params(node["type"], node.get("params"))
+                )
                 outputs = dump_outputs(out_m)
             elif mode == "cache":
                 outputs = cached or {}
             else:
-                decision = (ctrl.decision or {}).get("decision") if node["type"] == "human_confirm" else None
-                comment = (ctrl.decision or {}).get("comment") if node["type"] == "human_confirm" else None
+                decision = (
+                    (ctrl.decision or {}).get("decision")
+                    if node["type"] == "human_confirm"
+                    else None
+                )
+                comment = (
+                    (ctrl.decision or {}).get("comment")
+                    if node["type"] == "human_confirm"
+                    else None
+                )
                 if node["type"] == "human_confirm":
                     ctrl.decision = None
+
                 async def on_phase(phase: str) -> None:
                     ctrl.step_phase = phase
                     self.store.update_step(ctrl.run_id, step, phase=phase)
                     if phase == "waiting_precondition":
                         ctrl.wait_started = time.monotonic()
                         self._set_node(
-                            ctrl, nid, "running", rnd, step,
+                            ctrl,
+                            nid,
+                            "running",
+                            rnd,
+                            step,
                             phase=phase,
-                            wait_s=0, wait_max_s=ctrl.wait_max_s,
+                            wait_s=0,
+                            wait_max_s=ctrl.wait_max_s,
                         )
                     elif phase == "sent":
                         ctrl.current_started = time.monotonic()
                         self._set_node(ctrl, nid, "running", rnd, step, phase=phase)
 
                 ctx = RunContext(
-                    ctrl.run_id, step, rnd, idem, self.data_dir, self.adapter,
-                    decision=decision, on_progress=on_progress,
-                    on_phase=on_phase, should_abort=lambda: self._wait_abort_reason(ctrl),
+                    ctrl.run_id,
+                    step,
+                    rnd,
+                    idem,
+                    self.data_dir,
+                    self.adapter,
+                    decision=decision,
+                    on_progress=on_progress,
+                    on_phase=on_phase,
+                    should_abort=lambda: self._wait_abort_reason(ctrl),
                 )
                 wait_budget = float(desc.precondition_wait_s or 0) if desc else 0.0
                 async with asyncio.timeout(float(timeout) + wait_budget + 0.5):
-                    out_m = await inst.run(_coerce_inputs(inst, inputs), parse_params(node["type"], node.get("params")), ctx)
+                    out_m = await inst.run(
+                        _coerce_inputs(inst, inputs),
+                        parse_params(node["type"], node.get("params")),
+                        ctx,
+                    )
                 outputs = dump_outputs(out_m)
                 if comment:
                     self.store.update_step(ctrl.run_id, step, edited={"comment": comment})
@@ -1063,10 +1321,7 @@ class Executor:
             if ctrl.stop_flag:
                 status = "stopped"
                 err = None
-            elif side == "write":
-                status = "interrupted_unknown"
-                err = {"type": "timeout", "message": "timeout", "timeout_s": int(timeout)}
-            elif side == "motion":
+            elif side == "write" or side == "motion":
                 status = "interrupted_unknown"
                 err = {"type": "timeout", "message": "timeout", "timeout_s": int(timeout)}
             else:
@@ -1088,7 +1343,9 @@ class Executor:
             else:
                 self._revert_waiting_step(ctrl, step, item_ids)
                 ctrl.step_phase = None
-                reason = e.reason if e.reason in ("user", "operator_lost", "adapter_lost") else "user"
+                reason = (
+                    e.reason if e.reason in ("user", "operator_lost", "adapter_lost") else "user"
+                )
                 if reason == "adapter_lost":
                     ctrl.adapter_lost_flag = False
                 if reason == "user":
@@ -1102,7 +1359,10 @@ class Executor:
                 err = None
             else:
                 status = "error"
-                err = {"type": getattr(e, "error_type", None) or type(e).__name__, "message": str(e)}
+                err = {
+                    "type": getattr(e, "error_type", None) or type(e).__name__,
+                    "message": str(e),
+                }
                 state = getattr(e, "state", None)
                 if state:
                     err["state"] = state
@@ -1116,7 +1376,8 @@ class Executor:
         if side == "write" and (self.crash_before_t2 or self.hooks.get("crash_before_t2")):
             self.crash_before_t2 = False
             self.hooks["crash_before_t2"] = False
-            # Simulate kill -9 after the write and before T2: leave the step `running`.
+            # Simulate kill -9 after the write and before T2: leave the step
+            # `running`.
             self.store.update_run(ctrl.run_id, status="running")
             ctrl.abandoned = True
             self.runs.pop(ctrl.run_id, None)
@@ -1126,9 +1387,23 @@ class Executor:
         if outputs:
             bucket = self.images.setdefault(ctrl.run_id, {})
             for port, val in outputs.items():
-                if isinstance(val, dict) and (val.get("type") == "image" or str(val.get("mime") or "").startswith("image/")):
+                if isinstance(val, dict) and (
+                    val.get("type") == "image" or str(val.get("mime") or "").startswith("image/")
+                ):
                     bucket[(step, port)] = val
-        t2 = dict(status=status, output=stored, live_output=outputs, error=err, ended_at=now_iso(), duration_ms=dt, node_id=nid, round=rnd, step=step, side=side, mode=mode)
+        t2 = dict(
+            status=status,
+            output=stored,
+            live_output=outputs,
+            error=err,
+            ended_at=now_iso(),
+            duration_ms=dt,
+            node_id=nid,
+            round=rnd,
+            step=step,
+            side=side,
+            mode=mode,
+        )
         try:
             self._commit_t2(ctrl, **t2)
         except Exception as e:
@@ -1143,17 +1418,39 @@ class Executor:
             self._finish(ctrl, "stopped")
             return
         if status == "interrupted_unknown" and err and err.get("type") == "timeout":
-            self._set_node(ctrl, nid, "interrupted_unknown", rnd, step, duration_ms=dt, error_summary=(err or {}).get("message"), side_effect_mode=mode)
+            self._set_node(
+                ctrl,
+                nid,
+                "interrupted_unknown",
+                rnd,
+                step,
+                duration_ms=dt,
+                error_summary=(err or {}).get("message"),
+                side_effect_mode=mode,
+            )
             self.store.unconsume_items(ctrl.run_id, step, retry_idem_key=idem)
             if side == "write":
                 ctrl.retry_keys[nid] = idem
                 ctrl.retry_of[nid] = step
-                await self._pause(ctrl, "write_timeout", nid, "after", inputs, rnd, message="write_timeout")
+                await self._pause(
+                    ctrl, "write_timeout", nid, "after", inputs, rnd, message="write_timeout"
+                )
             else:
-                await self._pause(ctrl, "motion_timeout", nid, "before", inputs, rnd, message="motion_timeout")
+                await self._pause(
+                    ctrl, "motion_timeout", nid, "before", inputs, rnd, message="motion_timeout"
+                )
             return
         if status in ("error", "interrupted_unknown"):
-            self._set_node(ctrl, nid, "error" if status == "error" else status, rnd, step, duration_ms=dt, error_summary=(err or {}).get("message"), side_effect_mode=mode)
+            self._set_node(
+                ctrl,
+                nid,
+                "error" if status == "error" else status,
+                rnd,
+                step,
+                duration_ms=dt,
+                error_summary=(err or {}).get("message"),
+                side_effect_mode=mode,
+            )
             ctrl.error = err
             self._finish(ctrl, "error")
             return
@@ -1165,7 +1462,15 @@ class Executor:
         status, outputs, err, ended = t2["status"], t2["output"], t2["error"], t2["ended_at"]
         live = t2.get("live_output") or outputs
         step, nid = t2["step"], t2["node_id"]
-        self.store.update_step(ctrl.run_id, step, status=status, output=outputs, error=err, ended_at=ended, duration_ms=t2.get("duration_ms"))
+        self.store.update_step(
+            ctrl.run_id,
+            step,
+            status=status,
+            output=outputs,
+            error=err,
+            ended_at=ended,
+            duration_ms=t2.get("duration_ms"),
+        )
         if status in ("done", "error", "stopped", "interrupted", "interrupted_unknown"):
             ctrl.done_counts[nid] = ctrl.done_counts.get(nid, 0) + 1
         if status == "done" and ctrl.kind != "node":
@@ -1175,9 +1480,26 @@ class Executor:
                 for e in outgoing(ctrl.flow, nid, port):
                     if ctrl.allowed is not None and e["target"] not in ctrl.allowed:
                         continue
-                    self.store.add_pending(ctrl.run_id, e.get("id") or f"{e['source']}-{e['target']}", e["target"], e.get("target_port") or "in", val, step)
+                    self.store.add_pending(
+                        ctrl.run_id,
+                        e.get("id") or f"{e['source']}-{e['target']}",
+                        e["target"],
+                        e.get("target_port") or "in",
+                        val,
+                        step,
+                    )
         edges = [p["edge_id"] for p in self.store.list_pending(ctrl.run_id, unconsumed_only=True)]
-        self._set_node(ctrl, nid, "done" if status == "done" else status, t2["round"], step, duration_ms=t2.get("duration_ms"), error_summary=(err or {}).get("message") if err else None, side_effect_mode=t2.get("mode"), edges=edges)
+        self._set_node(
+            ctrl,
+            nid,
+            "done" if status == "done" else status,
+            t2["round"],
+            step,
+            duration_ms=t2.get("duration_ms"),
+            error_summary=(err or {}).get("message") if err else None,
+            side_effect_mode=t2.get("mode"),
+            edges=edges,
+        )
         node = node_map(ctrl.flow).get(nid) or {}
         if status == "done" and node.get("type") == "human_confirm":
             self._mark_unused_branch(ctrl, nid, outputs)
@@ -1241,8 +1563,12 @@ class Executor:
                 continue
             inst = get_instance(n["type"])
             req = [p["name"] for p in inst.input_ports(n.get("params")) if p.get("required")]
-            connected = {e.get("target_port") for e in incoming(ctrl.flow, nid) if ctrl.allowed is None or e["source"] in ctrl.allowed}
-            need = [p for p in req if p in connected] if connected else ([] if not req else req)
+            connected = {
+                e.get("target_port")
+                for e in incoming(ctrl.flow, nid)
+                if ctrl.allowed is None or e["source"] in ctrl.allowed
+            }
+            need = [p for p in req if p in connected] if connected else (req if req else [])
             have = {p["to_port"] for p in by_node.get(nid, [])}
             if need:
                 if set(need) <= have:
@@ -1250,15 +1576,21 @@ class Executor:
             elif nid in by_node:
                 ready.append(nid)
             elif ctrl.kind != "rerun" and self._exec_count(ctrl, nid) == 0:
-                inc = [e for e in incoming(ctrl.flow, nid) if ctrl.allowed is None or e["source"] in ctrl.allowed]
-                if not inc and n["type"] in SEED_TYPES:
-                    ready.append(nid)
-                elif not inc and n["type"] == "fail":
+                inc = [
+                    e
+                    for e in incoming(ctrl.flow, nid)
+                    if ctrl.allowed is None or e["source"] in ctrl.allowed
+                ]
+                if (not inc and n["type"] in SEED_TYPES) or (not inc and n["type"] == "fail"):
                     ready.append(nid)
         return ready
 
     def _peek_inputs(self, ctrl: RunCtrl, nid: str) -> tuple[dict[str, Any], list[int]]:
-        items = [p for p in self.store.list_pending(ctrl.run_id, unconsumed_only=True) if p["to_node"] == nid]
+        items = [
+            p
+            for p in self.store.list_pending(ctrl.run_id, unconsumed_only=True)
+            if p["to_node"] == nid
+        ]
         by_port: dict[str, list] = {}
         for p in items:
             by_port.setdefault(p["to_port"], []).append(p)
@@ -1273,12 +1605,15 @@ class Executor:
         retry_key = ctrl.retry_keys.get(nid)
         if retry_key:
             recs = [
-                s for s in self.store.list_steps(ctrl.run_id, node_id=nid, limit=10000)
+                s
+                for s in self.store.list_steps(ctrl.run_id, node_id=nid, limit=10000)
                 if s["status"] in ("done", "error", "stopped", "interrupted", "interrupted_unknown")
             ]
             recs = [
-                s for s in recs
-                if s.get("idem_key") != retry_key or s["status"] not in ("interrupted_unknown", "error")
+                s
+                for s in recs
+                if s.get("idem_key") != retry_key
+                or s["status"] not in ("interrupted_unknown", "error")
             ]
             return len(recs)
         return ctrl.done_counts.get(nid, 0)
@@ -1313,11 +1648,16 @@ class Executor:
     def _side(self, node: dict[str, Any], inputs: dict[str, Any]) -> str:
         cls = get_type(node["type"])
         if node["type"] == "tool_call":
-            name = (inputs or {}).get("tool_name") or (node.get("params") or {}).get("tool") or "clock"
-            try:
-                return self.tools.side(name)
-            except Exception:
-                return "none"
+            name = (
+                (inputs or {}).get("tool_name") or (node.get("params") or {}).get("tool") or "clock"
+            )
+            side_fn = getattr(self.adapter, "side", None)
+            if callable(side_fn):
+                try:
+                    return str(side_fn(name))
+                except Exception:
+                    return "none"
+            return "none"
         return cls.side_effect.value
 
     def _find_cache(self, ctrl: RunCtrl, nid: str, inputs: dict[str, Any]) -> dict | None:
@@ -1325,7 +1665,11 @@ class Executor:
         ch = config_hash(node_map(ctrl.flow)[nid])
         for run in self.store.list_runs(ctrl.flow_id):
             for s in self.store.list_steps(run["run_id"], node_id=nid, limit=10000):
-                if s["status"] == "done" and s.get("config_hash") == ch and s.get("input_sha256") == want:
+                if (
+                    s["status"] == "done"
+                    and s.get("config_hash") == ch
+                    and s.get("input_sha256") == want
+                ):
                     return s.get("output")
         return None
 
@@ -1355,7 +1699,16 @@ class Executor:
 
     # ----- pause / finish / status -----
 
-    def _make_pause(self, ctrl: RunCtrl, reason: str, node_id: str | None, when: str, inputs: dict | None = None, rnd: int = 0, message: str | None = None) -> dict[str, Any]:
+    def _make_pause(
+        self,
+        ctrl: RunCtrl,
+        reason: str,
+        node_id: str | None,
+        when: str,
+        inputs: dict | None = None,
+        rnd: int = 0,
+        message: str | None = None,
+    ) -> dict[str, Any]:
         return {
             "pause_id": new_id("ps_"),
             "reason": reason,
@@ -1385,7 +1738,17 @@ class Executor:
             ctrl.steps_used = max(0, step - 1)
             self.store.update_run(ctrl.run_id, steps_used=ctrl.steps_used)
 
-    async def _pause(self, ctrl: RunCtrl, reason: str, node_id: str | None, when: str, inputs: dict | None, rnd: int, message: str | None = None, skip_readback: bool = False) -> None:
+    async def _pause(
+        self,
+        ctrl: RunCtrl,
+        reason: str,
+        node_id: str | None,
+        when: str,
+        inputs: dict | None,
+        rnd: int,
+        message: str | None = None,
+        skip_readback: bool = False,
+    ) -> None:
         ctrl.status = "paused"
         ctrl.pause = self._make_pause(ctrl, reason, node_id, when, inputs, rnd, message)
         ctrl.last_paused_at_mono = time.monotonic()
@@ -1409,7 +1772,11 @@ class Executor:
             self._set_node(ctrl, node_id, state, rnd, ctrl.steps_used)
         self.store.update_run(ctrl.run_id, status="paused", pause=ctrl.pause)
         self.hub.flush_now(ctrl.run_id)
-        self.hub.emit(ctrl.run_id, "paused", {**ctrl.pause, "at": now_iso(), "paused_at_mono": ctrl.last_paused_at_mono})
+        self.hub.emit(
+            ctrl.run_id,
+            "paused",
+            {**ctrl.pause, "at": now_iso(), "paused_at_mono": ctrl.last_paused_at_mono},
+        )
         if reason == "storage_error":
             self.hub.emit(ctrl.run_id, "storage_error", {"message": message or "", "at": now_iso()})
         ctrl.resume.clear()
@@ -1421,29 +1788,68 @@ class Executor:
             return
         ctrl.status = status
         ctrl.pause = None
-        self.store.update_run(ctrl.run_id, status=status, finished_at=now_iso(), error=ctrl.error, result=ctrl.result, steps_used=ctrl.steps_used)
+        self.store.update_run(
+            ctrl.run_id,
+            status=status,
+            finished_at=now_iso(),
+            error=ctrl.error,
+            result=ctrl.result,
+            steps_used=ctrl.steps_used,
+        )
         last = self.store.list_steps(ctrl.run_id, after_step=max(0, ctrl.steps_used - 1), limit=1)
         last_node = last[-1]["node_id"] if last else None
         self.hub.flush_now(ctrl.run_id)
-        self.hub.emit(ctrl.run_id, "run_finished", {
-            "status": status, "steps_used": ctrl.steps_used, "max_steps": ctrl.max_steps,
-            "last_step": ctrl.steps_used, "last_node_id": last_node, "error": ctrl.error, "at": now_iso(),
-        })
+        self.hub.emit(
+            ctrl.run_id,
+            "run_finished",
+            {
+                "status": status,
+                "steps_used": ctrl.steps_used,
+                "max_steps": ctrl.max_steps,
+                "last_step": ctrl.steps_used,
+                "last_node_id": last_node,
+                "error": ctrl.error,
+                "at": now_iso(),
+            },
+        )
 
-    def _set_node(self, ctrl: RunCtrl, nid: str, state: str, rnd: int, step: int | None, **extra: Any) -> None:
-        body = {"state": state, "status": state, "round": rnd, "step": step, "last_step": step, **{k: v for k, v in extra.items() if v is not None and k != "edges"}}
+    def _set_node(
+        self, ctrl: RunCtrl, nid: str, state: str, rnd: int, step: int | None, **extra: Any
+    ) -> None:
+        body = {
+            "state": state,
+            "status": state,
+            "round": rnd,
+            "step": step,
+            "last_step": step,
+            **{k: v for k, v in extra.items() if v is not None and k != "edges"},
+        }
         ctrl.node_state[nid] = {**ctrl.node_state.get(nid, {}), **body}
-        self.hub.note_change(ctrl.run_id, nid, {
-            "kind": "node", "state": state, "status": state, "round": rnd, "step": step,
-            "duration_ms": extra.get("duration_ms"), "error_summary": extra.get("error_summary"),
-            "side_effect_mode": extra.get("side_effect_mode"), "steps_used": ctrl.steps_used,
-            "max_steps": ctrl.max_steps, "edges_active": extra.get("edges") or [],
-            "word": extra.get("word"), "progress": extra.get("progress"),
-            "feedback": extra.get("feedback"), "elapsed_s": extra.get("elapsed_s"),
-            "recovery": extra.get("recovery"),
-            "phase": extra.get("phase"), "wait_s": extra.get("wait_s"),
-            "wait_max_s": extra.get("wait_max_s"),
-        })
+        self.hub.note_change(
+            ctrl.run_id,
+            nid,
+            {
+                "kind": "node",
+                "state": state,
+                "status": state,
+                "round": rnd,
+                "step": step,
+                "duration_ms": extra.get("duration_ms"),
+                "error_summary": extra.get("error_summary"),
+                "side_effect_mode": extra.get("side_effect_mode"),
+                "steps_used": ctrl.steps_used,
+                "max_steps": ctrl.max_steps,
+                "edges_active": extra.get("edges") or [],
+                "word": extra.get("word"),
+                "progress": extra.get("progress"),
+                "feedback": extra.get("feedback"),
+                "elapsed_s": extra.get("elapsed_s"),
+                "recovery": extra.get("recovery"),
+                "phase": extra.get("phase"),
+                "wait_s": extra.get("wait_s"),
+                "wait_max_s": extra.get("wait_max_s"),
+            },
+        )
 
     def snapshot(self, run_id: str) -> dict[str, Any]:
         ctrl = self.runs.get(run_id)
@@ -1457,12 +1863,15 @@ class Executor:
                 nodes[s["node_id"]] = {
                     "state": s["status"] if s["status"] != "done" else "done",
                     "status": s["status"],
-                    "round": s["round"], "last_step": s["step"],
+                    "round": s["round"],
+                    "last_step": s["step"],
                     "side_effect_mode": s.get("side_effect_mode"),
-                    "error_summary": (s.get("error") or {}).get("message") if s.get("error") else None,
+                    "error_summary": (s.get("error") or {}).get("message")
+                    if s.get("error")
+                    else None,
                 }
         edges = [p["edge_id"] for p in self.store.list_pending(run_id, unconsumed_only=True)]
-        pause = (ctrl.pause if ctrl else row.get("pause"))
+        pause = ctrl.pause if ctrl else row.get("pause")
         status = ctrl.status if ctrl else row["status"]
         return {
             "run_id": run_id,
@@ -1489,25 +1898,39 @@ class Executor:
             "last_event_id": self.store.last_seq(run_id),
             "paused_at_mono": ctrl.last_paused_at_mono if ctrl else 0,
             "unused_pins": ctrl.unused_pins if ctrl else [],
-            "recovery": (pause or {}).get("recovery") if pause else (ctrl.recovery if ctrl else None),
+            "recovery": (pause or {}).get("recovery")
+            if pause
+            else (ctrl.recovery if ctrl else None),
             "not_cancelled": list(ctrl.not_cancelled) if ctrl else [],
         }
 
     def notify_version(self, flow_id: str, latest: int) -> None:
         for ctrl in self.runs.values():
-            if ctrl.flow_id == flow_id and ctrl.status not in TERMINAL and ctrl.flow_version != latest:
-                self.hub.emit(ctrl.run_id, "version_drift", {"locked_version": ctrl.flow_version, "latest_version": latest})
+            if (
+                ctrl.flow_id == flow_id
+                and ctrl.status not in TERMINAL
+                and ctrl.flow_version != latest
+            ):
+                self.hub.emit(
+                    ctrl.run_id,
+                    "version_drift",
+                    {"locked_version": ctrl.flow_version, "latest_version": latest},
+                )
 
     def decorate_steps(self, run_id: str, steps: list[dict[str, Any]]) -> list[dict[str, Any]]:
         row = self.store.get_run(run_id)
         latest = self.store.latest_graph(row["flow_id"]) if row else None
-        pins = {(p["node_id"], p["port"]) for p in self.store.list_pins(row["flow_id"])} if row else set()
+        pins = (
+            {(p["node_id"], p["port"]) for p in self.store.list_pins(row["flow_id"])}
+            if row
+            else set()
+        )
         out = []
         for s in steps:
             rec = dict(s)
             rec["inputs"] = rec.get("input")
             rec["outputs"] = rec.get("output")
-            live = (self.images.get(run_id) or {})
+            live = self.images.get(run_id) or {}
             if rec.get("output"):
                 merged = dict(rec["output"])
                 for port in list(merged):
@@ -1535,9 +1958,7 @@ class Executor:
         action_id = node.get("type") or ""
         state: Any = None
         try:
-            read_fn = getattr(self.adapter, "read_state", None)
-            if callable(read_fn):
-                state = await read_fn(action_id)
+            state = await self.adapter.read_state(action_id)
         except Exception as exc:
             state = {"error": str(exc)}
         return {
@@ -1561,7 +1982,8 @@ class Executor:
         if not nid:
             return
         steps = [
-            s for s in self.store.list_steps(ctrl.run_id, node_id=nid, limit=10000)
+            s
+            for s in self.store.list_steps(ctrl.run_id, node_id=nid, limit=10000)
             if s["status"] == "interrupted_unknown"
         ]
         if not steps:
@@ -1570,7 +1992,9 @@ class Executor:
         outputs = (edits or {}).get("outputs") if edits else None
         if not outputs:
             outputs = dict(((ctrl.pause or {}).get("readback") or {}).get("state") or {})
-        self.store.update_step(ctrl.run_id, rec["step"], status="done", output=outputs, ended_at=now_iso())
+        self.store.update_step(
+            ctrl.run_id, rec["step"], status="done", output=outputs, ended_at=now_iso()
+        )
         for port, val in (outputs or {}).items():
             if val is None or str(port).startswith("_"):
                 continue
@@ -1578,8 +2002,12 @@ class Executor:
                 if ctrl.allowed is not None and edge["target"] not in ctrl.allowed:
                     continue
                 self.store.add_pending(
-                    ctrl.run_id, edge.get("id") or f"{edge['source']}-{edge['target']}",
-                    edge["target"], edge.get("target_port") or "in", val, rec["step"],
+                    ctrl.run_id,
+                    edge.get("id") or f"{edge['source']}-{edge['target']}",
+                    edge["target"],
+                    edge.get("target_port") or "in",
+                    val,
+                    rec["step"],
                 )
         self._set_node(ctrl, nid, "done", rec["round"], rec["step"], extra=" · 人工确认")
 

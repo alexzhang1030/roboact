@@ -1,16 +1,15 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
-import time
 from typing import Any
 
-from .store import Store
-from .util import now_iso
+from .store import StoreLike
 
 
 class SseHub:
-    def __init__(self, store: Store | None = None, interval: float = 0.1) -> None:
+    def __init__(self, store: StoreLike | None = None, interval: float = 0.1) -> None:
         self.store = store
         self.interval = interval
         self._subs: dict[str, list[asyncio.Queue]] = {}
@@ -28,16 +27,17 @@ class SseHub:
     async def stop(self) -> None:
         if self._task:
             self._task.cancel()
-            try:
+            with contextlib.suppress(asyncio.CancelledError):
                 await self._task
-            except asyncio.CancelledError:
-                pass
             self._task = None
 
     def subscribe(self, run_id: str) -> asyncio.Queue:
         q: asyncio.Queue = asyncio.Queue(maxsize=80)
         self._subs.setdefault(run_id, []).append(q)
         return q
+
+    def subscriber_count(self, run_id: str) -> int:
+        return len(self._subs.get(run_id) or [])
 
     def unsubscribe(self, run_id: str, q: asyncio.Queue) -> None:
         subs = self._subs.get(run_id) or []
@@ -57,7 +57,13 @@ class SseHub:
             bucket[node_id] = payload
             self._seq_from.setdefault(run_id, seq)
         meta = self._meta.setdefault(run_id, {})
-        meta.update({k: v for k, v in payload.items() if k in ("steps_used", "max_steps", "edges_active", "status")})
+        meta.update(
+            {
+                k: v
+                for k, v in payload.items()
+                if k in ("steps_used", "max_steps", "edges_active", "status")
+            }
+        )
         meta["seq_to"] = seq
         return seq
 
@@ -90,13 +96,15 @@ class SseHub:
         return self._emit(run_id, "nodes", body, seq_to)
 
     def emit(self, run_id: str, event: str, data: dict[str, Any], seq: int | None = None) -> str:
-        if seq is None:
-            if self.store is not None:
-                seq = self.store.add_change(run_id, event, data.get("node_id"), data)
-            else:
-                self._local_seq = getattr(self, "_local_seq", 0) + 1
-                seq = self._local_seq
-        return self._emit(run_id, event, data, seq)
+        resolved: int
+        if seq is not None:
+            resolved = seq
+        elif self.store is not None:
+            resolved = self.store.add_change(run_id, event, data.get("node_id"), data)
+        else:
+            self._local_seq = int(getattr(self, "_local_seq", 0)) + 1
+            resolved = self._local_seq
+        return self._emit(run_id, event, data, resolved)
 
     def flush_now(self, run_id: str) -> None:
         self.flush_nodes(run_id)
@@ -120,6 +128,8 @@ class SseHub:
         return frame
 
     def replay_after(self, run_id: str, after: int) -> list[str]:
+        if self.store is None:
+            return []
         rows = self.store.changes_after(run_id, after)
         if not rows:
             return []
@@ -129,9 +139,8 @@ class SseHub:
         for r in rows:
             kind = r["kind"]
             p = r["payload"]
-            if kind in ("node", "nodes") or r.get("node_id"):
-                if r.get("node_id"):
-                    nodes[r["node_id"]] = p
+            if (kind in ("node", "nodes") or r.get("node_id")) and r.get("node_id"):
+                nodes[r["node_id"]] = p
             if kind == "paused":
                 last_pause = (r["seq"], p)
             if kind == "run_finished":
@@ -146,11 +155,21 @@ class SseHub:
                 "nodes": [{"node_id": i, **s} for i, s in nodes.items()],
                 "edges_active": [],
             }
-            frames.append(f"id: {seq_to}\nevent: nodes\ndata: {json.dumps(body, ensure_ascii=False)}\n\n")
+            frames.append(
+                f"id: {seq_to}\nevent: nodes\ndata: {json.dumps(body, ensure_ascii=False)}\n\n"
+            )
         if last_pause:
-            frames.append(f"id: {last_pause[0]}\nevent: paused\ndata: {json.dumps(last_pause[1], ensure_ascii=False)}\n\n")
+            frames.append(
+                f"id: {last_pause[0]}\nevent: paused\ndata: {
+                    json.dumps(last_pause[1], ensure_ascii=False)
+                }\n\n"
+            )
         if last_finish:
-            frames.append(f"id: {last_finish[0]}\nevent: run_finished\ndata: {json.dumps(last_finish[1], ensure_ascii=False)}\n\n")
+            frames.append(
+                f"id: {last_finish[0]}\nevent: run_finished\ndata: {
+                    json.dumps(last_finish[1], ensure_ascii=False)
+                }\n\n"
+            )
         return frames
 
     async def _loop(self) -> None:

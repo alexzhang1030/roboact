@@ -350,6 +350,8 @@
 ### 18.1 设置怎么定（PRD v1.4.5，Steve 10-31 定）
 - 语言：没手动选过时读 `navigator.languages`，第一个以 `zh` 开头就用简体中文，其他一律英文，读不到也用英文。
 - 主题：没手动选过时读 `prefers-color-scheme`（第 17.2 节）。
+- 减少动画：没手动选过时读 `prefers-reduced-motion`。开着时运行中图标不转，状态切换和连线不做动画，只换颜色和图标。
+- 词表文件是 `i18n/en.js` 和 `i18n/zh-CN.js`，两个都是 ES 模块，不用构建（PRD v1.4.7）。每项设置都能「恢复跟随浏览器」。
 - 手动选过以后存进 `localStorage`（`roboact.lang` 为 `en` / `zh-CN`，`roboact.theme`），以后按存下的来。两个页面同时开着时监听 `storage` 事件，一边切了另一边跟着变。
 - 浏览器里只存显示偏好：语言、主题、画布缩放和位置、面板宽度、日志筛选。超时、断开暂停时间、`precondition_wait_s`、连哪个 adapter 都在服务端，界面上只显示，不存浏览器（Tedrake、Thompson 10-31）。
 - 顶栏最右，主题按钮左边放语言按钮：英文界面写「中文」，中文界面写「EN」。不用国旗。`<head>` 内联脚本先设 `<html lang>`，打开时不闪另一种语言。切换不刷新页面，不打断运行。
@@ -422,9 +424,10 @@
 | `awaiting_approval` | 正在等人工确认，只能点确认或停止 | Waiting for approval. Approve or stop. |
 | `readback_required` | 先读回机器人状态，再选重试或标记为完成 | Read back the robot's state, then retry or mark as done. |
 | `precondition_failed` | 前提条件没满足 | Precondition not met |
-| 令牌失效（401） | 访问令牌失效，重新打开启动时给的地址 | Access token expired. Reopen the link printed at startup. |
 | 动作已不存在 | 这个动作 adapter 已经不提供了 | This action is no longer provided by the adapter. |
 
 表里没有的界面文字，Torvalds 的 agent 加词时两份词表同时加，键用代码或 `ui.` 开头的英文短名，交我看英文写法。
+
+鉴权先不做（Alex 10-31），令牌失效那一屏（`r-token`）和它的报错先不实现，词表里也先不加。
 
 验收：两种语言各截 12 屏，浅色、深色各一张。英文节点标题行没有溢出，顶栏在 1280 宽下一行放下，没有漏翻也没有显示键名。

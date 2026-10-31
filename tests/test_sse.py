@@ -1,10 +1,12 @@
 """PRD 8.19.1 推送合并, 8.19.2 / A5 停下立刻 flush。"""
+
 from __future__ import annotations
 
 import asyncio
 import time
 
 from roboact.sse import SseHub
+
 from tests.helpers import chain_flow, cont, ctx, run_until, wait_status
 
 
@@ -20,6 +22,7 @@ def test_batch_last_state_wins():
         got = await q.get()
         assert "done" in got
         hub.unsubscribe("r1", q)
+
     asyncio.run(go())
 
 
@@ -40,6 +43,7 @@ def test_batch_rate_at_most_10_per_second():
         dt = time.monotonic() - t0
         assert n <= int(dt * 10) + 2
         await hub.stop()
+
     asyncio.run(go())
 
 
@@ -63,17 +67,18 @@ def test_step_end_flushes_immediately(tmp_path):
         assert dt < 0.1
         assert got is not None or hub.flush(rid) is None
         await hub.stop()
+
     asyncio.run(go())
 
 
 def test_pause_event_immediate_a5(tmp_path):
     """A5 / 19.2: paused 事件在写完暂停状态后立刻发出，不等 100 ms 窗口。"""
+
     async def go():
         ex, store, _, hub = ctx(tmp_path)
         samples = []
         for _ in range(8):
             flow = chain_flow("b")
-            q = None
             rid, st = await run_until(ex, store, flow, "paused")
             # measure from stored mono to now; event already flushed
             now = time.monotonic()
@@ -85,4 +90,5 @@ def test_pause_event_immediate_a5(tmp_path):
         p95 = samples[int(0.95 * (len(samples) - 1))]
         assert p95 <= 20, (p95, samples)
         await hub.stop()
+
     asyncio.run(go())

@@ -1,4 +1,5 @@
 """One Playwright pass: each ui-spec screen/state in light and dark."""
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -60,7 +61,7 @@ def _shot(page, screen: str, state: str, theme: str, locale: str = "en") -> None
 
 
 def _open(br, base, path="/"):
-    page, blocked, errs = _page(br, base)
+    page, _blocked, _errs = _page(br, base)
     page.goto(base + path, wait_until="domcontentloaded")
     page.wait_for_function("window.__ready === true", timeout=60000)
     return page
@@ -157,10 +158,14 @@ def test_ui_spec_screenshots_one_pass(server):
         _set_run(page, "running")
         _both(page, "canvas", "running")
 
-        page.evaluate("() => { if (window.__af.pausePending) window.__af.pausePending.value = true }")
+        page.evaluate(
+            "() => { if (window.__af.pausePending) window.__af.pausePending.value = true }"
+        )
         page.wait_for_timeout(40)
         _both(page, "canvas", "pause-pending")
-        page.evaluate("() => { if (window.__af.pausePending) window.__af.pausePending.value = false }")
+        page.evaluate(
+            "() => { if (window.__af.pausePending) window.__af.pausePending.value = false }"
+        )
 
         _set_run(page, "paused", "user")
         _both(page, "canvas", "paused-user")
@@ -186,42 +191,71 @@ def test_ui_spec_screenshots_one_pass(server):
             _both(page, "canvas", state)
 
         _set_run(page, "running")
-        page.evaluate("() => { if (window.__af.selected) window.__af.selected.value = 'go'; if (window.__af.tab) window.__af.tab.value = 'rec' }")
-        _set_node(page, "go", {
-            "status": "running",
-            "state": "running",
-            "word": "运行中 · 等待前提条件",
-            "phase": "waiting_precondition",
-            "wait_s": 3,
-            "wait_max_s": 8,
-        })
+        page.evaluate(
+            "() => { if (window.__af.selected) window.__af.selected.value = 'go'; if "
+            "(window.__af.tab) window.__af.tab.value = 'rec' }"
+        )
+        _set_node(
+            page,
+            "go",
+            {
+                "status": "running",
+                "state": "running",
+                "word": "运行中 · 等待前提条件",
+                "phase": "waiting_precondition",
+                "wait_s": 3,
+                "wait_max_s": 8,
+            },
+        )
         _both(page, "canvas", "waiting")
 
-        _set_node(page, "go", {"status": "action_missing", "state": "action_missing", "word": "动作已不存在"})
+        _set_node(
+            page,
+            "go",
+            {"status": "action_missing", "state": "action_missing", "word": "动作已不存在"},
+        )
         _both(page, "node", "action-missing")
 
-        _set_node(page, "go", {"status": "cancel_rejected", "state": "cancel_rejected", "word": "取消被拒"})
+        _set_node(
+            page,
+            "go",
+            {"status": "cancel_rejected", "state": "cancel_rejected", "word": "取消被拒"},
+        )
         _set_run(page, "running")
         _both(page, "node", "cancel-rejected")
 
-        _set_node(page, "go", {
-            "status": "interrupted_unknown",
-            "state": "interrupted_unknown",
-            "word": "中断 · 结果未知",
-        })
+        _set_node(
+            page,
+            "go",
+            {
+                "status": "interrupted_unknown",
+                "state": "interrupted_unknown",
+                "word": "中断 · 结果未知",
+            },
+        )
         _set_run(page, "paused", "motion_timeout")
         _both(page, "node", "unknown")
 
-        page.evaluate("() => { if (window.__af.selected) window.__af.selected.value = 'go'; if (window.__af.tab) window.__af.tab.value = 'rec' }")
-        _set_node(page, "go", {
-            "status": "interrupted_unknown",
-            "state": "interrupted_unknown",
-            "word": "中断 · 结果未知",
-        })
+        page.evaluate(
+            "() => { if (window.__af.selected) window.__af.selected.value = 'go'; if "
+            "(window.__af.tab) window.__af.tab.value = 'rec' }"
+        )
+        _set_node(
+            page,
+            "go",
+            {
+                "status": "interrupted_unknown",
+                "state": "interrupted_unknown",
+                "word": "中断 · 结果未知",
+            },
+        )
         _set_run(page, "paused", "motion_timeout")
         _both(page, "node", "unknown-reading")
 
-        page.evaluate("() => { if (window.__af.selected) window.__af.selected.value = 'cam'; if (window.__af.tab) window.__af.tab.value = 'out' }")
+        page.evaluate(
+            "() => { if (window.__af.selected) window.__af.selected.value = 'cam'; if "
+            "(window.__af.tab) window.__af.tab.value = 'out' }"
+        )
         _both(page, "node", "camera")
 
         _set_run(page, "paused", "user")
@@ -250,23 +284,56 @@ def test_ui_spec_screenshots_one_pass(server):
             "name": "确认",
             "nodes": [
                 {"id": "start", "type": "start", "x": 40, "y": 80, "params": {"data": {"v": 1}}},
-                {"id": "hc", "type": "human_confirm", "x": 300, "y": 80, "params": {"prompt": "请确认"}},
+                {
+                    "id": "hc",
+                    "type": "human_confirm",
+                    "x": 300,
+                    "y": 80,
+                    "params": {"prompt": "请确认"},
+                },
                 {"id": "yes", "type": "echo", "x": 560, "y": 40, "params": {}},
                 {"id": "out", "type": "output", "x": 80, "y": 40, "params": {}},
             ],
             "edges": [
-                {"id": "e0", "source": "start", "source_port": "data", "target": "hc", "target_port": "value", "kind": "data"},
-                {"id": "e1", "source": "hc", "source_port": "pass", "target": "yes", "target_port": "value", "kind": "data"},
-                {"id": "e2", "source": "yes", "source_port": "value", "target": "out", "target_port": "value", "kind": "data"},
+                {
+                    "id": "e0",
+                    "source": "start",
+                    "source_port": "data",
+                    "target": "hc",
+                    "target_port": "value",
+                    "kind": "data",
+                },
+                {
+                    "id": "e1",
+                    "source": "hc",
+                    "source_port": "pass",
+                    "target": "yes",
+                    "target_port": "value",
+                    "kind": "data",
+                },
+                {
+                    "id": "e2",
+                    "source": "yes",
+                    "source_port": "value",
+                    "target": "out",
+                    "target_port": "value",
+                    "kind": "data",
+                },
             ],
             "groups": [],
             "bump": True,
         }
         try:
             flow = put_flow(server["base"], confirm)
-            http_json(server["base"], "/api/runs", "POST", {
-                "flow_id": flow["id"], "flow_version": flow["version"],
-            })
+            http_json(
+                server["base"],
+                "/api/runs",
+                "POST",
+                {
+                    "flow_id": flow["id"],
+                    "flow_version": flow["version"],
+                },
+            )
             page3 = _open(br, server["base"])
             page3.wait_for_function(
                 """() => {
@@ -338,7 +405,7 @@ def _write_sheet_compare_report() -> None:
                 ssize = f"{sim.size[0]}×{sim.size[1]}"
                 asize = f"{aim.size[0]}×{aim.size[1]}"
                 if sim.size != (1440, 900):
-                    notes.append(f"sheet not 1440×900")
+                    notes.append("sheet not 1440×900")
                 if aim.size[0] < 1200:
                     notes.append("app viewport narrower than sheet")
                 sm = _mean_rgb(sheet)
@@ -352,21 +419,32 @@ def _write_sheet_compare_report() -> None:
             if not notes:
                 notes.append("ok")
             lines.append(
-                f"| {stem}{suffix or ''} | {theme} | `{app.name if app.is_file() else app_stem}` | {ssize} | {asize} | {delta} | {'; '.join(notes)} |"
+                f"| {stem}{suffix or ''} | {theme} | `{app.name if app.is_file() else app_stem}` | {
+                    ssize
+                } | {asize} | {delta} | {'; '.join(notes)} |"
             )
     extra = sorted(p.name for p in SHEETS.glob("r-*-dark.png"))
     lines.extend(["", "## Design sheets present", "", ", ".join(extra) or "(none)", ""])
-    lines.extend([
-        "## Expected structural mismatches (not tuned)",
-        "",
-        "- Sheets include a logo, flow crumb (`/ 取杯子`), and a 7-node example graph. The live app shows the FakeAdapter demo (start / 假·到点 / 假·夹爪 / 假·相机).",
-        "- Sheets put 仿真/真机 and adapter name in the top-right cluster; the live app puts Save / Open and the language control before appearance.",
-        "- Appearance control matches §17 (half-filled circle, far right, follow system / light / dark).",
-        "- Sheets use `--hair` / `--surface2` for some separators; live chrome still uses `--border` for top/left/right edges.",
-        "- Fonts: live UI is Inter + JetBrains Mono from `roboact/static/fonts/` with system CJK fallback, as §17.",
-        "- r-token sheets exist in `docs/design/` (401 token gate). Authentication is deferred (A39); the live app has no token gate.",
-        "",
-    ])
+    lines.extend(
+        [
+            "## Expected structural mismatches (not tuned)",
+            "",
+            "- Sheets include a logo, flow crumb (`/ 取杯子`), and a 7-node example graph. "
+            "The live app shows the FakeAdapter demo "
+            "(start / 假·到点 / 假·夹爪 / 假·相机).",
+            "- Sheets put 仿真/真机 and adapter name in the top-right cluster; "
+            "the live app puts Save / Open and the language control before appearance.",
+            "- Appearance control matches §17 (half-filled circle, far right, follow system / "
+            "light / dark).",
+            "- Sheets use `--hair` / `--surface2` for some separators; live chrome still uses "
+            "`--border` for top/left/right edges.",
+            "- Fonts: live UI is Inter + JetBrains Mono from `roboact/static/fonts/` with system "
+            "CJK fallback, as §17.",
+            "- r-token sheets exist in `docs/design/` (401 token gate). Authentication is deferred "
+            "(A39); the live app has no token gate.",
+            "",
+        ]
+    )
     ART.mkdir(parents=True, exist_ok=True)
     report = ART / "theme-sheet-compare.md"
     report.write_text("\n".join(lines) + "\n", encoding="utf-8")

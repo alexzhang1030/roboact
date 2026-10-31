@@ -1,6 +1,8 @@
 """TCP proxy for A6: forward, hard cut (FIN/RST), half-open (drop bytes, no close)."""
+
 from __future__ import annotations
 
+import contextlib
 import socket
 import threading
 import time
@@ -57,26 +59,20 @@ class TcpProxy:
     def close(self) -> None:
         self._alive = False
         self.cut()
-        try:
+        with contextlib.suppress(OSError):
             self._srv.close()
-        except OSError:
-            pass
 
     def _shutdown(self, s: socket.socket) -> None:
-        try:
+        with contextlib.suppress(OSError):
             s.shutdown(socket.SHUT_RDWR)
-        except OSError:
-            pass
-        try:
+        with contextlib.suppress(OSError):
             s.close()
-        except OSError:
-            pass
 
     def _accept_loop(self) -> None:
         while self._alive:
             try:
                 client, _ = self._srv.accept()
-            except socket.timeout:
+            except TimeoutError:
                 continue
             except OSError:
                 break
@@ -111,7 +107,7 @@ class TcpProxy:
                         break
                 try:
                     data = client.recv(65536)
-                except socket.timeout:
+                except TimeoutError:
                     continue
                 except OSError:
                     break
@@ -125,7 +121,7 @@ class TcpProxy:
             while self._alive:
                 try:
                     data = src.recv(65536)
-                except socket.timeout:
+                except TimeoutError:
                     continue
                 except OSError:
                     break

@@ -1,8 +1,8 @@
 """PRD 19.6 / ui-spec §18 — catalogs, first-load locale, persist, no hardcoded UI."""
+
 from __future__ import annotations
 
 import ast
-import json
 import re
 from pathlib import Path
 
@@ -75,9 +75,23 @@ def test_detect_browser_lang_rule():
 # Catalog display strings that must not be pasted into frontend source.
 # Short / structural tokens are allowed (units, JSON type names, locale ids).
 _ALLOWED_LITERALS = {
-    "", "en", "zh-CN", "system", "light", "dark", "reduce", "full",
-    "JSON", "json", "number", "boolean", "text", "string",
-    "F5", "F10", "F6",
+    "",
+    "en",
+    "zh-CN",
+    "system",
+    "light",
+    "dark",
+    "reduce",
+    "full",
+    "JSON",
+    "json",
+    "number",
+    "boolean",
+    "text",
+    "string",
+    "F5",
+    "F10",
+    "F6",
 }
 
 

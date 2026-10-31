@@ -1,4 +1,5 @@
 """append_note / tool_call stay off the product palette; control nodes have no loop."""
+
 from __future__ import annotations
 
 from roboact.adapter import FakeAdapter

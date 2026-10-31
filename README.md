@@ -11,26 +11,48 @@ Offline, zero-build robot flow canvas. Wire the atomic actions an adapter expose
 
 Licence is [MIT](LICENSE) (`Copyright (c) 2026 alexzhang1030`). This repo is not published to PyPI and has no publish config.
 
-Specs in this tree: [PRD v1.4.8](docs/prd.md), [exec-model v0.2.2](docs/exec-model.md) (token §0.2 / A39 ignored — auth deferred), [system-design](docs/system-design.md), [UI spec](docs/ui-spec.md) (**§17 fonts/themes, §18 language**), [Rams design sheets](docs/design/), [diagrams](docs/diagrams/), [decision records](docs/decisions/). History: `docs/prd-v1.md`, `docs/exec-model-v0.md`, `docs/ui-spec-v0.md`, `docs/system-design-v0.md`. Agent-facing context also lives in [`.agents/docs/`](.agents/docs/).
+Specs in this tree: [PRD v1.4.11](docs/prd.md), [exec-model v0.2.3](docs/exec-model.md) (token §0.2 / A39 ignored — auth deferred), [system-design](docs/system-design.md), [UI spec](docs/ui-spec.md) (**§17 fonts/themes, §18 language**), [Rams design sheets](docs/design/), [diagrams](docs/diagrams/). History: `docs/prd-v1.md`, `docs/exec-model-v0.md`, `docs/ui-spec-v0.md`, `docs/system-design-v0.md`. Decision records are PCR in [`.agents/docs/`](.agents/docs/).
 
-## Install and run (offline)
+## Install and run
 
-Needs **CPython 3.12, linux x86_64** (the vendored `pydantic-core` wheel is built for that).
+Needs **CPython 3.12**. The robot controller (Jetson Thor, aarch64) runs ROS 2 Jazzy on Ubuntu 24.04; system Python is 3.12 ([REP 2000](https://www.ros.org/reps/rep-2000.html)). `rclpy` is **not** a dependency — it comes from apt with ROS. v1 is `FakeAdapter` only; the core package must never import `rclpy`.
 
 ```bash
-pip install --no-index --find-links vendor/wheels -r requirements.txt
-python -m roboact
+uv sync --frozen
+uv run python -m roboact
 ```
 
 Open <http://127.0.0.1:7465>. No Node, no `npm`, no bundle step.
 
+On the controller, create the venv from the ROS system Python so a later ROS adapter can see `rclpy`:
+
 ```bash
-python -m roboact --host 127.0.0.1 --port 7465 --db data/roboact.db
+uv venv --python /usr/bin/python3 --system-site-packages
+uv sync --frozen
 ```
 
-Default bind is `127.0.0.1`. `--host` on a non-loopback address prints a warning that there is no authentication and anyone on that network can control the robot; it does not exit. There is no access token and no login screen. A39 is **deferred (Alex 2026-10-31)** — see [docs/decisions/auth-deferred.md](docs/decisions/auth-deferred.md).
+Laptop / CI without ROS: ordinary `uv sync --frozen` is enough. Offline laptop with the vendored wheels:
 
-HTTP requests whose `Host` is not `127.0.0.1`, `localhost`, or `[::1]` (with the bind port) are rejected. WebSocket and SSE handshakes require `Origin` to be the page’s own origin. Command endpoints accept only `Content-Type: application/json`.
+```bash
+uv sync --frozen --find-links vendor/wheels
+# or: pip install --no-index --find-links vendor/wheels -r requirements.txt
+```
+
+```bash
+uv run python -m roboact --host 127.0.0.1 --port 7465 --db data/roboact.db
+```
+
+Bind is loopback only (`127.0.0.1`, `::1`, `localhost`). `--host` with any other address exits. There is no access token and no login screen. A39 is **deferred (Alex 2026-10-31)** — see [.agents/docs/auth-and-network.md](.agents/docs/auth-and-network.md).
+
+To use the UI from another computer, SSH port-forward. Do not bind a LAN address:
+
+```bash
+ssh -L 17465:127.0.0.1:17465 <controller>
+```
+
+Then start the server with `--port 17465` (or forward the default `7465` the same way).
+
+HTTP requests whose `Host` is not `127.0.0.1`, `localhost`, or `[::1]` (with a port) are rejected. WebSocket and SSE handshakes require `Origin` to be the page’s own origin. Command endpoints accept only `Content-Type: application/json`.
 
 Defaults: step limit **1000**, node timeout 60 s (absolute deadline given to the adapter; Python also enforces it), adapter heartbeat 3 s, page-disconnect pause 10 s, SSE retry 2 s, SQLite `busy_timeout` 5000 ms. Those values live on the server. The browser stores only the seven display prefs (`roboact.lang`, `roboact.theme`, `roboact.motion`, `roboact.viewport.<flow>`, `roboact.panels`, `roboact.grid`, `roboact.logFilter`).
 
@@ -53,12 +75,14 @@ Storage, SSE, the HTTP API, and exported flows carry **codes only**. The UI maps
 ## Tests
 
 ```bash
-pip install -r requirements-dev.txt
-python -m playwright install chromium   # if this machine has no Chrome
-pytest -q
+uv sync --frozen
+uv run python -m playwright install chromium   # if this machine has no Chrome
+scripts/check.sh
 ```
 
-CI recomputes the sha256 of every file in `vendor-manifest.json` and requires an SPDX `license` plus the text under `vendor/licenses/`. It also scans **exactly** `git ls-files` for private IPv4 addresses (`10/8`, `192.168/16`, `172.16–31`); `127.0.0.1` and `0.0.0.0` are allowed, then runs gitleaks. The same pair is `scripts/pre-push.sh`. Enable the hook with `git config core.hooksPath .githooks`.
+`scripts/check.sh` is the gate: `ruff check`, `ruff format --check`, `pyright`, `pytest`, private-IP scan over exactly `git ls-files`, then gitleaks. CI runs the same order on x86_64 (`uv sync --locked`) and a second `ubuntu-24.04-arm` job (`uv sync --frozen` + pytest).
+
+CI also recomputes the sha256 of every file in `vendor-manifest.json` and requires an SPDX `license` plus the text under `vendor/licenses/`. `127.0.0.1` and `0.0.0.0` are allowed in the private-IP scan; other RFC1918 addresses are not. Enable the hook with `git config core.hooksPath .githooks` (it runs `scripts/pre-push.sh`).
 
 `append_note` / `demo_notes.db` stay off the product path. They exist so executor / idempotency tests (A18, A20) have a write side effect. Product writes go through FakeAdapter memory.
 
@@ -76,8 +100,8 @@ Only items exercised **in a browser against the real backend** are marked pass. 
 | PRD 19.4 wait until stable | **pass** | FakeAdapter: `test_prd194_wait_then_send_when_stable`, `test_prd194_timeout_precondition_failed_no_goal`, `test_prd194_no_wait_fails_on_first_read`. |
 | PRD 19.5 light and dark | **pass** | `test_prd195_prefers_dark_then_persists_light`: system dark first-loads dark; pick light and reload stays light. `test_prd195_follow_system_tracks_prefers`. `test_prd195_grayscale_six_states_both_themes`. `test_prd195_offline_fonts_both_themes`: offline load of `/static/fonts/` Inter / JetBrains Mono, no remote font request. Contrast: `test_contrast_ui_spec` (uses `docs/design/contrast.py`). |
 | Locale + settings | **pass** | `test_i18n` (catalog keys match; no hard-coded CJK in `web/` outside catalogs). `test_prd196_*` (navigator language including French → English, persist, English overflow). `test_prd197_*` (clear storage, bad `localStorage`, reduced motion, panel/grid, last flow and canvas). `test_prd198_codes_survive_language_switch`. |
-| A40 / Host Origin | **pass** | `test_a40_host_origin_content_type` (`Host: evil.example` → 403, `Content-Type: text/plain` → 415, foreign Origin WS → 403/400). |
-| A39 authentication | **deferred (Alex 2026-10-31)** | No tokens. See [docs/decisions/auth-deferred.md](docs/decisions/auth-deferred.md). |
+| A40 / Host Origin | **pass** | `test_a40_host_origin_content_type` (`Host: evil.example` → 403, `Content-Type: text/plain` → 415, foreign Origin WS → 403/400; no run starts). |
+| A39 authentication | **deferred (Alex 2026-10-31)** | No tokens. See [.agents/docs/auth-and-network.md](.agents/docs/auth-and-network.md). |
 
 ## Before a real robot (R1–R8, N/A in v1)
 
@@ -106,13 +130,15 @@ web/                    Static frontend, served by the backend
 web/i18n/               en.js and zh-CN.js catalogs (ES modules, no build)
 web/vendor/             Vue / Vue Flow / icons (unmodified upstream files)
 assets/logo.svg         Brand mark (favicon is the same drawing)
-docs/prd.md             PRD v1.4.8 (current product doc in this tree; token rows ignored)
+docs/prd.md             PRD v1.4.11 (current product doc in this tree; token rows ignored)
 docs/system-design.md
 docs/ui-spec.md         §17 fonts and themes, §18 language
-docs/decisions/         One Markdown record per product decision
 docs/design/            Rams light + `-dark` sheets
 docs/design/contrast.py WCAG helpers used by contrast tests
 docs/diagrams/          Deploy / sequence / state sources + PNG
+pyproject.toml          uv + ruff + pyright
+.python-version         3.12
+scripts/check.sh        ruff, format, pyright, pytest, private-IP, gitleaks
 .githooks/pre-push      Private-IP scan + gitleaks
 vendor/wheels/          Runtime Python wheels
 vendor/licenses/        Third-party licence texts

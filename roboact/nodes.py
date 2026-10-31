@@ -3,18 +3,25 @@ from __future__ import annotations
 import asyncio
 import inspect
 import json
-import time
-from enum import Enum
+from enum import StrEnum
 from typing import Any, ClassVar
 
 from pydantic import BaseModel, ConfigDict, Field, create_model
 
 from . import NODE_TIMEOUT_S
-from .adapter import ActionDescriptor, Adapter, ActionResult, CancelResult, PreconditionFailed, Progress, WaitAborted
+from .adapter import (
+    ActionDescriptor,
+    ActionResult,
+    Adapter,
+    CancelResult,
+    PreconditionFailed,
+    Progress,
+    WaitAborted,
+)
 from .util import compare, dump, get_path, sha256_text
 
 
-class SideEffect(str, Enum):
+class SideEffect(StrEnum):
     none = "none"
     read = "read"
     motion = "motion"
@@ -86,6 +93,7 @@ class NodeType:
     def __init__(self) -> None:
         self._handle = None
         self.cancelled = False
+        self.idem: str | None = None
 
     async def run(self, inputs: BaseModel, params: BaseModel, ctx: RunContext) -> BaseModel:
         raise NotImplementedError
@@ -109,12 +117,14 @@ def _ports_from_model(model: type[BaseModel]) -> list[dict[str, Any]]:
     for name, field in model.model_fields.items():
         extra = field.json_schema_extra or {}
         ptype = extra.get("port_type") if isinstance(extra, dict) else None
-        out.append({
-            "name": name,
-            "json_type": ptype or "any",
-            "label": field.title or name,
-            "required": field.is_required(),
-        })
+        out.append(
+            {
+                "name": name,
+                "json_type": ptype or "any",
+                "label": field.title or name,
+                "required": field.is_required(),
+            }
+        )
     return out
 
 
@@ -123,6 +133,7 @@ def _schema(model: type[BaseModel]) -> dict[str, Any]:
 
 
 # --- built-in flow-control ---
+
 
 class StartParams(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -141,7 +152,7 @@ class StartNode(NodeType):
     Params = StartParams
     icon = "node-start"
 
-    async def run(self, inputs, params: StartParams, ctx):
+    async def run(self, inputs: BaseModel, params: StartParams, ctx: RunContext):
         return StartOut(data=params.data)
 
 
@@ -156,7 +167,7 @@ class OutputNode(NodeType):
     Outputs = Empty
     icon = "node-output"
 
-    async def run(self, inputs: OutputIn, params, ctx):
+    async def run(self, inputs: OutputIn, params: BaseModel, ctx: RunContext):
         return Empty()
 
 
@@ -178,7 +189,7 @@ class ConstantNode(NodeType):
     Params = ConstantParams
     icon = "node-constant"
 
-    async def run(self, inputs, params: ConstantParams, ctx):
+    async def run(self, inputs: BaseModel, params: ConstantParams, ctx: RunContext):
         raw, t = params.value, params.value_type or "string"
         if t == "number":
             val: Any = int(raw) if isinstance(raw, str) and "." not in raw else float(raw)
@@ -216,7 +227,7 @@ class ConditionNode(NodeType):
     Params = CondParams
     icon = "node-condition"
 
-    async def run(self, inputs: CondIn, params: CondParams, ctx):
+    async def run(self, inputs: CondIn, params: CondParams, ctx: RunContext):
         left = get_path(inputs.value, params.field)
         taken = compare(left, params.op, params.compare)
         return CondOut(yes=inputs.value if taken else None, no=inputs.value if not taken else None)
@@ -243,7 +254,7 @@ class MergeNode(NodeType):
         names = list((params or {}).get("ports") or ["a", "b"])
         return [{"name": n, "json_type": "any", "label": n, "required": True} for n in names]
 
-    async def run(self, inputs, params: MergeParams, ctx):
+    async def run(self, inputs: BaseModel, params: MergeParams, ctx: RunContext):
         raw = inputs.model_dump() if hasattr(inputs, "model_dump") else dict(inputs)
         return MergeOut(merged={n: raw.get(n) for n in (params.ports or raw.keys())})
 
@@ -254,7 +265,9 @@ class ConfirmIn(BaseModel):
 
 
 class ConfirmOut(BaseModel):
-    pass_: Any = Field(default=None, alias="pass", json_schema_extra={"port_type": "any"}, title="通过")
+    pass_: Any = Field(
+        default=None, alias="pass", json_schema_extra={"port_type": "any"}, title="通过"
+    )
     reject: Any = Field(default=None, json_schema_extra={"port_type": "any"}, title="驳回")
     model_config = ConfigDict(populate_by_name=True)
 
@@ -272,7 +285,7 @@ class ConfirmNode(NodeType):
     Params = ConfirmParams
     icon = "node-approval"
 
-    async def run(self, inputs: ConfirmIn, params: ConfirmParams, ctx):
+    async def run(self, inputs: ConfirmIn, params: ConfirmParams, ctx: RunContext):
         decision = getattr(ctx, "decision", None)
         if decision == "approve":
             return ConfirmOut(**{"pass": inputs.value, "reject": None})
@@ -282,6 +295,7 @@ class ConfirmNode(NodeType):
 
 
 # --- test fixtures (not on the palette) ---
+
 
 class EchoIn(BaseModel):
     value: Any = Field(default=None, json_schema_extra={"port_type": "any"}, title="值")
@@ -301,7 +315,7 @@ class EchoNode(NodeType):
     group = "测试夹具"
     icon = "node-constant"
 
-    async def run(self, inputs: EchoIn, params, ctx):
+    async def run(self, inputs: EchoIn, params: BaseModel, ctx: RunContext):
         return EchoOut(value=inputs.value)
 
 
@@ -323,11 +337,16 @@ class IncNode(NodeType):
     group = "测试夹具"
     icon = "node-constant"
 
-    async def run(self, inputs: IncIn, params, ctx):
+    async def run(self, inputs: IncIn, params: BaseModel, ctx: RunContext):
         v = inputs.value
         if isinstance(v, dict) and "value" in v:
-            n = int(v.get("value") or 0) + 1
+            raw = v.get("value") or 0
+            if not isinstance(raw, (int, float, str)):
+                raw = 0
+            n = int(raw) + 1
             return IncOut(value={**v, "value": n})
+        if not isinstance(v, (int, float, str)) and v is not None:
+            v = 0
         return IncOut(value={"value": int(v or 0) + 1})
 
 
@@ -341,7 +360,7 @@ class NopNode(NodeType):
     group = "测试夹具"
     icon = "node-constant"
 
-    async def run(self, inputs, params, ctx):
+    async def run(self, inputs: BaseModel, params: BaseModel, ctx: RunContext):
         await asyncio.sleep(0)
         return Empty()
 
@@ -360,7 +379,7 @@ class SleepNode(NodeType):
     icon = "node-constant"
     timeout_s = 0.2
 
-    async def run(self, inputs, params: SleepParams, ctx):
+    async def run(self, inputs: BaseModel, params: SleepParams, ctx: RunContext):
         await asyncio.sleep(float(params.seconds))
         return Empty()
 
@@ -380,7 +399,7 @@ class FailNode(NodeType):
     group = "测试夹具"
     icon = "node-tool"
 
-    async def run(self, inputs, params: FailParams, ctx):
+    async def run(self, inputs: BaseModel, params: FailParams, ctx: RunContext):
         raise RuntimeError(params.message)
 
 
@@ -414,25 +433,35 @@ class ToolNode(NodeType):
     icon = "node-tool"
     timeout_s = NODE_TIMEOUT_S
 
-    async def run(self, inputs: ToolIn, params: ToolParams, ctx):
+    async def run(self, inputs: ToolIn, params: ToolParams, ctx: RunContext):
         name = params.tool or inputs.tool_name or "clock"
         raw = inputs.args if isinstance(inputs.args, dict) else {"value": inputs.args}
         result = await ctx.tools.call(name, raw or {}, ctx.idempotency_key)
         return ToolOut(result=result)
 
-    def mock(self, inputs, params):
+    def mock(self, inputs: BaseModel, params: BaseModel):
         return ToolOut(result={"mocked": True})
 
 
 REGISTRY: dict[str, type[NodeType]] = {
     cls.type_id: cls
     for cls in (
-        StartNode, OutputNode, ConstantNode, ConditionNode, MergeNode, ConfirmNode,
-        EchoNode, IncNode, NopNode, SleepNode, FailNode, ToolNode,
+        StartNode,
+        OutputNode,
+        ConstantNode,
+        ConditionNode,
+        MergeNode,
+        ConfirmNode,
+        EchoNode,
+        IncNode,
+        NopNode,
+        SleepNode,
+        FailNode,
+        ToolNode,
     )
 }
 
-_BOUND_ADAPTER: Adapter | None = None
+_bound_adapter: Adapter | None = None
 
 
 def register_node_type(cls: type[NodeType]) -> None:
@@ -454,20 +483,34 @@ def known_type(type_id: str) -> bool:
 
 
 def bound_adapter() -> Adapter | None:
-    return _BOUND_ADAPTER
+    return _bound_adapter
 
 
 def _models_from_desc(desc: ActionDescriptor) -> tuple[type[BaseModel], type[BaseModel]]:
     in_fields: dict[str, Any] = {}
     for p in desc.params:
-        extra = {"port_type": p.type if p.type != "number" else "any"}
-        default = ... if p.required and p.default is None else (p.default if p.default is not None else None)
-        in_fields[p.name] = (Any, Field(default=default, title=p.title or p.name, json_schema_extra=extra))
+        extra: dict[str, Any] = {"port_type": p.type if p.type != "number" else "any"}
+        default = (
+            ...
+            if p.required and p.default is None
+            else (p.default if p.default is not None else None)
+        )
+        in_fields[p.name] = (
+            Any,
+            Field(default=default, title=p.title or p.name, json_schema_extra=extra),
+        )
     out_fields: dict[str, Any] = {}
     for o in desc.outputs:
-        extra = {"port_type": o.type}
-        out_fields[o.name] = (Any, Field(default=None, title=o.title or o.name, json_schema_extra=extra))
-    Inputs = create_model(f"{desc.id}_In", __config__=ConfigDict(extra="allow"), **in_fields) if in_fields else Empty
+        extra_out: dict[str, Any] = {"port_type": o.type}
+        out_fields[o.name] = (
+            Any,
+            Field(default=None, title=o.title or o.name, json_schema_extra=extra_out),
+        )
+    Inputs = (
+        create_model(f"{desc.id}_In", __config__=ConfigDict(extra="allow"), **in_fields)
+        if in_fields
+        else Empty
+    )
     Outputs = create_model(f"{desc.id}_Out", **out_fields) if out_fields else Empty
     return Inputs, Outputs
 
@@ -485,13 +528,18 @@ def _as_action_dict(raw: Any) -> dict[str, Any]:
     if data.get("return_mode") == "async":
         data["return_mode"] = "goal_progress"
     cancel = data.get("cancel")
-    if isinstance(cancel, dict):
-        if cancel.get("after") is None and cancel.get("post_cancel") is not None:
-            data["cancel"] = {**cancel, "after": cancel["post_cancel"]}
+    if (
+        isinstance(cancel, dict)
+        and cancel.get("after") is None
+        and cancel.get("post_cancel") is not None
+    ):
+        data["cancel"] = {**cancel, "after": cancel["post_cancel"]}
     return data
 
 
-def ingest_action(raw: Any, adapter: Adapter) -> tuple[type[NodeType] | None, dict[str, Any] | None]:
+def ingest_action(
+    raw: Any, adapter: Adapter
+) -> tuple[type[NodeType] | None, dict[str, Any] | None]:
     """Turn one list_actions() item into a node type, or a rejected_actions row.
 
     Adapter actions may only declare side_effect none | read | motion (missing = motion).
@@ -549,7 +597,11 @@ def ingest_action(raw: Any, adapter: Adapter) -> tuple[type[NodeType] | None, di
             "reason": "缺 " + "、".join(missing),
         }
     try:
-        desc = raw if isinstance(raw, ActionDescriptor) and se == raw.side_effect else ActionDescriptor.model_validate(data)
+        desc = (
+            raw
+            if isinstance(raw, ActionDescriptor) and se == raw.side_effect
+            else ActionDescriptor.model_validate(data)
+        )
     except Exception as exc:
         return None, {
             "id": aid,
@@ -562,10 +614,7 @@ def ingest_action(raw: Any, adapter: Adapter) -> tuple[type[NodeType] | None, di
 
 def make_action_node(desc: ActionDescriptor, adapter: Adapter) -> type[NodeType]:
     in_model, out_model = _models_from_desc(desc)
-    if desc.side_effect in ADAPTER_SIDES:
-        side = SideEffect(desc.side_effect)
-    else:
-        side = SideEffect.motion
+    side = SideEffect(desc.side_effect) if desc.side_effect in ADAPTER_SIDES else SideEffect.motion
 
     class ActionNode(NodeType):
         type_id = desc.id
@@ -587,32 +636,49 @@ def make_action_node(desc: ActionDescriptor, adapter: Adapter) -> type[NodeType]
         group = adapter.name
         action_desc = desc
 
-        async def run(self, inputs, params, ctx):
+        async def run(self, inputs: BaseModel, params: BaseModel, ctx: RunContext):
             raw = inputs.model_dump() if hasattr(inputs, "model_dump") else dict(inputs or {})
-            self._idem = ctx.idempotency_key
+            self.idem = ctx.idempotency_key
 
             async def _prog(p: Progress) -> None:
                 if ctx.on_progress:
                     await ctx.on_progress(p)
 
             bound = ctx.adapter if ctx.adapter is not None else adapter
-            exec_task = asyncio.create_task(bound.execute(
-                desc.id, raw, on_progress=_prog, idem_key=ctx.idempotency_key, deadline=None,
-                on_phase=ctx.on_phase, should_abort=ctx.should_abort,
-            ))
+            exec_task = asyncio.create_task(
+                bound.execute(
+                    desc.id,
+                    raw,
+                    on_progress=_prog,
+                    idem_key=ctx.idempotency_key,
+                    deadline=None,
+                    on_phase=ctx.on_phase,
+                    should_abort=ctx.should_abort,
+                )
+            )
             await asyncio.sleep(0)
-            self._handle = bound.handle_by_idem(ctx.idempotency_key) if hasattr(bound, "handle_by_idem") else None
+            self._handle = (
+                bound.handle_by_idem(ctx.idempotency_key)
+                if hasattr(bound, "handle_by_idem")
+                else None
+            )
             result: ActionResult = await exec_task
-            self._handle = bound.handle_by_idem(ctx.idempotency_key) if hasattr(bound, "handle_by_idem") else self._handle
+            self._handle = (
+                bound.handle_by_idem(ctx.idempotency_key)
+                if hasattr(bound, "handle_by_idem")
+                else self._handle
+            )
             if not result.success:
-                if result.message == "precondition_failed" or (result.message or "").startswith("前提条件"):
+                if result.message == "precondition_failed" or (result.message or "").startswith(
+                    "前提条件"
+                ):
                     raise PreconditionFailed(result.message, result.measured)
                 if result.message == "wait_aborted":
                     raise WaitAborted("user")
                 raise RuntimeError(result.message or "action_failed")
             return out_model.model_validate(result.outputs)
 
-        def mock(self, inputs, params):
+        def mock(self, inputs: BaseModel, params: BaseModel):
             return out_model()
 
         async def cancel(self) -> CancelResult:
@@ -620,7 +686,7 @@ def make_action_node(desc: ActionDescriptor, adapter: Adapter) -> type[NodeType]
             bound = adapter
             handle = self._handle
             if handle is None and hasattr(bound, "handle_by_idem"):
-                handle = bound.handle_by_idem(getattr(self, "_idem", None))
+                handle = bound.handle_by_idem(self.idem)
             return await bound.cancel(handle)
 
     ActionNode.__name__ = f"Action_{desc.id}"
@@ -629,9 +695,9 @@ def make_action_node(desc: ActionDescriptor, adapter: Adapter) -> type[NodeType]
 
 
 def bind_adapter(adapter: Adapter) -> Adapter:
-    global _BOUND_ADAPTER, REJECTED_ACTIONS
-    _BOUND_ADAPTER = adapter
-    REJECTED_ACTIONS = []
+    global _bound_adapter
+    _bound_adapter = adapter
+    REJECTED_ACTIONS.clear()
     adapter.rejected_actions = []
     for tid in list(REGISTRY):
         if getattr(REGISTRY[tid], "from_adapter", False):
@@ -648,7 +714,7 @@ def bind_adapter(adapter: Adapter) -> Adapter:
 
 
 def rejected_actions(adapter: Any = None) -> list[dict[str, Any]]:
-    src = adapter if adapter is not None else _BOUND_ADAPTER
+    src = adapter if adapter is not None else _bound_adapter
     return list(getattr(src, "rejected_actions", None) or REJECTED_ACTIONS)
 
 
@@ -664,7 +730,11 @@ def config_hash(node: dict[str, Any]) -> str:
             src = inspect.getsource(cls)
         except (OSError, TypeError):
             desc = getattr(cls, "action_desc", None)
-            src = dump(desc.model_dump() if desc is not None else {"type_id": cls.type_id, "title": cls.title})
+            src = dump(
+                desc.model_dump()
+                if desc is not None
+                else {"type_id": cls.type_id, "title": cls.title}
+            )
         src_h = sha256_text(src)
         _SRC_HASH[key] = src_h
     payload = dump({"type": cls.type_id, "src": src_h, "params": node.get("params") or {}})
@@ -708,7 +778,9 @@ def list_specs(adapter: Any = None) -> list[dict[str, Any]]:
     return [as_public(c, adapter) for c in REGISTRY.values()]
 
 
-def parse_inputs(type_id: str, raw: dict[str, Any] | None, params: dict[str, Any] | None = None) -> BaseModel:
+def parse_inputs(
+    type_id: str, raw: dict[str, Any] | None, params: dict[str, Any] | None = None
+) -> BaseModel:
     cls = get_type(type_id)
     if type_id == "merge":
         return _dyn_model(raw or {})
@@ -721,6 +793,7 @@ def parse_inputs(type_id: str, raw: dict[str, Any] | None, params: dict[str, Any
 def _dyn_model(raw: dict[str, Any]) -> BaseModel:
     class Dyn(BaseModel):
         model_config = ConfigDict(extra="allow")
+
     return Dyn.model_validate(raw)
 
 

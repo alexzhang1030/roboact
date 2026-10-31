@@ -1,4 +1,5 @@
 """PRD 1.1 依赖可追溯。"""
+
 from __future__ import annotations
 
 import hashlib
@@ -27,6 +28,7 @@ def test_tamper_fails(tmp_path):
 
 def test_each_entry_has_required_fields():
     import json
+
     data = json.loads((ROOT / "vendor-manifest.json").read_text())
     for e in data["files"]:
         assert e["package"]
@@ -45,7 +47,9 @@ def test_each_entry_has_required_fields():
 
 def test_missing_license_fails():
     import json
+
     from scripts.check_manifest import collect_errors
+
     data = json.loads((ROOT / "vendor-manifest.json").read_text())
     data["files"][0] = {k: v for k, v in data["files"][0].items() if k != "license"}
     errs = collect_errors(data, root=ROOT)

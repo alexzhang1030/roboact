@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Recompute sha256 of every vendored file and require a SPDX license field."""
+
 from __future__ import annotations
 
 import hashlib
@@ -57,16 +58,24 @@ def collect_errors(data: dict, root: Path = ROOT) -> list[str]:
         want = entry.get("sha256", "")
         want_bytes = entry.get("bytes")
         found = False
-        for folder in (root / "roboact" / "static" / "fonts", root / "fonts", root / "docs" / "design" / "fonts"):
+        for folder in (
+            root / "roboact" / "static" / "fonts",
+            root / "fonts",
+            root / "docs" / "design" / "fonts",
+        ):
             path = folder / name
             if not path.is_file():
                 continue
             found = True
             got = sha256(path)
             if got != want:
-                errors.append(f"font sha256 mismatch: {path}\n  manifest: {want}\n  actual:   {got}")
+                errors.append(
+                    f"font sha256 mismatch: {path}\n  manifest: {want}\n  actual:   {got}"
+                )
             if want_bytes not in (None, path.stat().st_size):
-                errors.append(f"font size mismatch: {path} manifest={want_bytes} actual={path.stat().st_size}")
+                errors.append(
+                    f"font size mismatch: {path} manifest={want_bytes} actual={path.stat().st_size}"
+                )
         if not found:
             errors.append(f"missing shipped font: {name}")
         if entry.get("license") != "OFL-1.1":

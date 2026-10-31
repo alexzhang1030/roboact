@@ -1,4 +1,5 @@
 """PRD 8.2 断点, 8.3 改值继续, 8.16 环里断点, 8.16.1 第 2 轮停下无本轮记录。"""
+
 from __future__ import annotations
 
 import asyncio
@@ -17,6 +18,7 @@ def test_breakpoint_before_third_no_later_records(tmp_path):
         assert names == ["start", "a"]
         assert "b" not in names and "c" not in names
         await hub.stop()
+
     asyncio.run(go())
 
 
@@ -33,6 +35,7 @@ def test_edit_input_then_continue(tmp_path):
         assert c["inputs"]["value"]["v"] == 99 or c["inputs"]["value"].get("edited") is True
         assert (b.get("edited") or {}).get("original") is not None
         await hub.stop()
+
     asyncio.run(go())
 
 
@@ -52,6 +55,7 @@ def test_loop_breakpoint_every_round(tmp_path):
         inc = [r for r in recs(store, rid) if r["node_id"] == "inc"]
         assert len(inc) == 2
         await hub.stop()
+
     asyncio.run(go())
 
 
@@ -65,4 +69,5 @@ def test_loop_breakpoint_only_round_2(tmp_path):
         assert [r["round"] for r in inc] == [1]
         assert st.current and st.current.round == 2
         await hub.stop()
+
     asyncio.run(go())

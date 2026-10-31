@@ -1,6 +1,8 @@
 # Execution model
 
-**Current conclusion.** The product doc in this tree is exec-model v0.2.1 / PRD v1.4.4. Later Alex notes (loopback, no auth, codes-only, fonts) override those docs where they conflict. Do not invent missing PRD §18 / 19.6–19.9 prose; implement the stated rules and keep the tests.
+**Current conclusion.** Product docs in this tree: [exec-model v0.2.3](../../docs/exec-model.md), [PRD v1.4.11](../../docs/prd.md). Later Alex notes (loopback only, no auth, codes-only, fonts, toolchain) override those docs where they conflict.
+
+There is no wait node. Optional `precondition_wait_s` on an action lets the adapter re-read `read_state` and send the goal only when the condition holds; otherwise the step is `precondition_failed` and no goal is sent. People waiting uses Human confirm.
 
 ## Codes on the wire
 
@@ -17,3 +19,21 @@ Executor, adapter, and API messages are codes: `timeout`, `precondition_failed`,
 - After process crash / restart: run stays paused (`restart`); in-flight `motion` is `interrupted_unknown` and waits for Redo / Mark done.
 
 R1–R8 stay N/A until a real robot. FakeAdapter must not move when A40 rejects a request.
+
+Canvas library: Vue Flow 1.48.2, zero-build native ES modules. React Flow is the fallback. LiteGraph is out.
+
+## Why
+
+Pause and breakpoints sit between nodes. A wait node that became true, then paused, would be stale by the time the next action fired. Putting the check in the action, immediately before the goal, leaves no gap. Codes survive a language switch and a crash.
+
+## Rejected
+
+- A seventh control node for “wait until stable”.
+- Auto-retry of `motion` after crash.
+- Storing display strings in run records.
+
+## Who / date / spec
+
+Tedrake (wait rule), Thompson (exec-model v0.2.1 §2.5.5, A38; v0.2.3 A40), Fadell (PRD), Alex (zero-build / offline), Steve (no bundler), 2026-10-31.
+
+[PRD §5.2](../../docs/prd.md), [exec-model §2.5.5 / §0.2](../../docs/exec-model.md), [flow-lib eval](../../docs/flow-lib-eval-2026-10-31.md).

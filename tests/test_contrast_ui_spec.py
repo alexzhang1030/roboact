@@ -2,6 +2,7 @@
 
 Grid dots are decorative — they are listed in §17.4 but not asserted.
 """
+
 from __future__ import annotations
 
 import importlib.util
@@ -11,7 +12,10 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 CSS = (ROOT / "web" / "css" / "app.css").read_text(encoding="utf-8")
 SPEC = (ROOT / "docs" / "ui-spec.md").read_text(encoding="utf-8")
-_spec = importlib.util.spec_from_file_location("design_contrast", ROOT / "docs" / "design" / "contrast.py")
+_spec = importlib.util.spec_from_file_location(
+    "design_contrast", ROOT / "docs" / "design" / "contrast.py"
+)
+assert _spec is not None
 _mod = importlib.util.module_from_spec(_spec)
 assert _spec.loader is not None
 _spec.loader.exec_module(_mod)
@@ -39,7 +43,7 @@ def parse_css_color(value: str) -> str:
         return "#" + h.upper()
     m = re.match(r"rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)", s)
     if m:
-        return "#{:02X}{:02X}{:02X}".format(int(m[1]), int(m[2]), int(m[3]))
+        return f"#{int(m[1]):02X}{int(m[2]):02X}{int(m[3]):02X}"
     raise ValueError("unrecognised colour: " + s)
 
 
@@ -92,14 +96,33 @@ SECTION_17_4 = (
 
 def test_css_matches_uispec_section17_tokens():
     needed = (
-        "bg", "grid", "surface", "surface2", "text", "muted", "border", "control",
-        "edge", "hair", "blue", "green", "red", "amber", "redsoft", "ambersoft", "onblue",
+        "bg",
+        "grid",
+        "surface",
+        "surface2",
+        "text",
+        "muted",
+        "border",
+        "control",
+        "edge",
+        "hair",
+        "blue",
+        "green",
+        "red",
+        "amber",
+        "redsoft",
+        "ambersoft",
+        "onblue",
     )
     for key in needed:
         assert key in LIGHT_SPEC, f"§17.3 missing light --{key}"
         assert key in DARK_SPEC, f"§17.3 missing dark --{key}"
-        assert LIGHT_SPEC[key] == LIGHT_CSS[key], f"light --{key}: spec {LIGHT_SPEC[key]} css {LIGHT_CSS[key]}"
-        assert DARK_SPEC[key] == DARK_CSS[key], f"dark --{key}: spec {DARK_SPEC[key]} css {DARK_CSS[key]}"
+        assert LIGHT_SPEC[key] == LIGHT_CSS[key], f"light --{key}: spec {LIGHT_SPEC[key]} css {
+            LIGHT_CSS[key]
+        }"
+        assert DARK_SPEC[key] == DARK_CSS[key], f"dark --{key}: spec {DARK_SPEC[key]} css {
+            DARK_CSS[key]
+        }"
     assert LIGHT_CSS["amber"] == "#8F6000"
     assert LIGHT_CSS["control"] == "#85857F"
     assert DARK_CSS["control"] == "#73736C"

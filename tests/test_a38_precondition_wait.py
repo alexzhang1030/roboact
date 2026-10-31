@@ -1,4 +1,5 @@
 """exec-model v0.2.1 A38 — wait then send; deadline fail; kill mid-wait restarts as pending."""
+
 from __future__ import annotations
 
 import asyncio
@@ -7,6 +8,7 @@ from roboact.executor import Executor
 from roboact.nodes import bind_adapter
 from roboact.sse import SseHub
 from roboact.store import Store
+
 from tests.helpers import boot, run_until, wait_status
 from tests.test_prd194_precondition_wait import _go_steps, _pose_flow, _stand_adapter
 

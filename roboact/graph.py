@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import hashlib
-from typing import Any, Iterable
+from typing import Any
 
 from .nodes import get_instance
 from .util import dump
@@ -123,7 +123,8 @@ def is_back_edge(flow: dict[str, Any], edge: dict[str, Any]) -> bool:
     src, dst = edge["source"], edge["target"]
     if src == dst:
         return True
-    # Walk from dst without using this edge; if we reach src, this edge closes a cycle.
+    # Walk from dst without using this edge; if we reach src, this edge closes
+    # a cycle.
     seen: set[str] = set()
     stack = [dst]
     skip = (edge.get("id"), src, dst, edge.get("source_port"), edge.get("target_port"))
@@ -135,7 +136,13 @@ def is_back_edge(flow: dict[str, Any], edge: dict[str, Any]) -> bool:
         if u == src:
             return True
         for e in outgoing(flow, u):
-            key = (e.get("id"), e["source"], e["target"], e.get("source_port"), e.get("target_port"))
+            key = (
+                e.get("id"),
+                e["source"],
+                e["target"],
+                e.get("source_port"),
+                e.get("target_port"),
+            )
             if key == skip:
                 continue
             stack.append(e["target"])

@@ -6,13 +6,14 @@ These bind every session. They stay **outside** the PCR markers.
 
 - After the first GitHub push of `main`, every further change is a branch + pull request. Do not merge. Do not force-push.
 - Alex verifies the UI. A screenshot or a passing Playwright run is evidence, not a substitute for his look.
-- Default bind is `127.0.0.1`. `--host` on a non-loopback address prints a warning that there is no authentication and anyone on that network can control the robot; do not exit.
-- Authentication is deferred (A39, Alex 2026-10-31). Do not add access tokens, login, or a token-gate screen. Ignore exec-model token rules and PRD token rows until he reopens it.
+- Bind loopback only (`127.0.0.1`, `::1`, `localhost`). `--host` with any other address must exit. Remote use is SSH port forwarding (`ssh -L 17465:127.0.0.1:17465 <controller>`). Do not add a warning-and-continue LAN bind.
+- Authentication is deferred (A39, Alex 2026-10-31). Do not add access tokens, login, or a token-gate screen. Do not add r-token catalog keys. Ignore exec-model token rules and PRD token rows until he reopens it.
 - Display prefs live in the browser only (`roboact.*` keys in `localStorage`). Execution and safety stay on the server: 10 s page-disconnect, 3 s adapter silence, `timeout_s`, `precondition_wait_s`, expiry, adapter, flow, step limit.
 - Storage, SSE, the HTTP API, and exported flows carry **codes only**. The UI maps code → text by locale. Never persist display strings.
-- ui-spec **§17** is authoritative for fonts and themes. Latin UI and digits: Inter. Code, parameter values, times, step counts: JetBrains Mono with tabular digits. CJK is system-only. Themes swap CSS variables; status meanings do not change.
+- ui-spec **§17** is authoritative for fonts and themes. Latin UI and digits: Inter. Code, parameter values, times, step counts: JetBrains Mono with tabular digits. CJK is system-only. Themes swap CSS variables; status meanings do not change. Reduced motion (`prefers-reduced-motion` / `roboact.motion=reduce`) is colour and icon only — no animation.
 - First-load language is `detectBrowserLang` in `web/js/prefs.js` (one function). First `navigator.languages` entry starting with `zh` → `zh-CN`, else English. Flip `FOLLOW_BROWSER_LANG` to `false` for always-English; keep the same constant in `web/index.html`. Do not scatter a second rule. Every `localStorage` / `sessionStorage` key uses the `roboact.` prefix.
-- Decision records (what / why / who / date / spec link) live in `docs/decisions/`. Never commit chat logs, robot or controller addresses, non-public vendor docs, or tokens. `scripts/pre-push.sh` (private IPv4 over `git ls-files`, then gitleaks) must pass before a GitHub push.
+- Decision records live in `.agents/docs/` (PCR). Do not add `docs/decisions/`. Never commit chat logs, robot or controller addresses, non-public vendor docs, or tokens. The private-IP scan is `scripts/check_private_ip.py` over exactly `git ls-files`.
+- Python 3.12. Toolchain is uv + ruff + pyright. No rclpy dependency. The check command is `scripts/check.sh` (ruff check, ruff format --check, pyright, pytest, private-IP scan, gitleaks).
 - No `[VOUCHED …]` stamps unless Alex explicitly asks for one.
 
 <!-- PCR:START -->

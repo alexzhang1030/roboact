@@ -1,4 +1,5 @@
 """Browser-side A4 / A5 / A6. Measurements are taken in Chromium against the real backend."""
+
 from __future__ import annotations
 
 import time
@@ -40,13 +41,18 @@ def _wait_run(page, *statuses, timeout=120000):
 
 
 def _run_id(page) -> str:
-    rid = page.evaluate("() => window.__af.run.value && (window.__af.run.value.run_id || window.__af.run.value.id)")
+    rid = page.evaluate(
+        "() => window.__af.run.value && (window.__af.run.value.run_id || window.__af.run.value.id)"
+    )
     assert rid, "no run id on the page"
     return rid
 
 
 def _click_run(page):
-    return page.evaluate("async () => { await window.__af.doRun('all'); return window.__af.run.value && window.__af.run.value.status }")
+    return page.evaluate(
+        "async () => { await window.__af.doRun('all'); return window.__af.run.value && "
+        "window.__af.run.value.status }"
+    )
 
 
 def _ui_states(page) -> dict:
@@ -81,7 +87,7 @@ def test_a5_pause_latency_frames_in_browser(server):
     p, _path = _launch()
     try:
         br = _browser(p)
-        page, blocked, errs = _open(br, server["base"])
+        page, blocked, _errs = _open(br, server["base"])
         page.wait_for_function(
             "() => document.querySelectorAll('.vue-flow__node').length >= 400",
             timeout=120000,
@@ -110,7 +116,9 @@ def test_a5_pause_latency_frames_in_browser(server):
                       n += 1
                       const el = document.querySelector('.run-word')
                       const w = el ? (el.textContent || '') : ''
-                      if (w.indexOf('Paused') === 0 || w.indexOf('\\u5df2\\u6682\\u505c') === 0) resolve(n)
+                      const paused = w.indexOf('Paused') === 0
+                        || w.indexOf('\\u5df2\\u6682\\u505c') === 0
+                      if (paused) resolve(n)
                       else if (n > 180) resolve(n)
                       else requestAnimationFrame(loop)
                     }
@@ -152,7 +160,7 @@ def test_a4_sse_batching_500_nodes_browser(server):
     p, _path = _launch()
     try:
         br = _browser(p)
-        page, blocked, errs = _open(br, server["base"], wrap_sse=True)
+        page, blocked, _errs = _open(br, server["base"], wrap_sse=True)
         page.wait_for_function(
             "() => document.querySelectorAll('.vue-flow__node').length >= 400",
             timeout=120000,
@@ -207,12 +215,14 @@ def _wait_node_running(base: str, rid: str, nid: str, timeout: float = 15.0) -> 
 def test_a6_reconnect_and_half_open_page_lost(server):
     """A6: real TCP cut + restore, then half-open cut → operator_lost, no new motion."""
     put_flow(server["base"], motion_graph("A6 重连"))
-    http_json(server["base"], "/api/test/adapter", "POST", {"async_steps": 20, "async_sleep_s": 0.3})
+    http_json(
+        server["base"], "/api/test/adapter", "POST", {"async_steps": 20, "async_sleep_s": 0.3}
+    )
     proxy = TcpProxy("127.0.0.1", server["port"])
     p, _path = _launch()
     try:
         br = _browser(p)
-        page, blocked, errs = _open(br, proxy.base, wrap_sse=True)
+        page, _blocked, _errs = _open(br, proxy.base, wrap_sse=True)
         page.evaluate("() => { window.__sseLog = [] }")
         _click_run(page)
         _wait_run(page, "running", timeout=30000)
@@ -224,14 +234,16 @@ def test_a6_reconnect_and_half_open_page_lost(server):
         cut_t0 = time.monotonic()
         proxy.cut()
         page.wait_for_function(
-            "() => { const t = document.body.innerText; return t.includes('Reconnecting') || t.includes('\\u91cd\\u8fde\\u4e2d') }",
+            "() => { const t = document.body.innerText; return t.includes('Reconnecting') || "
+            "t.includes('\\u91cd\\u8fde\\u4e2d') }",
             timeout=8000,
         )
         time.sleep(1.6)
         proxy.restore()
         cut_dt = time.monotonic() - cut_t0
         page.wait_for_function(
-            "() => { const t = document.body.innerText; return t.includes('Connected') || t.includes('\\u5df2\\u8fde\\u63a5') }",
+            "() => { const t = document.body.innerText; return t.includes('Connected') || "
+            "t.includes('\\u5df2\\u8fde\\u63a5') }",
             timeout=15000,
         )
         _wait_run(page, "completed", "paused", "error", "stopped", timeout=120000)
@@ -244,7 +256,8 @@ def test_a6_reconnect_and_half_open_page_lost(server):
         for e in log:
             if e.get("type") == "nodes" and str(e.get("id") or "").isdigit():
                 node_ids.append(int(e["id"]))
-        # Last-Event-ID replay may resend the last seq; ids must not go backwards.
+        # Last-Event-ID replay may resend the last seq; ids must not go
+        # backwards.
         assert node_ids == sorted(node_ids), node_ids
         snap = http_json(server["base"], f"/api/runs/{rid}")
         ui = _ui_states(page)
@@ -259,7 +272,9 @@ def test_a6_reconnect_and_half_open_page_lost(server):
 
         # --- half-open: stop forwarding, no FIN, SSE writes still succeed ---
         page.evaluate("() => window.__af.cmd('stop')")
-        http_json(server["base"], "/api/test/adapter", "POST", {"async_steps": 28, "async_sleep_s": 0.4})
+        http_json(
+            server["base"], "/api/test/adapter", "POST", {"async_steps": 28, "async_sleep_s": 0.4}
+        )
         page.wait_for_timeout(200)
         _click_run(page)
         _wait_run(page, "running", timeout=20000)
@@ -281,12 +296,16 @@ def test_a6_reconnect_and_half_open_page_lost(server):
         print(f"A6 half-open cut→operator_lost: {dt_lost:.3f}s", flush=True)
         assert paused is not None, f"backend never paused after half-open (waited {dt_lost:.3f}s)"
         reason = ((paused.get("run") or paused).get("pause") or {}).get("reason")
-        assert reason == "operator_lost", (reason, paused.get("pause") or (paused.get("run") or {}).get("pause"))
+        assert reason == "operator_lost", (
+            reason,
+            paused.get("pause") or (paused.get("run") or {}).get("pause"),
+        )
         recs_after = list(paused.get("records") or [])
         assert not any(r.get("node_id") == "grip" for r in recs_after), [
             r.get("node_id") for r in recs_after
         ]
-        # exec-model §5.1: about 10 s. Current motion may finish first; allow slack.
+        # exec-model §5.1: about 10 s. Current motion may finish first; allow
+        # slack.
         assert dt_lost <= 16.0, f"operator_lost took {dt_lost:.3f}s (expected ~10s)"
         assert dt_lost >= 7.0, f"operator_lost too fast ({dt_lost:.3f}s); deadline is 10s"
         print(

@@ -1,15 +1,19 @@
 """exec-model v0.2: adapter target, bidirectional heartbeat, cancel, restart."""
+
 from __future__ import annotations
 
 import asyncio
 
+import pytest
 from roboact.adapter import AdapterInfo, FakeAdapter
 from roboact.errors import ApiError
 from roboact.executor import Executor
 from roboact.nodes import bind_adapter
+from roboact.server import require_loopback_host
 from roboact.sse import SseHub
 from roboact.store import Store
-from tests.helpers import boot, ctx, e, make_flow, n, recs, run_until, wait_status
+
+from tests.helpers import boot, ctx, e, make_flow, n, run_until, wait_status
 
 
 def test_adapter_descriptor_uses_target_not_kind():
@@ -41,7 +45,9 @@ def test_fake_adapter_cancels_goal_when_executor_killed():
         adapter.start_watchdog()
         adapter.receive_heartbeat()
 
-        exec_task = asyncio.create_task(adapter.execute("fake_set_pose", {"x": 1.0, "y": 0.0, "z": 0.0}))
+        exec_task = asyncio.create_task(
+            adapter.execute("fake_set_pose", {"x": 1.0, "y": 0.0, "z": 0.0})
+        )
         await asyncio.sleep(0.05)
         assert adapter.list_active_goals()
 
@@ -55,7 +61,11 @@ def test_fake_adapter_cancels_goal_when_executor_killed():
         assert adapter.goals_cancelled_by_lost_heartbeat >= 1
         result = await exec_task
         assert result.success is False
-        cancelled = [h for h in list(adapter._handles.values()) + list(adapter._finished.values()) if h.cancelled]
+        cancelled = [
+            h
+            for h in list(adapter._handles.values()) + list(adapter._finished.values())
+            if h.cancelled
+        ]
         assert cancelled
         assert any(h.cancelled_by_lost_heartbeat for h in cancelled)
         await adapter.stop_watchdog()
@@ -74,10 +84,13 @@ def test_cancel_rejected_node_stays_running(tmp_path):
         hub.start()
         ex = Executor(store, adapter, hub, str(tmp_path / "data"))
         ex.ui_lost_s = None
-        flow = make_flow([
-            n("start", "start", data={"x": 1, "y": 0, "z": 0}),
-            n("go", "fake_set_pose"),
-        ], [e("e0", "start", "data", "go", "target")])
+        flow = make_flow(
+            [
+                n("start", "start", data={"x": 1, "y": 0, "z": 0}),
+                n("go", "fake_set_pose"),
+            ],
+            [e("e0", "start", "data", "go", "target")],
+        )
         rid, _ = await run_until(ex, store, flow, "running", timeout=2)
         await asyncio.sleep(0.05)
         out = await ex.stop_run(rid)
@@ -102,14 +115,20 @@ def test_stop_uncancellable_blocking_records_not_cancelled(tmp_path):
         hub.start()
         ex = Executor(store, adapter, hub, str(tmp_path / "data"))
         ex.ui_lost_s = None
-        flow = make_flow([
-            n("g", "fake_gripper", open=True),
-        ], [])
+        flow = make_flow(
+            [
+                n("g", "fake_gripper", open=True),
+            ],
+            [],
+        )
         # gripper has no required incoming ports — give it a start token
-        flow = make_flow([
-            n("start", "start", data={"open": True}),
-            n("g", "fake_gripper"),
-        ], [e("e0", "start", "data", "g", "target")])
+        flow = make_flow(
+            [
+                n("start", "start", data={"open": True}),
+                n("g", "fake_gripper"),
+            ],
+            [e("e0", "start", "data", "g", "target")],
+        )
         rid, _ = await run_until(ex, store, flow, "running", timeout=2)
         await asyncio.sleep(0.05)
         out = await ex.stop_run(rid)
@@ -134,10 +153,13 @@ def test_restart_async_queries_goal_blocking_reads_state(tmp_path):
         hub.start()
         ex = Executor(store, adapter, hub, str(tmp_path / "data"))
         ex.ui_lost_s = None
-        flow = make_flow([
-            n("start", "start", data={"x": 0.5, "y": 0, "z": 0}),
-            n("go", "fake_set_pose"),
-        ], [e("e0", "start", "data", "go", "target")])
+        flow = make_flow(
+            [
+                n("start", "start", data={"x": 0.5, "y": 0, "z": 0}),
+                n("go", "fake_set_pose"),
+            ],
+            [e("e0", "start", "data", "go", "target")],
+        )
         fid, ver = boot(store, flow)
         rid = await ex.start_full(fid, ver)
         await asyncio.sleep(0.08)
@@ -171,10 +193,13 @@ def test_restart_async_queries_goal_blocking_reads_state(tmp_path):
         hub3.start()
         ex3 = Executor(store3, adapter2, hub3, str(tmp_path / "data2"))
         ex3.ui_lost_s = None
-        flow_b = make_flow([
-            n("start", "start", data={"open": True}),
-            n("g", "fake_gripper"),
-        ], [e("e0", "start", "data", "g", "target")])
+        flow_b = make_flow(
+            [
+                n("start", "start", data={"open": True}),
+                n("g", "fake_gripper"),
+            ],
+            [e("e0", "start", "data", "g", "target")],
+        )
         fid2, ver2 = boot(store3, flow_b)
         rid2 = await ex3.start_full(fid2, ver2)
         await asyncio.sleep(0.08)
@@ -222,6 +247,7 @@ def test_action_list_mismatch_blocks_run(tmp_path):
 def test_adapter_lost_pauses(tmp_path):
     async def go():
         from roboact.nodes import SleepNode
+
         adapter = FakeAdapter()
         bind_adapter(adapter)
         ex, store, _, hub = ctx(tmp_path)
@@ -230,16 +256,19 @@ def test_adapter_lost_pauses(tmp_path):
         ex.start_background()
         old_sleep = SleepNode.timeout_s
         SleepNode.timeout_s = 5
-        flow = make_flow([
-            n("start", "start", data={"v": 1}),
-            n("a", "echo"),
-            n("s", "sleep", seconds=0.8),
-            n("b", "echo"),
-        ], [
-            e("e0", "start", "data", "a", "value"),
-            e("e1", "a", "value", "s", "value"),
-            e("e2", "s", "value", "b", "value"),
-        ])
+        flow = make_flow(
+            [
+                n("start", "start", data={"v": 1}),
+                n("a", "echo"),
+                n("s", "sleep", seconds=0.8),
+                n("b", "echo"),
+            ],
+            [
+                e("e0", "start", "data", "a", "value"),
+                e("e1", "a", "value", "s", "value"),
+                e("e2", "s", "value", "b", "value"),
+            ],
+        )
         try:
             rid, _ = await run_until(ex, store, flow, "running", timeout=2)
             adapter.connected = False
@@ -253,11 +282,11 @@ def test_adapter_lost_pauses(tmp_path):
     asyncio.run(go())
 
 
-def test_non_loopback_host_warns_only():
-    from roboact.server import warn_non_loopback_host
-
-    warn_non_loopback_host("127.0.0.1")
-    warn_non_loopback_host("0.0.0.0")
+def test_non_loopback_host_exits():
+    require_loopback_host("127.0.0.1")
+    with pytest.raises(SystemExit) as ei:
+        require_loopback_host("0.0.0.0")
+    assert ei.value.code == 2
 
 
 def test_missing_action_marked(tmp_path):
@@ -269,10 +298,13 @@ def test_missing_action_marked(tmp_path):
         hub.start()
         ex = Executor(store, adapter, hub, str(tmp_path / "data"))
         ex.ui_lost_s = None
-        flow = make_flow([
-            n("start", "start", data={}),
-            n("gone", "no_such_action"),
-        ], [e("e0", "start", "data", "gone", "value")])
+        flow = make_flow(
+            [
+                n("start", "start", data={}),
+                n("gone", "no_such_action"),
+            ],
+            [e("e0", "start", "data", "gone", "value")],
+        )
         try:
             await run_until(ex, store, flow, "completed")
             raise AssertionError

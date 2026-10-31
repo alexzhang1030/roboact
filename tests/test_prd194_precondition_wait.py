@@ -1,4 +1,5 @@
 """PRD v1.4.3 §8 item 19.4 — FakeAdapter precondition_wait_s."""
+
 from __future__ import annotations
 
 import asyncio
@@ -8,10 +9,13 @@ from roboact.executor import Executor
 from roboact.nodes import bind_adapter
 from roboact.sse import SseHub
 from roboact.store import Store
+
 from tests.helpers import e, make_flow, n, recs, run_until
 
 
-def _stand_adapter(*, wait_s: float | None, stable: bool = True, stable_after_s: float | None = None) -> FakeAdapter:
+def _stand_adapter(
+    *, wait_s: float | None, stable: bool = True, stable_after_s: float | None = None
+) -> FakeAdapter:
     adapter = FakeAdapter()
     adapter.precondition_poll_s = 0.05
     adapter.stable = stable
@@ -54,6 +58,8 @@ def test_prd194_wait_then_send_when_stable(tmp_path):
         assert adapter.goals_sent, "goal must be sent after standing"
         assert adapter.last_precondition_wait_s is not None
         assert 0.85 <= adapter.last_precondition_wait_s <= 1.35
+        assert adapter.goal_sent_at is not None
+        assert adapter._read_t0 is not None
         sent_after = adapter.goal_sent_at - adapter._read_t0
         assert 0.85 <= sent_after <= 1.35
         go_recs = _go_steps(store, rid)

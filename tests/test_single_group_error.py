@@ -1,4 +1,5 @@
 """PRD 8.5 单节点, 8.6 分组, 8.7 出错重跑。"""
+
 from __future__ import annotations
 
 import asyncio
@@ -14,13 +15,16 @@ def test_single_node_only_one_record(tmp_path):
         b1 = [r for r in recs(store, rid1) if r["node_id"] == "b"][-1]
         fid = store.get_run(rid1)["flow_id"]
         ver = store.get_run(rid1)["flow_version"]
-        rid2 = await ex.start_node(fid, ver, "b", input_spec={"kind": "record", "run_id": rid1, "step": b1["step"]})
+        rid2 = await ex.start_node(
+            fid, ver, "b", input_spec={"kind": "record", "run_id": rid1, "step": b1["step"]}
+        )
         await wait_status(ex, rid2, "completed")
         names = rec_nodes(store, rid2)
         assert names == ["b"]
         b2 = recs(store, rid2)[0]
         assert b2["inputs"] == b1["inputs"]
         await hub.stop()
+
     asyncio.run(go())
 
 
@@ -39,6 +43,7 @@ def test_group_two_middle_nodes(tmp_path):
         a2 = [r for r in recs(store, rid2) if r["node_id"] == "a"][-1]
         assert a2["input_source"] in ("cache", "pinned", "manual", "upstream")
         await hub.stop()
+
     asyncio.run(go())
 
 
@@ -68,4 +73,5 @@ def test_error_rerun_skips_upstream(tmp_path):
         assert "start" not in names and "ok" not in names
         assert names[0] == "bad"
         await hub.stop()
+
     asyncio.run(go())

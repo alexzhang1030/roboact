@@ -79,18 +79,6 @@ html, body, #app {
   font-family: var(--font); font-size: var(--fs-13); line-height: var(--lh-13); font-weight: 400;
   font-feature-settings: "cv05" 1;
 }
-.token-gate {
-  height: 100%; display: flex; align-items: center; justify-content: center;
-  background: var(--bg);
-}
-.token-box {
-  width: min(360px, calc(100vw - 32px)); display: flex; flex-direction: column; gap: 8px;
-  padding: 24px; background: var(--surface); border: 1px solid var(--border); border-radius: 6px;
-}
-.token-box label { margin: 0; font-size: 13px; color: var(--text); }
-.token-box input { height: 32px; }
-.token-box button { height: 32px; width: 100%; }
-.token-err { margin: 0; color: var(--red); font-size: 12px; }
 button, input, select, textarea { font: inherit; color: inherit; }
 button { height: 28px; border-radius: 4px; border: 1px solid var(--control); background: var(--surface); padding: 0 12px; cursor: pointer; white-space: nowrap; }
 button.primary { background: var(--blue); color: var(--onblue); border-color: var(--blue); }

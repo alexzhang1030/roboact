@@ -6,7 +6,9 @@ import urllib.request
 from typing import Any
 
 
-def http_json(base: str, path: str, method: str = "GET", body: Any = None, timeout: float = 8.0) -> Any:
+def http_json(
+    base: str, path: str, method: str = "GET", body: Any = None, timeout: float = 8.0
+) -> Any:
     data = None if body is None else json.dumps(body).encode()
     req = urllib.request.Request(base + path, data=data, method=method)
     if method in ("POST", "PUT", "PATCH", "DELETE"):
@@ -36,21 +38,37 @@ def echo_chain_graph(n_nodes: int, name: str = "") -> dict[str, Any]:
     prev, prev_port = "start", "data"
     for i in range(n_echo):
         nid = f"n{i}"
-        nodes.append({
-            "id": nid, "type": "echo",
-            "x": (i % 25) * 260, "y": (i // 25) * 140,
-            "params": {},
-        })
-        edges.append({
-            "id": f"e{i}", "source": prev, "source_port": prev_port,
-            "target": nid, "target_port": "value", "kind": "data",
-        })
+        nodes.append(
+            {
+                "id": nid,
+                "type": "echo",
+                "x": (i % 25) * 260,
+                "y": (i // 25) * 140,
+                "params": {},
+            }
+        )
+        edges.append(
+            {
+                "id": f"e{i}",
+                "source": prev,
+                "source_port": prev_port,
+                "target": nid,
+                "target_port": "value",
+                "kind": "data",
+            }
+        )
         prev, prev_port = nid, "value"
     nodes.append({"id": "out", "type": "output", "x": 40, "y": 40, "params": {}})
-    edges.append({
-        "id": "eout", "source": prev, "source_port": prev_port,
-        "target": "out", "target_port": "value", "kind": "data",
-    })
+    edges.append(
+        {
+            "id": "eout",
+            "source": prev,
+            "source_port": prev_port,
+            "target": "out",
+            "target_port": "value",
+            "kind": "data",
+        }
+    )
     return {
         "name": name or f"{n_nodes} 节点",
         "nodes": nodes,
@@ -64,15 +82,48 @@ def motion_graph(name: str = "A6 动作") -> dict[str, Any]:
     return {
         "name": name,
         "nodes": [
-            {"id": "start", "type": "start", "x": 40, "y": 160, "params": {"data": {"x": 0.4, "y": 0.1, "z": 0.2}}},
-            {"id": "go", "type": "fake_set_pose", "x": 300, "y": 160, "params": {"x": 0.4, "y": 0.1, "z": 0.2}},
+            {
+                "id": "start",
+                "type": "start",
+                "x": 40,
+                "y": 160,
+                "params": {"data": {"x": 0.4, "y": 0.1, "z": 0.2}},
+            },
+            {
+                "id": "go",
+                "type": "fake_set_pose",
+                "x": 300,
+                "y": 160,
+                "params": {"x": 0.4, "y": 0.1, "z": 0.2},
+            },
             {"id": "grip", "type": "fake_gripper", "x": 560, "y": 160, "params": {"open": True}},
             {"id": "out", "type": "output", "x": 560, "y": 360, "params": {}},
         ],
         "edges": [
-            {"id": "e0", "source": "start", "source_port": "data", "target": "go", "target_port": "target", "kind": "data"},
-            {"id": "e1", "source": "go", "source_port": "pose", "target": "grip", "target_port": "target", "kind": "data"},
-            {"id": "e2", "source": "grip", "source_port": "open", "target": "out", "target_port": "value", "kind": "data"},
+            {
+                "id": "e0",
+                "source": "start",
+                "source_port": "data",
+                "target": "go",
+                "target_port": "target",
+                "kind": "data",
+            },
+            {
+                "id": "e1",
+                "source": "go",
+                "source_port": "pose",
+                "target": "grip",
+                "target_port": "target",
+                "kind": "data",
+            },
+            {
+                "id": "e2",
+                "source": "grip",
+                "source_port": "open",
+                "target": "out",
+                "target_port": "value",
+                "kind": "data",
+            },
         ],
         "groups": [],
         "bump": True,

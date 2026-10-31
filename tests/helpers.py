@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import time
 from pathlib import Path
+from typing import Any
 
 from roboact.executor import Executor, compute_stale
 from roboact.sse import SseHub
@@ -12,11 +13,25 @@ from roboact.util import new_id
 
 
 def n(id: str, typ: str, *, x: int = 0, y: int = 0, breakpoints: dict | None = None, **params):
-    return {"id": id, "type": typ, "x": x, "y": y, "params": params, "breakpoints": breakpoints or {}}
+    return {
+        "id": id,
+        "type": typ,
+        "x": x,
+        "y": y,
+        "params": params,
+        "breakpoints": breakpoints or {},
+    }
 
 
 def e(id: str, src: str, sp: str, dst: str, dp: str):
-    return {"id": id, "source": src, "source_port": sp, "target": dst, "target_port": dp, "kind": "data"}
+    return {
+        "id": id,
+        "source": src,
+        "source_port": sp,
+        "target": dst,
+        "target_port": dp,
+        "kind": "data",
+    }
 
 
 def make_flow(nodes, edges, fid="fl_test", version=1):
@@ -90,7 +105,12 @@ def confirm_flow():
 def write_flow(line="hello"):
     nodes = [
         n("start", "start", data={"line": line}),
-        n("mail", "tool_call", tool="append_note", allowed_tools=["append_note", "read_note", "clock"]),
+        n(
+            "mail",
+            "tool_call",
+            tool="append_note",
+            allowed_tools=["append_note", "read_note", "clock"],
+        ),
         n("out", "output"),
     ]
     edges = [
@@ -131,13 +151,17 @@ def boot(store: Store, flow: dict) -> tuple[str, int]:
     for node in flow.get("nodes") or []:
         for when, spec in (node.get("breakpoints") or {}).items():
             if spec and spec.get("enabled"):
-                body = {"enabled": True}
+                body: dict[str, Any] = {"enabled": True}
                 if spec.get("round"):
                     body["mode"] = "round"
                     body["round"] = spec["round"]
                 elif spec.get("field"):
                     body["mode"] = "condition"
-                    body["condition"] = {"field": spec["field"], "op": spec.get("op") or "eq", "value": spec.get("value")}
+                    body["condition"] = {
+                        "field": spec["field"],
+                        "op": spec.get("op") or "eq",
+                        "value": spec.get("value"),
+                    }
                 else:
                     body["mode"] = "every"
                 store.set_breakpoint(fid, node["id"], when, body)
@@ -166,7 +190,8 @@ async def run_until(ex, store, flow, *want, timeout=4.0, kind="full", **kw):
         rid = await ex.rerun_from(kw.pop("parent_run_id"), kw.pop("step"), **kw)
     else:
         rid = await ex.start_full(
-            fid, ver,
+            fid,
+            ver,
             max_steps=kw.get("max_steps") or kw.get("step_limit"),
             initial_input=kw.get("initial_input"),
             side_effects=kw.get("side_effects") or "default",
@@ -181,8 +206,12 @@ async def cont(ex, rid, edits=None, mode="continue", resolution=None, readback_i
     if readback_id is None and st.pause and (st.pause.get("readback") or {}).get("readback_id"):
         readback_id = st.pause["readback"]["readback_id"]
     if mode == "step":
-        return await ex.step_run(rid, pid, edits=edits, resolution=resolution, readback_id=readback_id)
-    return await ex.continue_run(rid, pid, edits=edits, resolution=resolution, readback_id=readback_id)
+        return await ex.step_run(
+            rid, pid, edits=edits, resolution=resolution, readback_id=readback_id
+        )
+    return await ex.continue_run(
+        rid, pid, edits=edits, resolution=resolution, readback_id=readback_id
+    )
 
 
 def recs(store, rid):

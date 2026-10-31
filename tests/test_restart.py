@@ -1,10 +1,12 @@
 """PRD 8.4 刷新不丢, 8.11 服务端重启, 8.18.1 环中途重启。"""
+
 from __future__ import annotations
 
 import asyncio
 
 from roboact.executor import Executor
 from roboact.sse import SseHub
+
 from tests.helpers import chain_flow, cont, ctx, loop_flow, recs, run_until, wait_status
 
 
@@ -24,6 +26,7 @@ def test_paused_state_survives_reload(tmp_path):
         snap2 = ex.snapshot(rid)
         assert snap2["pause"]["pause_id"] == pause_id
         await hub.stop()
+
     asyncio.run(go())
 
 
@@ -48,6 +51,7 @@ def test_restart_then_continue_matches(tmp_path):
         names = [r["node_id"] for r in recs(store, rid)]
         assert names == ["start", "a", "b", "c", "out"]
         await hub2.stop()
+
     asyncio.run(go())
 
 
@@ -69,4 +73,5 @@ def test_loop_restart_midway(tmp_path):
         assert [r["round"] for r in inc] == [1, 2, 3]
         assert [r["round"] for r in cond] == [1, 2, 3]
         await hub2.stop()
+
     asyncio.run(go())

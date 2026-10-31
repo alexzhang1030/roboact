@@ -1,12 +1,14 @@
 """PRD 8.8 副作用：write 重放默认模拟，read 用缓存。"""
+
 from __future__ import annotations
 
 import asyncio
 
+from roboact.adapter import CrashBetweenWriteAndKey
 from roboact.executor import Executor
 from roboact.sse import SseHub
-from roboact.adapter import CrashBetweenWriteAndKey
 from roboact.tools import Tools
+
 from tests.helpers import boot, cont, ctx, read_flow, recs, run_until, wait_status, write_flow
 
 
@@ -26,6 +28,7 @@ def test_append_note_kill_between_write_and_key(tmp_path):
         await tools.call("append_note", {"line": "hello"}, "run1:1")
         assert tools.note_lines() == ["hello"]
         assert tools.ledger.count() == 1
+
     asyncio.run(go())
 
 
@@ -52,6 +55,7 @@ def test_append_note_kill_between_then_rerun(tmp_path):
         assert tools.note_lines() == ["once"]
         assert tools.ledger.count() == 1
         await hub2.stop()
+
     asyncio.run(go())
 
 
@@ -64,8 +68,10 @@ def test_write_replay_is_mocked(tmp_path):
         first = tools.ledger.count()
         fid = store.get_run(rid1)["flow_id"]
         ver = store.get_run(rid1)["flow_version"]
-        rec1 = [r for r in recs(store, rid1) if r["node_id"] == "mail"][0]
-        rid2 = await ex.start_node(fid, ver, "mail", input_spec={"kind": "record", "run_id": rid1, "step": rec1["step"]})
+        rec1 = next(r for r in recs(store, rid1) if r["node_id"] == "mail")
+        rid2 = await ex.start_node(
+            fid, ver, "mail", input_spec={"kind": "record", "run_id": rid1, "step": rec1["step"]}
+        )
         await wait_status(ex, rid2, "completed")
         assert tools.note_lines() == ["hello"]
         assert tools.ledger.count() == first
@@ -74,6 +80,7 @@ def test_write_replay_is_mocked(tmp_path):
         assert rec["mocked"] is True
         assert rec["outputs"]["result"]["mocked"] is True
         await hub.stop()
+
     asyncio.run(go())
 
 
@@ -86,14 +93,17 @@ def test_read_replay_uses_cache(tmp_path):
         rid1, _ = await run_until(ex, store, flow, "completed")
         n_read = len([c for c in tools.calls if c["tool"] == "read_note"])
         assert n_read == 1
-        cached = [r for r in recs(store, rid1) if r["node_id"] == "look"][0]
+        cached = next(r for r in recs(store, rid1) if r["node_id"] == "look")
         fid = store.get_run(rid1)["flow_id"]
         ver = store.get_run(rid1)["flow_version"]
-        rid2 = await ex.start_node(fid, ver, "look", input_spec={"kind": "record", "run_id": rid1, "step": cached["step"]})
+        rid2 = await ex.start_node(
+            fid, ver, "look", input_spec={"kind": "record", "run_id": rid1, "step": cached["step"]}
+        )
         await wait_status(ex, rid2, "completed")
         assert len([c for c in tools.calls if c["tool"] == "read_note"]) == 1
         rec = recs(store, rid2)[0]
         assert rec["side_effect_mode"] == "cache"
         assert rec["outputs"] == cached["outputs"]
         await hub.stop()
+
     asyncio.run(go())

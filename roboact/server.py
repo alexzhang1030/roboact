@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import contextlib
 import json
 import mimetypes
 import os
@@ -20,18 +21,27 @@ from .sse import SseHub
 from .store import open_store
 from .util import now_iso
 
-
 ROOT = Path(__file__).resolve().parent.parent
 PKG = Path(__file__).resolve().parent
 WEB = ROOT / "web"
 DOCS = ROOT / "docs"
 ASSETS = ROOT / "assets"
 PKG_STATIC = PKG / "static"
-REASONS = {200: "OK", 201: "Created", 202: "Accepted", 204: "No Content", 400: "Bad Request",
-           401: "Unauthorized", 403: "Forbidden", 404: "Not Found", 409: "Conflict",
-           410: "Gone",
-           415: "Unsupported Media Type",
-          422: "Unprocessable Entity", 500: "Error"}
+REASONS = {
+    200: "OK",
+    201: "Created",
+    202: "Accepted",
+    204: "No Content",
+    400: "Bad Request",
+    401: "Unauthorized",
+    403: "Forbidden",
+    404: "Not Found",
+    409: "Conflict",
+    410: "Gone",
+    415: "Unsupported Media Type",
+    422: "Unprocessable Entity",
+    500: "Error",
+}
 MIME = {
     ".html": "text/html; charset=utf-8",
     ".js": "text/javascript; charset=utf-8",
@@ -68,12 +78,10 @@ def parse_host_header(raw: str) -> tuple[str, str]:
     return h.lower(), ""
 
 
-def host_allowed(host_header: str, bind_port: int | None) -> bool:
+def host_allowed(host_header: str, _bind_port: int | None) -> bool:
     """Loopback Host only. Port may differ from the bind (SSH / TCP proxy)."""
     name, _port = parse_host_header(host_header)
-    if name not in ALLOWED_HOST_NAMES:
-        return False
-    return True
+    return name in ALLOWED_HOST_NAMES
 
 
 def origin_allowed(origin: str, host_header: str) -> bool:
@@ -95,9 +103,7 @@ def origin_allowed(origin: str, host_header: str) -> bool:
     origin_port = parsed.port
     if origin_port is None:
         origin_port = 443 if parsed.scheme == "https" else 80
-    if req_port and str(origin_port) != req_port:
-        return False
-    return True
+    return not (req_port and str(origin_port) != req_port)
 
 
 def request_origin(headers: dict[str, str]) -> str:
@@ -140,16 +146,52 @@ class App:
             "adapter_id": self.adapter.adapter_id,
             "action_list_version": self.adapter.action_list_version,
             "nodes": [
-                {"id": "start", "type": "start", "x": 40, "y": 160, "params": {"data": {"x": 0.4, "y": 0.1, "z": 0.2}}},
-                {"id": "go", "type": "fake_set_pose", "x": 300, "y": 160, "params": {"x": 0.4, "y": 0.1, "z": 0.2}},
-                {"id": "grip", "type": "fake_gripper", "x": 560, "y": 160, "params": {"open": True}},
+                {
+                    "id": "start",
+                    "type": "start",
+                    "x": 40,
+                    "y": 160,
+                    "params": {"data": {"x": 0.4, "y": 0.1, "z": 0.2}},
+                },
+                {
+                    "id": "go",
+                    "type": "fake_set_pose",
+                    "x": 300,
+                    "y": 160,
+                    "params": {"x": 0.4, "y": 0.1, "z": 0.2},
+                },
+                {
+                    "id": "grip",
+                    "type": "fake_gripper",
+                    "x": 560,
+                    "y": 160,
+                    "params": {"open": True},
+                },
                 {"id": "cam", "type": "fake_camera", "x": 300, "y": 360, "params": {}},
                 {"id": "out", "type": "output", "x": 560, "y": 360, "params": {}},
             ],
             "edges": [
-                {"id": "e0", "source": "start", "source_port": "data", "target": "go", "target_port": "target"},
-                {"id": "e1", "source": "go", "source_port": "pose", "target": "grip", "target_port": "target"},
-                {"id": "e2", "source": "grip", "source_port": "open", "target": "out", "target_port": "value"},
+                {
+                    "id": "e0",
+                    "source": "start",
+                    "source_port": "data",
+                    "target": "go",
+                    "target_port": "target",
+                },
+                {
+                    "id": "e1",
+                    "source": "go",
+                    "source_port": "pose",
+                    "target": "grip",
+                    "target_port": "target",
+                },
+                {
+                    "id": "e2",
+                    "source": "grip",
+                    "source_port": "open",
+                    "target": "out",
+                    "target_port": "value",
+                },
             ],
             "groups": [],
         }
@@ -174,41 +216,80 @@ class App:
         self.ex.start_background()
         await self.ex.adopt_unfinished()
 
-    async def handle(self, method: str, path: str, headers: dict[str, str], body: bytes, writer: asyncio.StreamWriter) -> None:
+    async def handle(
+        self,
+        method: str,
+        path: str,
+        headers: dict[str, str],
+        body: bytes,
+        writer: asyncio.StreamWriter,
+    ) -> None:
         parsed = urlparse(path)
         route = parsed.path
         query = {k: v[0] if v else "" for k, v in parse_qs(parsed.query).items()}
         if not host_allowed(headers.get("host") or "", self.port):
-            await self._json(writer, 403, {"error": "bad_host", "message": "bad_host", "detail": {}})
+            await self._json(
+                writer, 403, {"error": "bad_host", "message": "bad_host", "detail": {}}
+            )
             return
         if (headers.get("upgrade") or "").lower() == "websocket":
             if not origin_allowed(headers.get("origin") or "", headers.get("host") or ""):
-                await self._json(writer, 403, {"error": "bad_origin", "message": "bad_origin", "detail": {}})
+                await self._json(
+                    writer, 403, {"error": "bad_origin", "message": "bad_origin", "detail": {}}
+                )
                 return
-            await self._json(writer, 400, {"error": "no_websocket", "message": "no_websocket", "detail": {}})
+            await self._json(
+                writer, 400, {"error": "no_websocket", "message": "no_websocket", "detail": {}}
+            )
             return
         is_events = route.endswith("/events")
         if is_events and not origin_allowed(request_origin(headers), headers.get("host") or ""):
-            await self._json(writer, 403, {"error": "bad_origin", "message": "bad_origin", "detail": {}})
+            await self._json(
+                writer, 403, {"error": "bad_origin", "message": "bad_origin", "detail": {}}
+            )
             return
-        if route.startswith("/api/") and method in COMMAND_METHODS and not content_type_is_json(headers):
-            await self._json(writer, 415, {"error": "bad_content_type", "message": "bad_content_type", "detail": {}})
+        if (
+            route.startswith("/api/")
+            and method in COMMAND_METHODS
+            and not content_type_is_json(headers)
+        ):
+            await self._json(
+                writer,
+                415,
+                {"error": "bad_content_type", "message": "bad_content_type", "detail": {}},
+            )
             return
         try:
             data = json.loads(body.decode("utf-8") or "null") if body else None
         except json.JSONDecodeError:
-            await self._json(writer, 400, {"error": "invalid_graph", "message": "invalid_graph", "detail": {}})
+            await self._json(
+                writer, 400, {"error": "invalid_graph", "message": "invalid_graph", "detail": {}}
+            )
             return
         try:
             await self._dispatch(method, route, query, data, headers, writer)
         except ApiError as e:
             await self._json(writer, e.status, e.body())
         except FileNotFoundError:
-            await self._json(writer, 404, {"error": "not_found", "message": "not_found", "detail": {}})
+            await self._json(
+                writer, 404, {"error": "not_found", "message": "not_found", "detail": {}}
+            )
         except Exception as e:
-            await self._json(writer, 500, {"error": "internal", "message": "internal", "detail": {"type": type(e).__name__}})
+            await self._json(
+                writer,
+                500,
+                {"error": "internal", "message": "internal", "detail": {"type": type(e).__name__}},
+            )
 
-    async def _dispatch(self, method, route, query, data, headers, writer) -> None:
+    async def _dispatch(
+        self,
+        method: str,
+        route: str,
+        query: dict[str, str],
+        data: Any,
+        headers: dict[str, str],
+        writer: asyncio.StreamWriter,
+    ) -> None:
         if method == "OPTIONS":
             await self._raw(writer, 204, b"", "text/plain")
             return
@@ -226,21 +307,27 @@ class App:
                 if r["status"] in ("running", "paused"):
                     current = r
                     snap = self.ex.snapshot(r["run_id"])
-                    records = self.ex.decorate_steps(r["run_id"], self.store.list_steps(r["run_id"], limit=10000))
+                    records = self.ex.decorate_steps(
+                        r["run_id"], self.store.list_steps(r["run_id"], limit=10000)
+                    )
                     break
-            await self._json(writer, 200, {
-                "flow": flow,
-                "node_types": [t for t in list_specs(self.adapter)],
-                "rejected_actions": rejected_actions(self.adapter),
-                "adapter": self.adapter.public(),
-                "tools": [],
-                "runs": runs[:30],
-                "run": snap or current,
-                "records": records,
-                "pins": self.store.list_pins(fid),
-                "breakpoints": self.store.list_breakpoints(fid),
-                "step_limit_default": DEFAULT_STEP_LIMIT,
-            })
+            await self._json(
+                writer,
+                200,
+                {
+                    "flow": flow,
+                    "node_types": [t for t in list_specs(self.adapter)],
+                    "rejected_actions": rejected_actions(self.adapter),
+                    "adapter": self.adapter.public(),
+                    "tools": [],
+                    "runs": runs[:30],
+                    "run": snap or current,
+                    "records": records,
+                    "pins": self.store.list_pins(fid),
+                    "breakpoints": self.store.list_breakpoints(fid),
+                    "step_limit_default": DEFAULT_STEP_LIMIT,
+                },
+            )
             return
         if route == "/api/adapter" and method == "GET":
             await self._json(writer, 200, self.adapter.public())
@@ -255,10 +342,14 @@ class App:
             await self._json(writer, 200, {"state": state, "at": now_iso()})
             return
         if route == "/api/node-types" and method == "GET":
-            await self._json(writer, 200, {
-                "node_types": list_specs(self.adapter),
-                "rejected_actions": rejected_actions(self.adapter),
-            })
+            await self._json(
+                writer,
+                200,
+                {
+                    "node_types": list_specs(self.adapter),
+                    "rejected_actions": rejected_actions(self.adapter),
+                },
+            )
             return
         if route == "/api/flows" and method == "GET":
             await self._json(writer, 200, {"flows": self.store.list_flows()})
@@ -279,11 +370,15 @@ class App:
                 flow = self.store.latest_graph(fid)
                 if not flow:
                     raise ApiError(404, "not_found", "找不到流程")
-                await self._json(writer, 200, {
-                    "flow": flow,
-                    "pins": self.store.list_pins(fid),
-                    "breakpoints": self.store.list_breakpoints(fid),
-                })
+                await self._json(
+                    writer,
+                    200,
+                    {
+                        "flow": flow,
+                        "pins": self.store.list_pins(fid),
+                        "breakpoints": self.store.list_breakpoints(fid),
+                    },
+                )
                 return
             old = self.store.latest_graph(fid)
             bump = bool((data or {}).get("bump", True))
@@ -299,9 +394,13 @@ class App:
         if route == "/api/single-runs/node" and method == "POST":
             data = data or {}
             rid = await self.ex.start_node(
-                data["flow_id"], int(data["flow_version"]), data["node_id"],
-                input_spec=data.get("input"), side_effects=data.get("side_effects") or "default",
-                confirm=data.get("confirm"), client_id=data.get("client_id") or "",
+                data["flow_id"],
+                int(data["flow_version"]),
+                data["node_id"],
+                input_spec=data.get("input"),
+                side_effects=data.get("side_effects") or "default",
+                confirm=data.get("confirm"),
+                client_id=data.get("client_id") or "",
                 request_id=data.get("request_id"),
             )
             await self._json(writer, 201, {"run_id": rid})
@@ -309,10 +408,15 @@ class App:
         if route == "/api/single-runs/group" and method == "POST":
             data = data or {}
             rid, echo = await self.ex.start_group(
-                data["flow_id"], int(data["flow_version"]), list(data.get("node_ids") or []),
-                entries=data.get("entries"), side_effects=data.get("side_effects") or "default",
-                confirm=data.get("confirm"), client_id=data.get("client_id") or "",
-                request_id=data.get("request_id"), max_steps=data.get("max_steps"),
+                data["flow_id"],
+                int(data["flow_version"]),
+                list(data.get("node_ids") or []),
+                entries=data.get("entries"),
+                side_effects=data.get("side_effects") or "default",
+                confirm=data.get("confirm"),
+                client_id=data.get("client_id") or "",
+                request_id=data.get("request_id"),
+                max_steps=data.get("max_steps"),
                 source_run_id=data.get("source_run_id"),
             )
             await self._json(writer, 201, {"run_id": rid, "entries": echo})
@@ -328,18 +432,26 @@ class App:
                 meta = self.store.get_flow_meta(fid)
                 ver = meta["latest_version"] if meta else 1
             rid = await self.ex.start_full(
-                fid, int(ver),
+                fid,
+                int(ver),
                 initial_input=data.get("initial_input"),
                 max_steps=data.get("max_steps") or data.get("step_limit"),
                 client_id=data.get("client_id") or "",
                 request_id=data.get("request_id"),
             )
             snap = self.ex.snapshot(rid)
-            await self._json(writer, 201, {
-                "run_id": rid, "flow_version": snap["flow_version"],
-                "max_steps": snap["max_steps"], "status": snap["status"],
-                "last_event_id": snap["last_event_id"], "run": snap,
-            })
+            await self._json(
+                writer,
+                201,
+                {
+                    "run_id": rid,
+                    "flow_version": snap["flow_version"],
+                    "max_steps": snap["max_steps"],
+                    "status": snap["status"],
+                    "last_event_id": snap["last_event_id"],
+                    "run": snap,
+                },
+            )
             return
         if route.startswith("/api/runs/") and route.endswith("/events") and method == "GET":
             run_id = route.split("/")[3]
@@ -371,7 +483,12 @@ class App:
                 node_id = query.get("node_id")
                 after_step = int(query.get("after_step") or 0)
                 limit = int(query.get("limit") or 200)
-                steps = self.ex.decorate_steps(run_id, self.store.list_steps(run_id, node_id=node_id, after_step=after_step, limit=limit))
+                steps = self.ex.decorate_steps(
+                    run_id,
+                    self.store.list_steps(
+                        run_id, node_id=node_id, after_step=after_step, limit=limit
+                    ),
+                )
                 for s in steps:
                     raw = json.dumps(s.get("input"), ensure_ascii=False, default=str)
                     if len(raw) > 65536:
@@ -382,7 +499,9 @@ class App:
                         s["output"] = {"truncated": True, "preview": raw[:200]}
                         s["outputs"] = s["output"]
                 nxt = steps[-1]["step"] if steps else after_step
-                await self._json(writer, 200, {"steps": steps, "records": steps, "next_after_step": nxt})
+                await self._json(
+                    writer, 200, {"steps": steps, "records": steps, "next_after_step": nxt}
+                )
                 return
             snap = self.ex.snapshot(run_id)
             recs = self.ex.decorate_steps(run_id, self.store.list_steps(run_id, limit=10000))
@@ -404,15 +523,23 @@ class App:
                 return
             if action == "continue":
                 out = await self.ex.continue_run(
-                    run_id, data.get("pause_id") or "", client, data.get("edits"),
-                    resolution=data.get("resolution"), readback_id=data.get("readback_id"),
+                    run_id,
+                    data.get("pause_id") or "",
+                    client,
+                    data.get("edits"),
+                    resolution=data.get("resolution"),
+                    readback_id=data.get("readback_id"),
                 )
                 await self._json(writer, 200, {**out, "run": self.ex.snapshot(run_id)})
                 return
             if action == "step":
                 out = await self.ex.step_run(
-                    run_id, data.get("pause_id") or "", client, data.get("edits"),
-                    resolution=data.get("resolution"), readback_id=data.get("readback_id"),
+                    run_id,
+                    data.get("pause_id") or "",
+                    client,
+                    data.get("edits"),
+                    resolution=data.get("resolution"),
+                    readback_id=data.get("readback_id"),
                 )
                 await self._json(writer, 200, {**out, "run": self.ex.snapshot(run_id)})
                 return
@@ -425,13 +552,34 @@ class App:
                 await self._json(writer, 200, out)
                 return
             if action == "approve":
-                out = await self.ex.approve(run_id, data.get("pause_id") or "", data.get("decision") or "approve", client, data.get("comment"))
+                out = await self.ex.approve(
+                    run_id,
+                    data.get("pause_id") or "",
+                    data.get("decision") or "approve",
+                    client,
+                    data.get("comment"),
+                )
                 await self._json(writer, 200, {**out, "run": self.ex.snapshot(run_id)})
                 return
             if action == "rerun-from":
-                rid = await self.ex.rerun_from(run_id, int(data["step"]), data.get("side_effects") or "default", data.get("confirm"), client)
+                rid = await self.ex.rerun_from(
+                    run_id,
+                    int(data["step"]),
+                    data.get("side_effects") or "default",
+                    data.get("confirm"),
+                    client,
+                )
                 snap = self.ex.snapshot(rid)
-                await self._json(writer, 201, {"run_id": rid, "parent_run_id": run_id, "base_step": snap.get("step") and 0, "run": snap})
+                await self._json(
+                    writer,
+                    201,
+                    {
+                        "run_id": rid,
+                        "parent_run_id": run_id,
+                        "base_step": snap.get("step") and 0,
+                        "run": snap,
+                    },
+                )
                 return
             raise ApiError(404, "not_found", "未知动作")
         if self.test_mode and route == "/api/test/flood-status" and method == "POST":
@@ -442,9 +590,17 @@ class App:
             statuses = ["idle", "queued", "running", "done", "error", "paused_before"]
             for t in range(ticks):
                 for i in range(n):
-                    self.hub.update_node(run_id, f"n{i}", {"state": statuses[(t + i) % 6], "status": statuses[(t + i) % 6]})
+                    self.hub.update_node(
+                        run_id,
+                        f"n{i}",
+                        {"state": statuses[(t + i) % 6], "status": statuses[(t + i) % 6]},
+                    )
                 await asyncio.sleep(0.01)
-            await self._json(writer, 200, {"ok": True, "ticks": ticks, "events_sent": self.hub.events_sent.get(run_id, 0)})
+            await self._json(
+                writer,
+                200,
+                {"ok": True, "ticks": ticks, "events_sent": self.hub.events_sent.get(run_id, 0)},
+            )
             return
         if self.test_mode and route == "/api/test/crash-before-t2" and method == "POST":
             self.ex.hooks["crash_before_t2"] = True
@@ -462,21 +618,31 @@ class App:
                 self.adapter.async_sleep_s = float(data["async_sleep_s"])
             if "block_s" in data:
                 self.adapter.block_s = float(data["block_s"])
-            await self._json(writer, 200, {
-                "ok": True,
-                "async_steps": self.adapter.async_steps,
-                "async_sleep_s": getattr(self.adapter, "async_sleep_s", 0.04),
-                "block_s": self.adapter.block_s,
-            })
+            await self._json(
+                writer,
+                200,
+                {
+                    "ok": True,
+                    "async_steps": self.adapter.async_steps,
+                    "async_sleep_s": getattr(self.adapter, "async_sleep_s", 0.04),
+                    "block_s": self.adapter.block_s,
+                },
+            )
             return
         if method == "GET":
             await self._static(writer, route)
             return
         raise ApiError(404, "not_found", "找不到接口")
 
-    async def _breakpoints(self, method, route, data, writer) -> None:
+    async def _breakpoints(
+        self,
+        method: str,
+        route: str,
+        data: Any,
+        writer: asyncio.StreamWriter,
+    ) -> None:
         # /api/flows/{flow_id}/breakpoints/{node_id}/{when}
-        rest = route[len("/api/flows/"):]
+        rest = route[len("/api/flows/") :]
         fid, _, tail = rest.partition("/breakpoints/")
         node_id, _, when = tail.partition("/")
         if method == "PUT":
@@ -486,14 +652,20 @@ class App:
                 node = next((n for n in graph["nodes"] if n["id"] == node_id), None)
             body = data or {}
             if body.get("mode") == "condition" and node:
-                field = ((body.get("condition") or {}).get("field") or "")
+                field = (body.get("condition") or {}).get("field") or ""
                 inst = get_instance(node["type"])
-                names = list(inst.Inputs.model_fields) + [p["name"] for p in inst.input_ports(node.get("params"))]
+                names = list(inst.Inputs.model_fields) + [
+                    p["name"] for p in inst.input_ports(node.get("params"))
+                ]
                 top = field.split(".")[0]
                 if field and top not in names:
-                    raise ApiError(422, "invalid_graph", "断点条件字段不在输入模型里", {"field": field})
+                    raise ApiError(
+                        422, "invalid_graph", "断点条件字段不在输入模型里", {"field": field}
+                    )
             bp = self.store.set_breakpoint(fid, node_id, when, body)
-            self.hub.emit("_flow_" + fid, "breakpoints", {"flow_id": fid, "changed": [bp], "removed": []})
+            self.hub.emit(
+                "_flow_" + fid, "breakpoints", {"flow_id": fid, "changed": [bp], "removed": []}
+            )
             await self._json(writer, 200, {"breakpoint": bp})
             return
         if method == "DELETE":
@@ -502,15 +674,23 @@ class App:
             return
         raise ApiError(404, "not_found", "找不到接口")
 
-    async def _pins(self, method, route, data, writer) -> None:
-        rest = route[len("/api/flows/"):]
+    async def _pins(
+        self,
+        method: str,
+        route: str,
+        data: Any,
+        writer: asyncio.StreamWriter,
+    ) -> None:
+        rest = route[len("/api/flows/") :]
         fid, _, tail = rest.partition("/pins/")
         node_id, _, port = tail.partition("/")
         if method == "PUT":
             data = data or {}
             fr = data.get("from") or {}
             pin = self.store.set_pin(
-                fid, node_id, port,
+                fid,
+                node_id,
+                port,
                 value=data.get("value"),
                 from_run=fr.get("run_id") or data.get("from_run"),
                 from_step=fr.get("step") or data.get("from_step"),
@@ -539,7 +719,9 @@ class App:
                 snap = self.ex.snapshot(run_id)
             except ApiError:
                 snap = {"run_id": run_id, "status": "unknown", "nodes": {}}
-            frame = f"id: {snap.get('last_event_id') or 0}\nevent: snapshot\ndata: {json.dumps(snap, ensure_ascii=False, default=str)}\n\n"
+            frame = f"id: {snap.get('last_event_id') or 0}\nevent: snapshot\ndata: {
+                json.dumps(snap, ensure_ascii=False, default=str)
+            }\n\n"
             writer.write(frame.encode())
             await writer.drain()
         else:
@@ -554,7 +736,7 @@ class App:
                     payload = await asyncio.wait_for(q.get(), timeout=15)
                     writer.write(payload.encode() if isinstance(payload, str) else payload)
                     await writer.drain()
-                except asyncio.TimeoutError:
+                except TimeoutError:
                     writer.write(b": ping\n\n")
                     await writer.drain()
         except (ConnectionResetError, BrokenPipeError, asyncio.CancelledError):
@@ -568,7 +750,8 @@ class App:
             target = (PKG_STATIC / rel[7:]).resolve()
             root = PKG_STATIC.resolve()
         elif rel.startswith("docs/fonts/"):
-            # Design sheets load ../fonts from /docs/design/; same files as the package.
+            # Design sheets load ../fonts from /docs/design/; same files as the
+            # package.
             target = (PKG_STATIC / "fonts" / rel[11:]).resolve()
             root = (PKG_STATIC / "fonts").resolve()
         elif rel.startswith("docs/"):
@@ -598,7 +781,9 @@ class App:
         raw = json.dumps(obj, ensure_ascii=False, default=str).encode("utf-8")
         await self._raw(writer, code, raw, "application/json; charset=utf-8")
 
-    async def _raw(self, writer: asyncio.StreamWriter, code: int, body: bytes, mime: str, head: bool = False) -> None:
+    async def _raw(
+        self, writer: asyncio.StreamWriter, code: int, body: bytes, mime: str, head: bool = False
+    ) -> None:
         reason = REASONS.get(code, "OK")
         extra = ""
         header = (
@@ -613,10 +798,8 @@ class App:
         writer.write(header.encode() + (b"" if head else body))
         await writer.drain()
         writer.close()
-        try:
+        with contextlib.suppress(ConnectionError):
             await writer.wait_closed()
-        except ConnectionError:
-            pass
 
 
 async def _read_request(reader: asyncio.StreamReader) -> tuple[str, str, dict[str, str], bytes]:
@@ -639,34 +822,32 @@ async def _client(app: App, reader: asyncio.StreamReader, writer: asyncio.Stream
         method, path, headers, body = await asyncio.wait_for(_read_request(reader), timeout=30)
         await app.handle(method, path, headers, body, writer)
     except Exception:
-        try:
+        with contextlib.suppress(Exception):
             writer.close()
-        except Exception:
-            pass
 
 
 def _is_loopback(host: str) -> bool:
-    return host in LOOPBACK
-
-
-def warn_non_loopback_host(host: str) -> None:
-    """Alex 2026-10-31: no auth. Non-loopback is allowed; warn, do not block."""
-    if not _is_loopback(host):
-        print(
-            f"WARNING: --host {host} is not loopback. There is no authentication; "
-            "anyone on that network can control the robot.",
-            file=sys.stderr,
-            flush=True,
-        )
+    name = (host or "").strip().strip("[]")
+    return name in LOOPBACK
 
 
 def require_loopback_host(host: str) -> None:
-    # Kept as a name for older tests; 1.4.8 does not block. Warn only.
-    warn_non_loopback_host(host)
+    """Refuse any non-loopback bind. No warning-and-continue path."""
+    if _is_loopback(host):
+        return
+    print(
+        f"error: --host {host} is not loopback. "
+        "Bind only 127.0.0.1, ::1, or localhost. "
+        "To use the UI from another computer, SSH port-forward: "
+        "ssh -L 17465:127.0.0.1:17465 <controller>",
+        file=sys.stderr,
+        flush=True,
+    )
+    raise SystemExit(2)
 
 
 async def serve(host: str, port: int, db_path: str, test_mode: bool = False) -> None:
-    warn_non_loopback_host(host)
+    require_loopback_host(host)
     app = App(db_path, test_mode=test_mode, port=port)
     await app.start()
     server = await asyncio.start_server(lambda r, w: _client(app, r, w), host, port)
@@ -681,11 +862,12 @@ def main(argv: list[str] | None = None) -> None:
     p.add_argument(
         "--host",
         default=os.environ.get("ROBOACT_HOST", "127.0.0.1"),
-        help="Bind address. Default 127.0.0.1. Non-loopback prints a warning (no auth).",
+        help="Bind address. Only 127.0.0.1, ::1, or localhost; anything else exits.",
     )
     p.add_argument("--port", type=int, default=int(os.environ.get("ROBOACT_PORT", "7465")))
     p.add_argument("--db", default=os.environ.get("ROBOACT_DB", "data/roboact.db"))
     args = p.parse_args(argv)
+    require_loopback_host(args.host)
     test_mode = os.environ.get("ROBOACT_TEST") == "1"
     try:
         asyncio.run(serve(args.host, args.port, args.db, test_mode=test_mode))

@@ -128,29 +128,36 @@ from enum import Enum
 from typing import ClassVar
 from pydantic import BaseModel
 
+
 class SideEffect(str, Enum):
-    none = "none"      # 不读也不动：纯计算、控制节点
-    read = "read"      # 只读传感器或外部：相机、关节角、夹爪读数、读笔记
+    none = "none"  # 不读也不动：纯计算、控制节点
+    read = "read"  # 只读传感器或外部：相机、关节角、夹爪读数、读笔记
     motion = "motion"  # 会让机器人动：走、转、坐、机械臂到某位姿、抓、放
-    write = "write"    # 只给测试用节点（append_note）；机器人的动作不用这一类
+    write = "write"  # 只给测试用节点（append_note）；机器人的动作不用这一类
+
 
 class ReturnMode(str, Enum):
-    blocking = "blocking"            # 做完才返回
+    blocking = "blocking"  # 做完才返回
     goal_progress = "goal_progress"  # 马上返回，之后收进度和结果
 
+
 class NodeType:
-    type_id: ClassVar[str]                  # 动作节点是 "action:<动作名>"，例如 "action:walk_to"
-    title: ClassVar[str]                    # 界面上的中文名
+    type_id: ClassVar[str]  # 动作节点是 "action:<动作名>"，例如 "action:walk_to"
+    title: ClassVar[str]  # 界面上的中文名
     Inputs: ClassVar[type[BaseModel]]
     Outputs: ClassVar[type[BaseModel]]
     Params: ClassVar[type[BaseModel]]
     side_effect: ClassVar[SideEffect]
-    side_effect_note: ClassVar[str] = ""    # 悬停说明；motion 节点是「会让机器人动」（界面规格第 16 节）
-    timeout_s: ClassVar[float] = 60         # 控制节点和测试节点的推断默认值；动作节点取动作说明里的值
+    side_effect_note: ClassVar[str] = (
+        ""  # 悬停说明；motion 节点是「会让机器人动」（界面规格第 16 节）
+    )
+    timeout_s: ClassVar[float] = 60  # 控制节点和测试节点的推断默认值；动作节点取动作说明里的值
     action: ClassVar["ActionDescriptor | None"] = None  # 动作节点才有，第 2.5.1 节
 
     async def run(self, inputs: BaseModel, params: BaseModel, ctx: "RunContext") -> BaseModel: ...
-    def mock(self, inputs: BaseModel, params: BaseModel) -> BaseModel: ...  # 只有 write 类测试节点实现
+    def mock(
+        self, inputs: BaseModel, params: BaseModel
+    ) -> BaseModel: ...  # 只有 write 类测试节点实现
 ```
 
 `RunContext` 只给节点这些东西：`run_id`、`step`、`round`、`idempotency_key`，动作节点另外拿到 adapter 的调用句柄（只能调用自己这个动作，第 2.5.2 节）。不给图、不给别的节点、不给运行记录，节点没有办法绕过连线传数据。

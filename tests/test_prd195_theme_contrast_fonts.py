@@ -1,4 +1,5 @@
 """PRD v1.4.4 §8 item 19.5 — light/dark, grayscale states, offline fonts, contrast."""
+
 from __future__ import annotations
 
 import io
@@ -58,14 +59,14 @@ def _gray_means(png: bytes, gw: int = 8, gh: int = 8) -> tuple[int, ...]:
             xs = range(int(gx * w / gw), int((gx + 1) * w / gw) or 1)
             ys = range(int(gy * h / gh), int((gy + 1) * h / gh) or 1)
             vals = [pix[y * w + x] for y in ys for x in xs if 0 <= y * w + x < len(pix)]
-            grid.append(0 if not vals else int(round(sum(vals) / len(vals))))
+            grid.append(0 if not vals else round(sum(vals) / len(vals)))
     return tuple(grid)
 
 
 def _grids_distinct(a: tuple[int, ...], b: tuple[int, ...], min_l1: int = 16) -> bool:
     if a == b:
         return False
-    return sum(abs(x - y) for x, y in zip(a, b)) >= min_l1
+    return sum(abs(x - y) for x, y in zip(a, b, strict=False)) >= min_l1
 
 
 def _browser(p):
@@ -109,7 +110,9 @@ def _css_vars(page) -> dict[str, str]:
     raw = page.evaluate(
         """() => {
           const s = getComputedStyle(document.documentElement)
-          const names = ['bg','grid','surface','text','muted','border','edge','blue','green','red','amber']
+          const names = [
+            'bg','grid','surface','text','muted','border','edge','blue','green','red','amber'
+          ]
           const out = {}
           for (const n of names) out[n] = s.getPropertyValue('--' + n).trim()
           return out
@@ -131,9 +134,9 @@ def _font_urls(urls: list[str]) -> list[str]:
     found = []
     for url in urls:
         low = url.lower()
-        if any(low.endswith(ext) for ext in (".woff2", ".woff", ".ttf", ".otf", ".eot")):
-            found.append(url)
-        elif "font" in low and "font-face" not in low:
+        if any(low.endswith(ext) for ext in (".woff2", ".woff", ".ttf", ".otf", ".eot")) or (
+            "font" in low and "font-face" not in low
+        ):
             found.append(url)
     return found
 
@@ -144,7 +147,7 @@ def test_prd195_prefers_dark_then_persists_light(server):
     try:
         br = _browser(p)
         ctx = br.new_context(viewport={"width": 1280, "height": 800}, color_scheme="dark")
-        page, blocked, seen, errs = _wired_page(ctx, server["base"])
+        page, blocked, seen, _errs = _wired_page(ctx, server["base"])
         page.goto(server["base"] + "/", wait_until="domcontentloaded")
         # Inline head script runs before Vue — first paint is already dark.
         assert _theme_of(page) == "dark"
@@ -154,7 +157,11 @@ def test_prd195_prefers_dark_then_persists_light(server):
         assert stored in (None, "system")
         assert page.evaluate("() => document.documentElement.dataset.themeMode") in ("system", "")
         assert _css_vars(page)["bg"] == DARK_CSS["bg"]
-        last = page.evaluate("() => document.querySelector('.top .right') && document.querySelector('.top .right').lastElementChild && document.querySelector('.top .right').lastElementChild.className")
+        last = page.evaluate(
+            "() => document.querySelector('.top .right') && document.querySelector('.top "
+            ".right').lastElementChild && document.querySelector('.top "
+            ".right').lastElementChild.className"
+        )
         assert "theme-wrap" in (last or "")
         page.locator('[data-testid="theme-btn"]').click()
         page.locator('[data-theme-mode="light"]').click()
@@ -222,9 +229,9 @@ def test_prd195_grayscale_six_states_both_themes(server):
             keys = list(grids)
             for i, a in enumerate(keys):
                 for b in keys[i + 1 :]:
-                    assert _grids_distinct(grids[a], grids[b]), (
-                        f"{theme}: {a} vs {b} grayscale means too close {grids[a]} / {grids[b]}"
-                    )
+                    assert _grids_distinct(grids[a], grids[b]), f"{theme}: {a} vs {
+                        b
+                    } grayscale means too close {grids[a]} / {grids[b]}"
 
             # Canvas node icons for the four node-level states.
             node_kinds = ("done", "paused", "error", "unknown")
@@ -235,9 +242,9 @@ def test_prd195_grayscale_six_states_both_themes(server):
             nk = list(node_grids)
             for i, a in enumerate(nk):
                 for b in nk[i + 1 :]:
-                    assert _grids_distinct(node_grids[a], node_grids[b], min_l1=8), (
-                        f"{theme} node {a} vs {b} {node_grids[a]} / {node_grids[b]}"
-                    )
+                    assert _grids_distinct(node_grids[a], node_grids[b], min_l1=8), f"{theme} node {
+                        a
+                    } vs {b} {node_grids[a]} / {node_grids[b]}"
         assert blocked == []
         assert _external_hosts(seen) == []
         br.close()
@@ -251,7 +258,7 @@ def test_prd195_offline_fonts_both_themes(server):
     try:
         br = _browser(p)
         ctx = br.new_context(viewport={"width": 1280, "height": 800}, color_scheme="light")
-        page, blocked, seen, errs = _wired_page(ctx, server["base"])
+        page, blocked, seen, _errs = _wired_page(ctx, server["base"])
         _goto_ready(page, server["base"] + "/")
         for theme in ("light", "dark"):
             page.evaluate(
@@ -306,15 +313,19 @@ def test_prd195_follow_system_tracks_prefers(server):
     try:
         br = _browser(p)
         ctx = br.new_context(viewport={"width": 1280, "height": 800}, color_scheme="dark")
-        page, blocked, seen, _errs = _wired_page(ctx, server["base"])
+        page, blocked, _seen, _errs = _wired_page(ctx, server["base"])
         _goto_ready(page, server["base"] + "/")
         page.evaluate("() => window.__af.setThemeMode('system')")
         page.wait_for_function("() => document.documentElement.dataset.theme === 'dark'")
         page.emulate_media(color_scheme="light")
-        page.wait_for_function("() => document.documentElement.dataset.theme === 'light'", timeout=5000)
+        page.wait_for_function(
+            "() => document.documentElement.dataset.theme === 'light'", timeout=5000
+        )
         assert page.evaluate("() => localStorage.getItem('roboact.theme')") == "system"
         page.emulate_media(color_scheme="dark")
-        page.wait_for_function("() => document.documentElement.dataset.theme === 'dark'", timeout=5000)
+        page.wait_for_function(
+            "() => document.documentElement.dataset.theme === 'dark'", timeout=5000
+        )
         assert blocked == []
         br.close()
     finally:
@@ -345,7 +356,8 @@ def test_prd195_live_contrast_operator_adapter_disabled_edge_grid(server):
                 """() => {
                   const vars = {}
                   const s = getComputedStyle(document.documentElement)
-                  for (const n of ['bg','grid','surface','text','muted','border','edge','red','amber']) {
+                  const names = ['bg','grid','surface','text','muted','border','edge','red','amber']
+                  for (const n of names) {
                     vars[n] = s.getPropertyValue('--' + n).trim()
                   }
                   const disabled = document.querySelector('button:disabled')
@@ -357,8 +369,12 @@ def test_prd195_live_contrast_operator_adapter_disabled_edge_grid(server):
                   const ccs = canvas ? getComputedStyle(canvas) : null
                   return {
                     vars,
-                    disabled: dcs ? { color: dcs.color, bg: dcs.backgroundColor, opacity: dcs.opacity } : null,
-                    primaryDisabled: pcs ? { color: pcs.color, bg: pcs.backgroundColor, opacity: pcs.opacity } : null,
+                    disabled: dcs
+                      ? { color: dcs.color, bg: dcs.backgroundColor, opacity: dcs.opacity }
+                      : null,
+                    primaryDisabled: pcs
+                      ? { color: pcs.color, bg: pcs.backgroundColor, opacity: pcs.opacity }
+                      : null,
                     canvasBg: ccs ? ccs.backgroundColor : '',
                     canvasImage: ccs ? ccs.backgroundImage : '',
                   }
@@ -366,7 +382,9 @@ def test_prd195_live_contrast_operator_adapter_disabled_edge_grid(server):
             )
             palette = {k: parse_css_color(v) for k, v in data["vars"].items() if v}
             for key in ("bg", "grid", "surface", "muted", "edge", "red", "amber"):
-                assert palette[key] == expected[key], f"{theme} --{key}: live {palette[key]} expected {expected[key]}"
+                assert palette[key] == expected[key], f"{theme} --{key}: live {
+                    palette[key]
+                } expected {expected[key]}"
 
             for bg in ("bg", "surface"):
                 assert meets(contrast_ratio(palette["amber"], palette[bg]), TEXT_MIN)
@@ -385,7 +403,9 @@ def test_prd195_live_contrast_operator_adapter_disabled_edge_grid(server):
             p_fg = parse_css_color(data["primaryDisabled"]["color"])
             p_bg = parse_css_color(data["primaryDisabled"]["bg"])
             assert float(data["primaryDisabled"]["opacity"]) == 1.0
-            assert meets(contrast_ratio(p_fg, p_bg), TEXT_MIN), f"{theme} primary disabled {p_fg} on {p_bg}"
+            assert meets(contrast_ratio(p_fg, p_bg), TEXT_MIN), (
+                f"{theme} primary disabled {p_fg} on {p_bg}"
+            )
 
             assert "radial-gradient" in data["canvasImage"]
         assert blocked == []

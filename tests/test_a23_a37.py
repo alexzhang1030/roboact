@@ -1,16 +1,19 @@
 """exec-model v0.2 A23–A37 (PRD §8 mapping in each name). R1–R8 are real-robot N/A in v1."""
+
 from __future__ import annotations
 
 import asyncio
 import time
-import uuid
 
+import pytest
 from roboact.adapter import FakeAdapter
 from roboact.errors import ApiError
 from roboact.executor import Executor
 from roboact.nodes import bind_adapter, ingest_action, list_specs, rejected_actions
+from roboact.server import require_loopback_host
 from roboact.sse import SseHub
 from roboact.store import Store, open_store
+
 from tests.helpers import boot, cont, e, make_flow, n, recs, run_until, wait_status
 
 
@@ -46,7 +49,9 @@ def test_a23_heartbeat_cancels_goal_when_backend_dies():
         adapter.async_steps = 40
         adapter.start_watchdog()
         adapter.receive_heartbeat()
-        exec_task = asyncio.create_task(adapter.execute("fake_set_pose", {"x": 1.0, "y": 0.0, "z": 0.0}))
+        exec_task = asyncio.create_task(
+            adapter.execute("fake_set_pose", {"x": 1.0, "y": 0.0, "z": 0.0})
+        )
         await asyncio.sleep(0.05)
         assert adapter.list_active_goals()
         await asyncio.sleep(0.35)
@@ -63,7 +68,9 @@ def test_a24_controller_expiry_stops_goal():
         adapter = FakeAdapter()
         adapter.async_steps = 80
         result = await adapter.execute(
-            "fake_set_pose", {"x": 1.0, "y": 0.0, "z": 0.0}, deadline=time.time() + 0.12,
+            "fake_set_pose",
+            {"x": 1.0, "y": 0.0, "z": 0.0},
+            deadline=time.time() + 0.12,
         )
         assert result.success is False
         assert result.message == "timeout"
@@ -96,7 +103,12 @@ def test_a26_stop_calls_cancel_no_new_goal(tmp_path):
         t0 = time.time()
         while time.time() - t0 < 2:
             ctrl = ex.get(rid)
-            if adapter.calls and ctrl and ctrl.current_nid == "go" and ctrl.current_inst is not None:
+            if (
+                adapter.calls
+                and ctrl
+                and ctrl.current_nid == "go"
+                and ctrl.current_inst is not None
+            ):
                 break
             await asyncio.sleep(0.01)
         n0 = len(adapter.calls)
@@ -135,6 +147,7 @@ def test_a28_motion_timeout_requires_readback(tmp_path):
         adapter.async_steps = 80
         ex, store, adapter, hub = adapter_ctx(tmp_path, adapter)
         from roboact.nodes import get_type
+
         get_type("fake_set_pose").timeout_s = 0.15
         try:
             rid, st = await run_until(ex, store, pose_flow(), "paused", timeout=4)
@@ -241,10 +254,18 @@ def test_a31_rejected_missing_timeout_and_write_side_effect():
     assert "broken_write" in by_id
     assert "side_effect" in by_id["broken_write"]["missing"]
     assert "write" in by_id["broken_write"]["reason"]
-    cls, rej = ingest_action({"id": "implicit", "return_mode": "blocking", "timeout_s": 3,
-                              "outputs": [{"name": "ok", "type": "any"}],
-                              "cancel": {"cancellable": True, "after": "hold"},
-                              "expiry": "controller", "read_state": True}, adapter)
+    cls, rej = ingest_action(
+        {
+            "id": "implicit",
+            "return_mode": "blocking",
+            "timeout_s": 3,
+            "outputs": [{"name": "ok", "type": "any"}],
+            "cancel": {"cancellable": True, "after": "hold"},
+            "expiry": "controller",
+            "read_state": True,
+        },
+        adapter,
+    )
     assert rej is None and cls is not None
     assert cls.side_effect.value == "motion"
 
@@ -273,6 +294,7 @@ def test_a33_operator_lost_pauses_without_cancel(tmp_path):
         ex, store, adapter, hub = adapter_ctx(tmp_path, adapter)
         ex.ui_lost_s = 0.15
         from roboact.nodes import SleepNode
+
         old_sleep = SleepNode.timeout_s
         SleepNode.timeout_s = 5
         flow = make_flow(
@@ -306,6 +328,7 @@ def test_a34_adapter_lost_pauses(tmp_path):
         ex.adapter_heartbeat_s = 0.15
         ex.start_background()
         from roboact.nodes import SleepNode
+
         old_sleep = SleepNode.timeout_s
         SleepNode.timeout_s = 5
         flow = make_flow(
@@ -365,7 +388,7 @@ def test_a36_images_stay_out_of_sqlite(tmp_path):
         )
         for _ in range(10):
             rid, _ = await run_until(ex, store, flow, "completed", timeout=3)
-            rec = [r for r in recs(store, rid) if r["node_id"] == "cam"][0]
+            rec = next(r for r in recs(store, rid) if r["node_id"] == "cam")
             frame = (rec.get("output") or {}).get("frame") or {}
             assert frame.get("omitted") is True or "data" not in frame
             assert frame.get("width") and frame.get("height") and frame.get("captured_at")
@@ -377,17 +400,17 @@ def test_a36_images_stay_out_of_sqlite(tmp_path):
         # restart process view: images gone
         ex.images.clear()
         last = store.list_runs()[0]["run_id"]
-        cam = [r for r in recs(store, last) if r["node_id"] == "cam"][0]
+        cam = next(r for r in recs(store, last) if r["node_id"] == "cam")
         assert ex.image_at(last, cam["step"], "frame") is None
         await hub.stop()
 
     asyncio.run(go())
 
 
-def test_non_loopback_host_warns_only():
-    from roboact.server import warn_non_loopback_host
-
-    warn_non_loopback_host("127.0.0.1")
-    warn_non_loopback_host("localhost")
-    warn_non_loopback_host("::1")
-    warn_non_loopback_host("0.0.0.0")
+def test_non_loopback_host_exits():
+    require_loopback_host("127.0.0.1")
+    require_loopback_host("localhost")
+    require_loopback_host("::1")
+    with pytest.raises(SystemExit) as ei:
+        require_loopback_host("0.0.0.0")
+    assert ei.value.code == 2

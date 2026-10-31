@@ -6,9 +6,8 @@ import sqlite3
 from pathlib import Path
 from typing import Any
 
-from .adapter import CrashBetweenWriteAndKey
+from .adapter import ActionDescriptor, Adapter, CrashBetweenWriteAndKey
 from .util import now_iso
-
 
 SIDES = {
     "read_note": "read",
@@ -35,8 +34,12 @@ class NoteLedger:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self.conn = sqlite3.connect(str(self.path), check_same_thread=False)
         self.conn.isolation_level = None
-        self.conn.execute("CREATE TABLE IF NOT EXISTS ledger (key TEXT PRIMARY KEY, result TEXT, created_at TEXT)")
-        self.conn.execute("CREATE TABLE IF NOT EXISTS notes (id INTEGER PRIMARY KEY, line TEXT, created_at TEXT)")
+        self.conn.execute(
+            "CREATE TABLE IF NOT EXISTS ledger (key TEXT PRIMARY KEY, result TEXT, created_at TEXT)"
+        )
+        self.conn.execute(
+            "CREATE TABLE IF NOT EXISTS notes (id INTEGER PRIMARY KEY, line TEXT, created_at TEXT)"
+        )
         self.conn.execute("CREATE TABLE IF NOT EXISTS meta (k TEXT PRIMARY KEY, v TEXT)")
 
     def get(self, key: str) -> Any:
@@ -59,13 +62,21 @@ class NoteLedger:
         return int(self.conn.execute("SELECT COUNT(*) FROM ledger").fetchone()[0])
 
     def note_lines(self) -> list[str]:
-        return [r[0] for r in self.conn.execute("SELECT line FROM notes ORDER BY id").fetchall() if r[0] != ""]
+        return [
+            r[0]
+            for r in self.conn.execute("SELECT line FROM notes ORDER BY id").fetchall()
+            if r[0] != ""
+        ]
 
-    def append_atomic(self, line: str, idem_key: str | None, notes_path: Path, crash_between: bool = False) -> Any:
+    def append_atomic(
+        self, line: str, idem_key: str | None, notes_path: Path, crash_between: bool = False
+    ) -> Any:
         self.conn.execute("BEGIN IMMEDIATE")
         try:
             if idem_key:
-                hit = self.conn.execute("SELECT result FROM ledger WHERE key=?", (idem_key,)).fetchone()
+                hit = self.conn.execute(
+                    "SELECT result FROM ledger WHERE key=?", (idem_key,)
+                ).fetchone()
                 if hit:
                     self.conn.commit()
                     return json.loads(hit[0])
@@ -94,8 +105,8 @@ class NoteLedger:
         notes_path.write_text(text, encoding="utf-8")
 
 
-class Tools:
-    """Test-fixture tool host. Duck-types the Adapter surface so Executor can ping it."""
+class Tools(Adapter):
+    """Test-fixture tool host. Same Adapter surface so Executor can ping it."""
 
     adapter_id = "tools"
     name = "测试夹具"
@@ -105,6 +116,7 @@ class Tools:
     connected = True
 
     def __init__(self, data_dir: str | Path) -> None:
+        super().__init__()
         self.data_dir = Path(data_dir)
         self.data_dir.mkdir(parents=True, exist_ok=True)
         self.notes = self.data_dir / "notes.txt"
@@ -120,16 +132,15 @@ class Tools:
     async def ping(self) -> bool:
         return True
 
-    def list_actions(self) -> list:
-        return []
-
-    def list_active_goals(self) -> list:
+    def list_actions(self) -> list[ActionDescriptor]:
         return []
 
     async def read_state(self, action_id: str) -> dict[str, Any]:
         return {}
 
-    async def goal_status(self, handle_id: str | None = None, idem_key: str | None = None) -> dict[str, Any]:
+    async def goal_status(
+        self, handle_id: str | None = None, idem_key: str | None = None
+    ) -> dict[str, Any]:
         return {"found": False}
 
     def public(self) -> dict[str, Any]:
@@ -166,7 +177,9 @@ class Tools:
         if name == "append_note":
             if self.append_delay:
                 await asyncio.sleep(self.append_delay)
-            line = str(args.get("line") or args.get("text") or args.get("value") or args.get("内容") or "")
+            line = str(
+                args.get("line") or args.get("text") or args.get("value") or args.get("内容") or ""
+            )
             crash = self.crash_between_write_and_key
             self.crash_between_write_and_key = False
             result = self.ledger.append_atomic(line, idem_key, self.notes, crash_between=crash)

@@ -1,23 +1,22 @@
 """exec-model A1–A17. PRD §8 对应关系写在各测试名里。"""
+
 from __future__ import annotations
 
 import asyncio
-import time
 
 from roboact.errors import ApiError
 from roboact.executor import Executor
 from roboact.sse import SseHub
+
 from tests.helpers import (
     boot,
     chain_flow,
-    confirm_flow,
     cont,
     ctx,
     e,
     loop_flow,
     make_flow,
     n,
-    rec_nodes,
     recs,
     run_until,
     wait_status,
@@ -48,6 +47,7 @@ def test_a1_write_crash_does_not_double(tmp_path):
         assert tools.ledger.count() == 1
         await hub.stop()
         await hub2.stop()
+
     asyncio.run(go())
 
 
@@ -67,6 +67,7 @@ def test_a2_pending_survives_restart(tmp_path):
         inc = [r for r in recs(store, rid) if r["node_id"] == "inc"]
         assert [r["round"] for r in inc] == [1, 2, 3]
         await hub2.stop()
+
     asyncio.run(go())
 
 
@@ -85,6 +86,7 @@ def test_a3_restart_does_not_autoresume(tmp_path):
         assert ex2.get(rid).pause["reason"] == "restart"
         assert len(recs(store, rid)) == n0
         await hub2.stop()
+
     asyncio.run(go())
 
 
@@ -102,23 +104,28 @@ def test_a8_two_continues_one_wins(tmp_path):
             assert err.error == "pause_mismatch"
         await wait_status(ex, rid, "completed")
         await hub.stop()
+
     asyncio.run(go())
 
 
 def test_a11_step_limit_not_error(tmp_path):
     async def go():
         ex, store, _, hub = ctx(tmp_path)
-        rid, st = await run_until(ex, store, loop_flow(compare=-1, op="eq"), "step_limit", step_limit=10)
+        rid, st = await run_until(
+            ex, store, loop_flow(compare=-1, op="eq"), "step_limit", step_limit=10
+        )
         assert st.status == "step_limit"
         assert st.error is None
         assert max(r["step"] for r in recs(store, rid)) == 10
         await hub.stop()
+
     asyncio.run(go())
 
 
 def test_a15_storage_error_pauses(tmp_path):
     async def go():
         import sqlite3
+
         ex, store, _, hub = ctx(tmp_path)
         rid, st = await run_until(ex, store, chain_flow("b"), "paused")
         orig = store.add_step
@@ -137,6 +144,7 @@ def test_a15_storage_error_pauses(tmp_path):
         st = await wait_status(ex, rid, "completed")
         assert st.status == "completed"
         await hub.stop()
+
     asyncio.run(go())
 
 
@@ -153,12 +161,14 @@ def test_user_stop_is_stopped_not_interrupted(tmp_path):
             if ns.get("state") in ("running", "stopped"):
                 assert ns.get("state") == "stopped"
         await hub.stop()
+
     asyncio.run(go())
 
 
 def test_write_timeout_is_interrupted_unknown(tmp_path):
     async def go():
         from roboact.nodes import ToolNode
+
         ex, store, tools, hub = ctx(tmp_path)
         old = ToolNode.timeout_s
         ToolNode.timeout_s = 0.15
@@ -167,7 +177,7 @@ def test_write_timeout_is_interrupted_unknown(tmp_path):
             rid, st = await run_until(ex, store, write_flow("slow"), "paused", timeout=4)
             assert st.pause and st.pause["reason"] == "write_timeout"
             assert st.node_state.get("mail", {}).get("state") == "interrupted_unknown"
-            rec = [r for r in recs(store, rid) if r["node_id"] == "mail"][0]
+            rec = next(r for r in recs(store, rid) if r["node_id"] == "mail")
             assert rec["status"] == "interrupted_unknown"
             assert rec["error"]["type"] == "timeout"
             tools.delay_after_commit = 0.0
@@ -179,6 +189,7 @@ def test_write_timeout_is_interrupted_unknown(tmp_path):
         finally:
             ToolNode.timeout_s = old
         await hub.stop()
+
     asyncio.run(go())
 
 
@@ -191,6 +202,7 @@ def test_a16_timeout(tmp_path):
         rec = recs(store, rid)[0]
         assert rec["error"]["type"] == "timeout"
         await hub.stop()
+
     asyncio.run(go())
 
 
@@ -199,7 +211,11 @@ def test_a17_loop_without_exit(tmp_path):
         ex, store, _, hub = ctx(tmp_path)
         flow = make_flow(
             [n("start", "start", data={}), n("a", "echo"), n("b", "echo")],
-            [e("e0", "start", "data", "a", "value"), e("e1", "a", "value", "b", "value"), e("e2", "b", "value", "a", "value")],
+            [
+                e("e0", "start", "data", "a", "value"),
+                e("e1", "a", "value", "b", "value"),
+                e("e2", "b", "value", "a", "value"),
+            ],
         )
         try:
             await run_until(ex, store, flow, "completed")
@@ -208,6 +224,7 @@ def test_a17_loop_without_exit(tmp_path):
             assert err.error == "loop_without_exit"
             assert err.detail.get("node_ids")
         await hub.stop()
+
     asyncio.run(go())
 
 
@@ -218,10 +235,11 @@ def test_full_run_ignores_pins(tmp_path):
         fid, ver = boot(store, flow)
         store.set_pin(fid, "a", "value", value={"pinned": True})
         rid = await ex.start_full(fid, ver)
-        st = await wait_status(ex, rid, "completed")
+        await wait_status(ex, rid, "completed")
         snap = ex.snapshot(rid)
         assert any(p["node_id"] == "a" for p in snap["unused_pins"])
-        a = [r for r in recs(store, rid) if r["node_id"] == "a"][0]
+        a = next(r for r in recs(store, rid) if r["node_id"] == "a")
         assert a["input_source"] == "upstream"
         await hub.stop()
+
     asyncio.run(go())

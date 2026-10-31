@@ -13,7 +13,11 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 def chrome_path() -> str | None:
-    for p in ("/usr/local/bin/google-chrome", "/usr/bin/google-chrome", "/usr/bin/chromium-browser"):
+    for p in (
+        "/usr/local/bin/google-chrome",
+        "/usr/bin/google-chrome",
+        "/usr/bin/chromium-browser",
+    ):
         if Path(p).exists():
             return p
     return None
@@ -40,7 +44,17 @@ def server(tmp_path):
         "PYTHONPATH": str(ROOT),
     }
     proc = subprocess.Popen(
-        [sys.executable, "-m", "roboact", "--host", "127.0.0.1", "--port", str(port), "--db", str(db)],
+        [
+            sys.executable,
+            "-m",
+            "roboact",
+            "--host",
+            "127.0.0.1",
+            "--port",
+            str(port),
+            "--db",
+            str(db),
+        ],
         cwd=str(ROOT),
         env=env,
         stdout=subprocess.PIPE,
@@ -49,6 +63,7 @@ def server(tmp_path):
     base = f"http://127.0.0.1:{port}"
     t0 = time.time()
     import urllib.request
+
     while time.time() - t0 < 8:
         if proc.poll() is not None:
             out = proc.stdout.read().decode() if proc.stdout else ""

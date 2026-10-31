@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import contextlib
 import struct
 import time
 import zlib
@@ -12,8 +13,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from .util import now_iso
 
-
-ProgressFn = Callable[["Progress"], None | Awaitable[None]]
+ProgressFn = Callable[["Progress"], Awaitable[None] | None]
 
 
 class ParamSpec(BaseModel):
@@ -105,12 +105,18 @@ class CancelResult(BaseModel):
 
 
 class ExecuteHandle:
-    def __init__(self, action_id: str, idem_key: str | None, cancellable: bool, post_cancel: str) -> None:
+    def __init__(
+        self,
+        action_id: str,
+        idem_key: str | None,
+        cancellable: bool,
+        post_cancel: Literal["hold", "safe_pose", "finish_step"],
+    ) -> None:
         self.id = f"{action_id}:{idem_key or id(self)}"
         self.action_id = action_id
         self.idem_key = idem_key
         self.cancellable = cancellable
-        self.post_cancel = post_cancel
+        self.post_cancel: Literal["hold", "safe_pose", "finish_step"] = post_cancel
         self.cancelled = False
         self.cancelled_by_lost_heartbeat = False
         self.done = False
@@ -153,6 +159,7 @@ class Adapter:
     heartbeat_timeout_s: float = 3.0
 
     def __init__(self) -> None:
+        self.rejected_actions: list[dict[str, Any]] = []
         self.fetched_at: str | None = None
         self._handles: dict[str, ExecuteHandle] = {}
         self._finished: dict[str, ExecuteHandle] = {}
@@ -227,10 +234,8 @@ class Adapter:
         self._watchdog_task = None
         if task:
             task.cancel()
-            try:
+            with contextlib.suppress(asyncio.CancelledError):
                 await task
-            except asyncio.CancelledError:
-                pass
 
     async def _watchdog(self) -> None:
         try:
@@ -268,17 +273,21 @@ class Adapter:
         for h in self._handles.values():
             if h.done:
                 continue
-            out.append({
-                "id": h.id,
-                "action_id": h.action_id,
-                "idem_key": h.idem_key,
-                "return_mode": h.return_mode,
-                "cancelled": h.cancelled,
-                "done": h.done,
-            })
+            out.append(
+                {
+                    "id": h.id,
+                    "action_id": h.action_id,
+                    "idem_key": h.idem_key,
+                    "return_mode": h.return_mode,
+                    "cancelled": h.cancelled,
+                    "done": h.done,
+                }
+            )
         return out
 
-    async def goal_status(self, handle_id: str | None = None, idem_key: str | None = None) -> dict[str, Any]:
+    async def goal_status(
+        self, handle_id: str | None = None, idem_key: str | None = None
+    ) -> dict[str, Any]:
         handle = None
         if handle_id and handle_id in self._handles:
             handle = self._handles[handle_id]
@@ -368,7 +377,7 @@ class Adapter:
         on_progress: ProgressFn | None = None,
         idem_key: str | None = None,
         deadline: float | None = None,
-        on_phase: Callable[[str], None | Awaitable[None]] | None = None,
+        on_phase: Callable[[str], Awaitable[None] | None] | None = None,
         should_abort: Callable[[], str | None] | None = None,
     ) -> ActionResult:
         desc = self.descriptor(action_id)
@@ -379,7 +388,6 @@ class Adapter:
                 await out
         ok, last = await self.await_preconditions(desc, should_abort=should_abort)
         if not ok:
-            waited = self.last_precondition_wait_s or 0
             return ActionResult(
                 success=False,
                 message="precondition_failed",
@@ -391,9 +399,13 @@ class Adapter:
                 await out
         if deadline is None:
             deadline = time.time() + float(desc.timeout_s or 60)
-        handle = ExecuteHandle(action_id, idem_key, desc.cancel.cancellable, desc.cancel.post_cancel)
+        handle = ExecuteHandle(
+            action_id, idem_key, desc.cancel.cancellable, desc.cancel.post_cancel
+        )
         handle.deadline = deadline
-        handle.return_mode = "goal_progress" if desc.return_mode in ("goal_progress", "async") else desc.return_mode
+        handle.return_mode = (
+            "goal_progress" if desc.return_mode in ("goal_progress", "async") else desc.return_mode
+        )
         self._handles[handle.id] = handle
         try:
             if desc.return_mode in ("goal_progress", "async"):
@@ -410,7 +422,9 @@ class Adapter:
             if handle.done:
                 self._handles.pop(handle.id, None)
 
-    async def send_goal(self, action_id: str, inputs: dict[str, Any], handle: ExecuteHandle) -> None:
+    async def send_goal(
+        self, action_id: str, inputs: dict[str, Any], handle: ExecuteHandle
+    ) -> None:
         raise NotImplementedError
 
     async def poll_progress(self, handle: ExecuteHandle) -> Progress | None:
@@ -421,7 +435,9 @@ class Adapter:
             raise RuntimeError("结果还没有准备好")
         return handle.result
 
-    async def run_blocking(self, action_id: str, inputs: dict[str, Any], handle: ExecuteHandle) -> ActionResult:
+    async def run_blocking(
+        self, action_id: str, inputs: dict[str, Any], handle: ExecuteHandle
+    ) -> ActionResult:
         raise NotImplementedError
 
     async def cancel(self, handle: ExecuteHandle | None) -> CancelResult:
@@ -438,7 +454,9 @@ class Adapter:
     async def read_state(self, action_id: str) -> dict[str, Any]:
         raise NotImplementedError
 
-    async def _wait_async(self, handle: ExecuteHandle, on_progress: ProgressFn | None) -> ActionResult:
+    async def _wait_async(
+        self, handle: ExecuteHandle, on_progress: ProgressFn | None
+    ) -> ActionResult:
         while not handle.done:
             if handle.cancelled:
                 handle.done = True
@@ -465,7 +483,12 @@ def fake_png(width: int = 64, height: int = 48, seed: int = 0) -> bytes:
     """Tiny generated PNG, not written to disk."""
 
     def chunk(tag: bytes, data: bytes) -> bytes:
-        return struct.pack(">I", len(data)) + tag + data + struct.pack(">I", zlib.crc32(tag + data) & 0xFFFFFFFF)
+        return (
+            struct.pack(">I", len(data))
+            + tag
+            + data
+            + struct.pack(">I", zlib.crc32(tag + data) & 0xFFFFFFFF)
+        )
 
     rows = bytearray()
     for y in range(height):
@@ -480,7 +503,9 @@ def fake_png(width: int = 64, height: int = 48, seed: int = 0) -> bytes:
     )
 
 
-def image_payload(png: bytes, width: int, height: int, captured_at: str | None = None) -> dict[str, Any]:
+def image_payload(
+    png: bytes, width: int, height: int, captured_at: str | None = None
+) -> dict[str, Any]:
     return {
         "type": "image",
         "mime": "image/png",
@@ -494,7 +519,9 @@ def image_payload(png: bytes, width: int, height: int, captured_at: str | None =
 
 def image_summary(value: Any) -> Any:
     """Logs keep size/time/bytes only — never image pixels."""
-    if isinstance(value, dict) and (value.get("type") == "image" or value.get("mime", "").startswith("image/")):
+    if isinstance(value, dict) and (
+        value.get("type") == "image" or value.get("mime", "").startswith("image/")
+    ):
         return {
             "type": "image",
             "mime": value.get("mime") or "image/png",
@@ -511,7 +538,8 @@ def image_summary(value: Any) -> Any:
     return value
 
 
-# Hand-written per-action table. Missing side_effect ⇒ motion (enforced in ingest).
+# Hand-written per-action table. Missing side_effect ⇒ motion (enforced in
+# ingest).
 FAKE_ACTIONS: list[ActionDescriptor] = [
     ActionDescriptor(
         id="fake_read_pose",
@@ -542,9 +570,33 @@ FAKE_ACTIONS: list[ActionDescriptor] = [
         labels={"en": "Go to pose", "zh-CN": "假·到点"},
         params=[
             ParamSpec(name="target", type="any", required=False, title="目标"),
-            ParamSpec(name="x", type="number", unit="m", range=(-2.0, 2.0), default=0.0, required=False, title="X"),
-            ParamSpec(name="y", type="number", unit="m", range=(-2.0, 2.0), default=0.0, required=False, title="Y"),
-            ParamSpec(name="z", type="number", unit="m", range=(0.0, 2.0), default=0.0, required=False, title="Z"),
+            ParamSpec(
+                name="x",
+                type="number",
+                unit="m",
+                range=(-2.0, 2.0),
+                default=0.0,
+                required=False,
+                title="X",
+            ),
+            ParamSpec(
+                name="y",
+                type="number",
+                unit="m",
+                range=(-2.0, 2.0),
+                default=0.0,
+                required=False,
+                title="Y",
+            ),
+            ParamSpec(
+                name="z",
+                type="number",
+                unit="m",
+                range=(0.0, 2.0),
+                default=0.0,
+                required=False,
+                title="Z",
+            ),
         ],
         outputs=[OutputSpec(name="pose", type="any", title="到达位姿")],
         side_effect="motion",
@@ -574,7 +626,9 @@ FAKE_ACTIONS: list[ActionDescriptor] = [
         return_mode="blocking",
         timeout_s=8,
         typical_s=0.2,
-        cancel=CancelSpec(cancellable=True, post_cancel="safe_pose", after="safe_pose", method="cancel_goal"),
+        cancel=CancelSpec(
+            cancellable=True, post_cancel="safe_pose", after="safe_pose", method="cancel_goal"
+        ),
         preconditions=[Precondition(text="夹爪未被锁定")],
         read_state=True,
         expiry="controller",
@@ -666,7 +720,9 @@ class FakeAdapter(Adapter):
                 continue
             updates = dict(self.action_updates.get(a.id) or {})
             if self.force_uncancellable and a.id == "fake_gripper":
-                updates["cancel"] = CancelSpec(cancellable=False, post_cancel=a.cancel.post_cancel, after=a.cancel.after)
+                updates["cancel"] = CancelSpec(
+                    cancellable=False, post_cancel=a.cancel.post_cancel, after=a.cancel.after
+                )
             out.append(a.model_copy(update=updates) if updates else a)
         out.extend(self.extra_raw_actions)
         return out
@@ -692,9 +748,13 @@ class FakeAdapter(Adapter):
 
     def _note_goal_sent(self, action_id: str, inputs: dict[str, Any], idem_key: str | None) -> None:
         self.goal_sent_at = time.monotonic()
-        self.goals_sent.append({"action": action_id, "inputs": inputs, "idem_key": idem_key, "at": self.goal_sent_at})
+        self.goals_sent.append(
+            {"action": action_id, "inputs": inputs, "idem_key": idem_key, "at": self.goal_sent_at}
+        )
 
-    async def run_blocking(self, action_id: str, inputs: dict[str, Any], handle: ExecuteHandle) -> ActionResult:
+    async def run_blocking(
+        self, action_id: str, inputs: dict[str, Any], handle: ExecuteHandle
+    ) -> ActionResult:
         self._note_goal_sent(action_id, inputs, handle.idem_key)
         self.calls.append({"action": action_id, "inputs": inputs, "idem_key": handle.idem_key})
         if self.block_s:
@@ -704,20 +764,28 @@ class FakeAdapter(Adapter):
                     return ActionResult(success=False, message="cancelled")
                 await asyncio.sleep(0.02)
         if action_id == "fake_read_pose":
-            return ActionResult(success=True, outputs={"pose": dict(self.pose)}, measured={"pose": dict(self.pose)})
+            return ActionResult(
+                success=True, outputs={"pose": dict(self.pose)}, measured={"pose": dict(self.pose)}
+            )
         if action_id == "fake_tick":
             self.tick += 1
             return ActionResult(success=True, outputs={"n": self.tick}, measured={"n": self.tick})
         if action_id == "fake_camera":
             png = fake_png(64, 48, seed=self.tick)
             frame = image_payload(png, 64, 48)
-            return ActionResult(success=True, outputs={"frame": frame}, measured={"bytes": frame["bytes"]})
+            return ActionResult(
+                success=True, outputs={"frame": frame}, measured={"bytes": frame["bytes"]}
+            )
         if action_id == "fake_gripper":
             opened = _as_open(inputs)
-            return self._commit_write(handle.idem_key, {"kind": "gripper", "open": opened}, {"open": opened})
+            return self._commit_write(
+                handle.idem_key, {"kind": "gripper", "open": opened}, {"open": opened}
+            )
         raise KeyError(action_id)
 
-    async def send_goal(self, action_id: str, inputs: dict[str, Any], handle: ExecuteHandle) -> None:
+    async def send_goal(
+        self, action_id: str, inputs: dict[str, Any], handle: ExecuteHandle
+    ) -> None:
         self._note_goal_sent(action_id, inputs, handle.idem_key)
         self.calls.append({"action": action_id, "inputs": inputs, "idem_key": handle.idem_key})
         if action_id != "fake_set_pose":
@@ -735,9 +803,14 @@ class FakeAdapter(Adapter):
                         handle.result = ActionResult(success=False, message="timeout")
                         handle.done = True
                         return
-                    handle.progress = Progress(percent=round((i + 1) / self.async_steps * 100), text=f"到点 {i + 1}/{self.async_steps}")
+                    handle.progress = Progress(
+                        percent=round((i + 1) / self.async_steps * 100),
+                        text=f"到点 {i + 1}/{self.async_steps}",
+                    )
                     await asyncio.sleep(float(getattr(self, "async_sleep_s", 0.04) or 0.04))
-                handle.result = self._commit_write(handle.idem_key, {"kind": "pose", **pose}, {"pose": pose})
+                handle.result = self._commit_write(
+                    handle.idem_key, {"kind": "pose", **pose}, {"pose": pose}
+                )
                 if self.delay_after_commit:
                     await asyncio.sleep(self.delay_after_commit)
             except CrashBetweenWriteAndKey:
@@ -748,10 +821,16 @@ class FakeAdapter(Adapter):
 
         self._async_jobs[handle.id] = asyncio.create_task(job())
 
-    async def _wait_async(self, handle: ExecuteHandle, on_progress: ProgressFn | None) -> ActionResult:
+    async def _wait_async(
+        self, handle: ExecuteHandle, on_progress: ProgressFn | None
+    ) -> ActionResult:
         task = self._async_jobs.get(handle.id)
         while not handle.done:
-            if handle.deadline is not None and time.time() >= handle.deadline and not handle.cancelled:
+            if (
+                handle.deadline is not None
+                and time.time() >= handle.deadline
+                and not handle.cancelled
+            ):
                 handle.result = handle.result or ActionResult(success=False, message="timeout")
                 handle.done = True
                 break
@@ -764,7 +843,9 @@ class FakeAdapter(Adapter):
             raise CrashBetweenWriteAndKey("killed between write and idempotency key")
         return handle.result
 
-    def _commit_write(self, idem_key: str | None, record: dict[str, Any], outputs: dict[str, Any]) -> ActionResult:
+    def _commit_write(
+        self, idem_key: str | None, record: dict[str, Any], outputs: dict[str, Any]
+    ) -> ActionResult:
         if idem_key and idem_key in self.idem:
             return self.idem[idem_key]
         if self.crash_after_write_before_key:

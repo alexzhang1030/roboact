@@ -5,6 +5,7 @@ Scans exactly `git ls-files` (the set that gets pushed). Dot-directories such
 as `.agents/` are included because they are tracked. 127.0.0.1 and 0.0.0.0
 are allowed.
 """
+
 from __future__ import annotations
 
 import re

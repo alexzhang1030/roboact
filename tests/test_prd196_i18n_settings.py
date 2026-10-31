@@ -1,9 +1,10 @@
 """PRD 19.6 / 19.7 / 19.8 — locale, persist, overflow, codes-only storage, follow-browser reset."""
+
 from __future__ import annotations
 
 import pytest
-
 from roboact import ADAPTER_HEARTBEAT_S, UI_LOST_TIMEOUT_S
+
 from tests.http_api import http_json, motion_graph, put_flow
 from tests.test_prd195_theme_contrast_fonts import _browser, _goto_ready, _wired_page
 from tests.test_ui import _launch
@@ -16,7 +17,7 @@ def test_prd196_default_locale_from_navigator(server):
     try:
         br = _browser(p)
         ctx = br.new_context(viewport={"width": 1280, "height": 800}, locale="en-US")
-        page, blocked, seen, errs = _wired_page(ctx, server["base"])
+        page, blocked, _seen, _errs = _wired_page(ctx, server["base"])
         _goto_ready(page, server["base"] + "/")
         assert page.evaluate("() => localStorage.getItem('roboact.lang')") in (None, "system")
         assert page.evaluate("() => document.documentElement.dataset.lang") == "en"
@@ -64,9 +65,13 @@ def test_prd196_storage_event_syncs_second_tab(server):
         page_b.wait_for_function("window.__ready === true", timeout=20000)
         assert page_b.evaluate("() => document.documentElement.dataset.lang") == "en"
         page_a.evaluate("() => window.__af.setLocaleMode('zh-CN')")
-        page_b.wait_for_function("() => document.documentElement.dataset.lang === 'zh-CN'", timeout=5000)
+        page_b.wait_for_function(
+            "() => document.documentElement.dataset.lang === 'zh-CN'", timeout=5000
+        )
         page_a.evaluate("() => window.__af.setThemeMode('dark')")
-        page_b.wait_for_function("() => document.documentElement.dataset.theme === 'dark'", timeout=5000)
+        page_b.wait_for_function(
+            "() => document.documentElement.dataset.theme === 'dark'", timeout=5000
+        )
         br.close()
     finally:
         p.stop()
@@ -101,11 +106,21 @@ def _apply_screen(page, name: str) -> None:
         return
     if name == "waiting":
         _set_run(page, "running")
-        page.evaluate("() => { if (window.__af.selected) window.__af.selected.value = 'go'; if (window.__af.tab) window.__af.tab.value = 'rec' }")
-        _set_node(page, "go", {
-            "status": "running", "state": "running",
-            "phase": "waiting_precondition", "wait_s": 3, "wait_max_s": 8,
-        })
+        page.evaluate(
+            "() => { if (window.__af.selected) window.__af.selected.value = 'go'; if "
+            "(window.__af.tab) window.__af.tab.value = 'rec' }"
+        )
+        _set_node(
+            page,
+            "go",
+            {
+                "status": "running",
+                "state": "running",
+                "phase": "waiting_precondition",
+                "wait_s": 3,
+                "wait_max_s": 8,
+            },
+        )
         return
     if name == "unknown":
         _set_run(page, "paused", "motion_timeout")
@@ -113,7 +128,10 @@ def _apply_screen(page, name: str) -> None:
         return
     if name == "unknown-reading":
         _set_run(page, "paused", "motion_timeout")
-        page.evaluate("() => { if (window.__af.selected) window.__af.selected.value = 'go'; if (window.__af.tab) window.__af.tab.value = 'rec' }")
+        page.evaluate(
+            "() => { if (window.__af.selected) window.__af.selected.value = 'go'; if "
+            "(window.__af.tab) window.__af.tab.value = 'rec' }"
+        )
         _set_node(page, "go", {"status": "interrupted_unknown", "state": "interrupted_unknown"})
         return
     if name == "cancel-rejected":
@@ -130,7 +148,10 @@ def _apply_screen(page, name: str) -> None:
         _set_node(page, "go", {"status": "action_missing", "state": "action_missing"})
         return
     if name == "camera":
-        page.evaluate("() => { if (window.__af.selected) window.__af.selected.value = 'cam'; if (window.__af.tab) window.__af.tab.value = 'out' }")
+        page.evaluate(
+            "() => { if (window.__af.selected) window.__af.selected.value = 'cam'; if "
+            "(window.__af.tab) window.__af.tab.value = 'out' }"
+        )
         return
     raise AssertionError("unknown screen " + name)
 
@@ -203,7 +224,9 @@ def test_prd197_clear_storage_resets_prefs_not_timeouts(server):
     p, _path = _launch()
     try:
         br = _browser(p)
-        ctx = br.new_context(viewport={"width": 1280, "height": 800}, locale="en-US", color_scheme="dark")
+        ctx = br.new_context(
+            viewport={"width": 1280, "height": 800}, locale="en-US", color_scheme="dark"
+        )
         page, _, _, _ = _wired_page(ctx, server["base"])
         _goto_ready(page, server["base"] + "/")
         page.evaluate(
@@ -236,7 +259,9 @@ def test_prd197_clear_storage_zh_resets_to_browser_lang(server):
     p, _path = _launch()
     try:
         br = _browser(p)
-        ctx = br.new_context(viewport={"width": 1280, "height": 800}, locale="zh-CN", color_scheme="light")
+        ctx = br.new_context(
+            viewport={"width": 1280, "height": 800}, locale="zh-CN", color_scheme="light"
+        )
         page, _, _, _ = _wired_page(ctx, server["base"])
         _goto_ready(page, server["base"] + "/")
         page.evaluate(
@@ -266,7 +291,9 @@ def test_prd198_codes_survive_language_switch(server):
     from pathlib import Path
 
     put_flow(server["base"], motion_graph("i18n-unknown"))
-    http_json(server["base"], "/api/test/adapter", "POST", {"async_steps": 80, "async_sleep_s": 0.08})
+    http_json(
+        server["base"], "/api/test/adapter", "POST", {"async_steps": 80, "async_sleep_s": 0.08}
+    )
     p, _path = _launch()
     try:
         br = _browser(p)
@@ -286,7 +313,9 @@ def test_prd198_codes_survive_language_switch(server):
             }""",
             timeout=15000,
         )
-        assert any("运行" in w or "中断" in w for w in page.locator(".fn-st-word").all_inner_texts())
+        assert any(
+            "运行" in w or "中断" in w for w in page.locator(".fn-st-word").all_inner_texts()
+        )
         os.kill(server["proc"].pid, 9)
         server["proc"].wait(timeout=5)
         page.evaluate("() => window.__af.setLocaleMode('en')")
@@ -294,7 +323,17 @@ def test_prd198_codes_survive_language_switch(server):
         root = Path(__file__).resolve().parents[1]
         env = {**os.environ, "ROBOACT_TEST": "1", "PYTHONPATH": str(root)}
         proc = subprocess.Popen(
-            [sys.executable, "-m", "roboact", "--host", "127.0.0.1", "--port", str(server["port"]), "--db", server["db"]],
+            [
+                sys.executable,
+                "-m",
+                "roboact",
+                "--host",
+                "127.0.0.1",
+                "--port",
+                str(server["port"]),
+                "--db",
+                server["db"],
+            ],
             cwd=str(root),
             env=env,
             stdout=subprocess.PIPE,
@@ -321,7 +360,9 @@ def test_prd198_codes_survive_language_switch(server):
             """() => {
               const r = window.__af.run && window.__af.run.value
               const go = window.__af.nodeStatus && window.__af.nodeStatus.go
-              return r && r.status === 'paused' && go && (go.state === 'interrupted_unknown' || go.status === 'interrupted_unknown')
+              const interrupted = go.state === 'interrupted_unknown'
+                || go.status === 'interrupted_unknown'
+              return r && r.status === 'paused' && go && interrupted
             }""",
             timeout=15000,
         )
@@ -422,7 +463,9 @@ def test_prd197_panel_grid_persist_and_follow_theme(server):
     p, _path = _launch()
     try:
         br = _browser(p)
-        ctx = br.new_context(viewport={"width": 1280, "height": 800}, locale="en-US", color_scheme="dark")
+        ctx = br.new_context(
+            viewport={"width": 1280, "height": 800}, locale="en-US", color_scheme="dark"
+        )
         page, _, _, _ = _wired_page(ctx, server["base"])
         _goto_ready(page, server["base"] + "/")
         page.evaluate(
@@ -471,7 +514,10 @@ def test_prd197_viewport_persist_per_flow(server):
         _goto_ready(page, server["base"] + "/")
         page.evaluate(
             """(id) => {
-              localStorage.setItem('roboact.viewport.' + id, JSON.stringify({x: 120, y: -40, zoom: 1.35}))
+              localStorage.setItem(
+                'roboact.viewport.' + id,
+                JSON.stringify({x: 120, y: -40, zoom: 1.35})
+              )
             }""",
             fid,
         )
