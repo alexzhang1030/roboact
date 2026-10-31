@@ -171,7 +171,12 @@ export function statusWord(st) {
   if (status === 'interrupted_unknown' || status === 'interrupted') return t('status.' + status)
   if (status === 'running') {
     if (st.phase === 'waiting_precondition') return t('status.running_wait')
-    if (st.feedback) return t('status.running_feedback', { text: st.feedback })
+    if (st.feedback) {
+      const text = Object.prototype.hasOwnProperty.call(CATALOGS.en, st.feedback)
+        ? t(st.feedback, st.feedback_params)
+        : st.feedback
+      return t('status.running_feedback', { text })
+    }
     if (st.progress != null && st.progress !== '') return t('status.running_pct', { pct: Math.round(st.progress) })
     if (st.elapsed_s != null) return t('status.running_s', { s: Math.round(st.elapsed_s) })
     return t('status.running')

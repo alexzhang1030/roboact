@@ -5,11 +5,12 @@ from __future__ import annotations
 import ast
 import json
 import re
+import time
 from pathlib import Path
 
 from roboact.catalog import en
 
-from tests.http_api import http_json
+from tests.http_api import http_json, motion_graph, put_flow
 
 ROOT = Path(__file__).resolve().parents[1]
 EN = ROOT / "web" / "i18n" / "en.js"
@@ -167,3 +168,37 @@ def test_en_api_stored_values_have_no_han(server) -> None:
         if spec.get("type") == "human_confirm"
     )
     assert prompt == en("confirm.default")
+
+
+def test_fake_run_progress_events_have_no_han(server) -> None:
+    """Progress feedback on a fake run is a catalog key, never a zh-CN string."""
+    flow = put_flow(server["base"], motion_graph("progress-han"))
+    http_json(
+        server["base"],
+        "/api/test/adapter",
+        "POST",
+        {"async_steps": 16, "async_sleep_s": 0.06},
+    )
+    started = http_json(
+        server["base"],
+        "/api/runs",
+        "POST",
+        {"flow_id": flow["id"], "flow_version": flow["version"], "max_steps": 20},
+    )
+    rid = started["run_id"]
+    saw: set[str] = set()
+    t0 = time.monotonic()
+    last: object = None
+    while time.monotonic() - t0 < 12:
+        snap = http_json(server["base"], f"/api/runs/{rid}")
+        last = snap
+        assert HAN.search(json.dumps(snap, ensure_ascii=False)) is None
+        assert _han_paths(snap) == []
+        for st in (snap.get("nodes") or {}).values():
+            fb = (st or {}).get("feedback")
+            if fb:
+                saw.add(str(fb))
+        if snap.get("status") in ("completed", "error", "stopped", "step_limit"):
+            break
+        time.sleep(0.04)
+    assert "adapter.pose_progress" in saw, (saw, last)

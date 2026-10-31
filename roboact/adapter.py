@@ -90,6 +90,7 @@ class ActionDescriptor(BaseModel):
 class Progress(BaseModel):
     percent: float | None = None
     text: str | None = None
+    params: dict[str, Any] = Field(default_factory=dict)
     at: str = Field(default_factory=now_iso)
 
 
@@ -435,7 +436,7 @@ class Adapter:
                 await self.send_goal(action_id, inputs, handle)
                 return await self._wait_async(handle, on_progress)
             if on_progress:
-                await _emit(on_progress, Progress(text=zh("adapter.running")))
+                await _emit(on_progress, Progress(text="adapter.running"))
             result = await self.run_blocking(action_id, inputs, handle)
             handle.done = True
             handle.result = result
@@ -878,7 +879,8 @@ class FakeAdapter(Adapter):
                         return
                     handle.progress = Progress(
                         percent=round((i + 1) / self.async_steps * 100),
-                        text=zh("adapter.pose_progress").format(i=i + 1, n=self.async_steps),
+                        text="adapter.pose_progress",
+                        params={"i": i + 1, "n": self.async_steps},
                     )
                     await asyncio.sleep(float(getattr(self, "async_sleep_s", 0.04) or 0.04))
                 handle.result = self._commit_write(
