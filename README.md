@@ -57,6 +57,18 @@ CI 会重算 `vendor-manifest.json` 里每个文件的 sha256，并且要求每�
 
 `append_note` / `demo_notes.db` 不在产品路径上，只作为执行器/幂等测试夹具（A18、A20）。产品写副作用走 FakeAdapter 内存。
 
+## 验收状态
+
+只把**浏览器里对着真实后端**测过的项标成通过。只在服务端队列或 `SseHub` 上量过的，不算通过。
+
+| 项 | 状态 | 依据 |
+|---|---|---|
+| A4 / PRD 19.1 推送合并 | **pass** | `test_a4_sse_batching_500_nodes_browser`：Chromium + 真实 SSE，500 节点跑完，批次/秒 ≤ 10，画布终态与后端一致。服务端 `test_batch_rate_at_most_10_per_second` 只作对照，不单独算通过。 |
+| A5 / PRD 19.2 暂停延迟 | **pass** | `test_a5_pause_latency_frames_in_browser`：500 节点运行中点暂停，从点击起数 `requestAnimationFrame` 到顶栏「已暂停」，5 次均 ≤ 20 帧。服务端 `test_pause_event_immediate_a5` 不单独算通过。 |
+| A6 重连 + 页面断开 | **pass** | `test_a6_reconnect_and_half_open_page_lost`：TCP 代理真切断后重连，事件序号不回退、画布对齐后端；半开（停转发、不发 FIN/RST）后后端以 `operator_lost` 暂停，半开后不再派发新的 motion。服务端 `replay_after` / A33 不单独算通过。 |
+| PRD 19 画布性能 | **pass** | 浏览器 `test_prd19_canvas_performance_500_nodes`（平移/状态洪水 p95 ≤ 33 ms）加上 A4 的真实 SSE 500 节点。 |
+| PRD 19.2 停下不等窗口 | **pass** | 同 A5：`test_a5_pause_latency_frames_in_browser`。 |
+
 ## 仓库怎么摆
 
 ```

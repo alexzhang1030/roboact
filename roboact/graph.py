@@ -184,6 +184,9 @@ def cycle_exit_details(flow: dict[str, Any]) -> list[dict[str, Any]]:
 
 def influencing_nodes(flow: dict[str, Any], node_id: str) -> set[str]:
     """Nodes whose param change should stale snapshots of node_id."""
+    cached = flow.get("_influencing_map")
+    if isinstance(cached, dict) and node_id in cached:
+        return set(cached[node_id])
     cyclic = cycle_node_ids(flow)
     result: set[str] = set()
     for n in flow.get("nodes") or []:
@@ -194,6 +197,33 @@ def influencing_nodes(flow: dict[str, Any], node_id: str) -> set[str]:
             continue
         result.add(nid)
     return result
+
+
+def influencing_map(flow: dict[str, Any]) -> dict[str, set[str]]:
+    """Same as influencing_nodes for every node, in one O(n·(n+e)) pass."""
+    ids = [n["id"] for n in flow.get("nodes") or []]
+    succ: dict[str, list[str]] = {i: [] for i in ids}
+    for e in edges_of(flow):
+        succ.setdefault(e["source"], []).append(e["target"])
+    reach: dict[str, set[str]] = {}
+    for u in ids:
+        seen = {u}
+        stack = [u]
+        while stack:
+            x = stack.pop()
+            for v in succ.get(x, []):
+                if v not in seen:
+                    seen.add(v)
+                    stack.append(v)
+        reach[u] = seen
+    cyclic = cycle_node_ids(flow)
+    inf: dict[str, set[str]] = {i: set() for i in ids}
+    for u in ids:
+        for v in reach[u]:
+            if u == v and u not in cyclic:
+                continue
+            inf[v].add(u)
+    return inf
 
 
 def stale_targets(flow: dict[str, Any], changed_id: str) -> set[str]:

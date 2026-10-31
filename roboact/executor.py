@@ -12,6 +12,7 @@ from .graph import (
     cycle_exit_details,
     cycle_exit_errors,
     incoming,
+    influencing_map,
     influencing_nodes,
     node_map,
     outgoing,
@@ -93,6 +94,9 @@ class RunCtrl:
     recovery: dict[str, Any] | None = None
     adapter_lost_flag: bool = False
     confirm: str | None = None
+    done_counts: dict[str, int] = field(default_factory=dict)
+    influencing: dict[str, set[str]] | None = None
+    hash_cache: dict[str, str] = field(default_factory=dict)
 
     @property
     def paused_node(self) -> str | None:
@@ -123,6 +127,7 @@ class Executor:
         self.images: dict[str, dict[tuple[int, str], dict[str, Any]]] = {}
         self.ui_lost_s: float | None = UI_LOST_TIMEOUT_S
         self.adapter_heartbeat_s: float = ADAPTER_HEARTBEAT_S
+        self.step_delay_s: float = 0.0
         self._hb_task: asyncio.Task | None = None
         self._last_adapter_ok = time.monotonic()
 
@@ -205,6 +210,7 @@ class Executor:
             unused_pins=unused,
             confirm=confirm,
         )
+        ctrl.influencing = influencing_map(graph)
         self.runs[run_id] = ctrl
         self.store.insert_run({
             "run_id": run_id, "kind": kind, "flow_id": flow_id, "flow_version": flow_version,
@@ -693,6 +699,10 @@ class Executor:
                 ctrl.pause["readback"] = await self._read_robot(ctrl, node_id)
             self.store.update_run(ctrl.run_id, status="paused", pause=ctrl.pause)
             ctrl.resume = asyncio.Event()
+            ctrl.influencing = influencing_map(graph)
+            for s in self.store.list_steps(ctrl.run_id, limit=10000):
+                if s["status"] in ("done", "error", "stopped", "interrupted", "interrupted_unknown"):
+                    ctrl.done_counts[s["node_id"]] = ctrl.done_counts.get(s["node_id"], 0) + 1
             self.runs[ctrl.run_id] = ctrl
             ctrl.task = asyncio.create_task(self._loop(ctrl))
             ids.append(ctrl.run_id)
@@ -856,6 +866,8 @@ class Executor:
                     await self._pause(ctrl, "user", nid, "before", peeked, nxt_round)
                     continue
                 await self._dispatch(ctrl, nid, peeked, item_ids, nxt_round)
+                if self.step_delay_s:
+                    await asyncio.sleep(self.step_delay_s)
                 if ctrl.abandoned or ctrl.run_id not in self.runs:
                     break
                 if ctrl.status in TERMINAL:
@@ -912,7 +924,20 @@ class Executor:
         source = self._input_source(ctrl, nid, inputs)
         if ctrl.edits and ctrl.edits.get("used"):
             source = "manual"
-        fps = {i: config_hash(node_map(ctrl.flow)[i]) for i in influencing_nodes(ctrl.flow, nid) if i in node_map(ctrl.flow)}
+        nmap = node_map(ctrl.flow)
+        inf = (ctrl.influencing or {}).get(nid)
+        if inf is None:
+            inf = influencing_nodes(ctrl.flow, nid)
+        fps = {}
+        for i in inf:
+            node_i = nmap.get(i)
+            if not node_i:
+                continue
+            h = ctrl.hash_cache.get(i)
+            if h is None:
+                h = config_hash(node_i)
+                ctrl.hash_cache[i] = h
+            fps[i] = h
         try:
             self.store.add_step({
                 "run_id": ctrl.run_id, "step": step, "node_id": nid, "round": rnd, "status": "running",
@@ -933,7 +958,6 @@ class Executor:
         ctrl.current_nid = nid
         ctrl.current_started = time.monotonic()
         self._set_node(ctrl, nid, "running", rnd, step, word="运行中")
-        self.hub.flush_now(ctrl.run_id)
 
         outputs: dict[str, Any] = {}
         err = None
@@ -1074,6 +1098,8 @@ class Executor:
         live = t2.get("live_output") or outputs
         step, nid = t2["step"], t2["node_id"]
         self.store.update_step(ctrl.run_id, step, status=status, output=outputs, error=err, ended_at=ended, duration_ms=t2.get("duration_ms"))
+        if status in ("done", "error", "stopped", "interrupted", "interrupted_unknown"):
+            ctrl.done_counts[nid] = ctrl.done_counts.get(nid, 0) + 1
         if status == "done" and ctrl.kind != "node":
             for port, val in (live or {}).items():
                 if val is None or str(port).startswith("_"):
@@ -1127,6 +1153,7 @@ class Executor:
         for rec in running:
             self.store.update_step(ctrl.run_id, rec["step"], status="stopped", ended_at=now_iso())
             self._set_node(ctrl, rec["node_id"], "stopped", rec["round"], rec["step"])
+            ctrl.done_counts[rec["node_id"]] = ctrl.done_counts.get(rec["node_id"], 0) + 1
         self._finish(ctrl, "stopped")
 
     # ----- ready / inputs -----
@@ -1175,19 +1202,24 @@ class Executor:
         return inputs, ids
 
     def _exec_count(self, ctrl: RunCtrl, nid: str) -> int:
-        recs = [s for s in self.store.list_steps(ctrl.run_id, node_id=nid, limit=10000) if s["status"] in ("done", "error", "stopped", "interrupted", "interrupted_unknown")]
         retry_key = ctrl.retry_keys.get(nid)
         if retry_key:
-            recs = [s for s in recs if s.get("idem_key") != retry_key or s["status"] not in ("interrupted_unknown", "error")]
-        return len(recs)
+            recs = [
+                s for s in self.store.list_steps(ctrl.run_id, node_id=nid, limit=10000)
+                if s["status"] in ("done", "error", "stopped", "interrupted", "interrupted_unknown")
+            ]
+            recs = [
+                s for s in recs
+                if s.get("idem_key") != retry_key or s["status"] not in ("interrupted_unknown", "error")
+            ]
+            return len(recs)
+        return ctrl.done_counts.get(nid, 0)
 
     def _ui_lost(self, ctrl: RunCtrl) -> bool:
+        # Liveness is only last_ui_at (SSE subscribe + page ui-beat).
+        # A half-open TCP socket still accepts SSE writes and keeps
+        # n_subscribers > 0; that must not count as a live page.
         if self.ui_lost_s is None:
-            return False
-        n = self.ui_subscribers(ctrl.run_id)
-        if n > 0:
-            ctrl.saw_ui = True
-            ctrl.last_ui_at = time.monotonic()
             return False
         if not ctrl.saw_ui:
             return False

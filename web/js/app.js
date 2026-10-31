@@ -86,6 +86,8 @@ const App = defineComponent({
     let es = null
     let saveTimer = null
     let ignoreSave = false
+    let beatTimer = null
+    const UI_BEAT_MS = 2000
 
     document.documentElement.dataset.theme = theme.value
 
@@ -474,9 +476,24 @@ const App = defineComponent({
       for (const e of edges.value) e.animated = (ev.edges_active || []).includes(e.id)
     }
 
+    function stopBeat() {
+      if (beatTimer) { clearInterval(beatTimer); beatTimer = null }
+    }
+
+    function startBeat(runId) {
+      stopBeat()
+      if (!runId) return
+      const beat = () => {
+        send('/api/runs/' + runId + '/ui-beat', 'POST', { client_id: CLIENT_ID }).catch(() => {})
+      }
+      beat()
+      beatTimer = setInterval(beat, UI_BEAT_MS)
+    }
+
     function listen(runId) {
       if (es) { es.close(); es = null }
       conn.value = 'ok'
+      startBeat(runId)
       es = openEvents(runId, null, {
         snapshot: (ev) => {
           conn.value = 'ok'
@@ -511,6 +528,7 @@ const App = defineComponent({
         },
       })
       es.onerror = () => { conn.value = 'retry' }
+      es.onopen = () => { conn.value = 'ok' }
     }
 
     async function refreshRecords(runId) {
@@ -858,7 +876,7 @@ const App = defineComponent({
       }
       vf.onNodesInitialized(() => { window.__ready = true })
     })
-    onUnmounted(() => { window.removeEventListener('keydown', onKeyDown); if (es) es.close(); stopAdapterPoll() })
+    onUnmounted(() => { window.removeEventListener('keydown', onKeyDown); if (es) es.close(); stopBeat(); stopAdapterPoll() })
 
     window.__af = { nodes, edges, run, adapter, doRun, cmd, toggleBp, vf, nodeStatus, decide, pausePending, slot1Label, slot1Disabled, slot2Disabled, banners, mismatch, pauseRun, runWord, runWordKind, needToken, adapterLost, uiLost, operatorLost, rejectedActions, resolveMotion }
 

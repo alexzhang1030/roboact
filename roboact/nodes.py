@@ -641,14 +641,22 @@ def rejected_actions(adapter: Any = None) -> list[dict[str, Any]]:
     return list(getattr(src, "rejected_actions", None) or REJECTED_ACTIONS)
 
 
+_SRC_HASH: dict[str, str] = {}
+
+
 def config_hash(node: dict[str, Any]) -> str:
     cls = get_type(node["type"])
-    try:
-        src = inspect.getsource(cls)
-    except (OSError, TypeError):
-        desc = getattr(cls, "action_desc", None)
-        src = dump(desc.model_dump() if desc is not None else {"type_id": cls.type_id, "title": cls.title})
-    payload = dump({"type": cls.type_id, "src": sha256_text(src), "params": node.get("params") or {}})
+    key = cls.type_id
+    src_h = _SRC_HASH.get(key)
+    if src_h is None:
+        try:
+            src = inspect.getsource(cls)
+        except (OSError, TypeError):
+            desc = getattr(cls, "action_desc", None)
+            src = dump(desc.model_dump() if desc is not None else {"type_id": cls.type_id, "title": cls.title})
+        src_h = sha256_text(src)
+        _SRC_HASH[key] = src_h
+    payload = dump({"type": cls.type_id, "src": src_h, "params": node.get("params") or {}})
     return sha256_text(payload)
 
 

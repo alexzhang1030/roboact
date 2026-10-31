@@ -306,6 +306,10 @@ class App:
             action = parts[4] if len(parts) > 4 else ""
             data = data or {}
             client = data.get("client_id") or ""
+            if action == "ui-beat":
+                self.ex.note_ui(run_id)
+                await self._json(writer, 200, {"ok": True})
+                return
             if action == "pause":
                 out = await self.ex.pause(run_id, client)
                 await self._json(writer, 202, out)
@@ -357,6 +361,25 @@ class App:
         if self.test_mode and route == "/api/test/crash-before-t2" and method == "POST":
             self.ex.hooks["crash_before_t2"] = True
             await self._json(writer, 200, {"ok": True})
+            return
+        if self.test_mode and route == "/api/test/step-delay" and method == "POST":
+            self.ex.step_delay_s = float((data or {}).get("seconds") or 0)
+            await self._json(writer, 200, {"ok": True, "seconds": self.ex.step_delay_s})
+            return
+        if self.test_mode and route == "/api/test/adapter" and method == "POST":
+            data = data or {}
+            if "async_steps" in data:
+                self.adapter.async_steps = int(data["async_steps"])
+            if "async_sleep_s" in data:
+                self.adapter.async_sleep_s = float(data["async_sleep_s"])
+            if "block_s" in data:
+                self.adapter.block_s = float(data["block_s"])
+            await self._json(writer, 200, {
+                "ok": True,
+                "async_steps": self.adapter.async_steps,
+                "async_sleep_s": getattr(self.adapter, "async_sleep_s", 0.04),
+                "block_s": self.adapter.block_s,
+            })
             return
         if method == "GET":
             await self._static(writer, route)

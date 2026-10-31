@@ -525,6 +525,7 @@ class FakeAdapter(Adapter):
         self.crash_after_write_before_key = False
         self.delay_after_commit = 0.0
         self.async_steps = 4
+        self.async_sleep_s = 0.04
         self.block_s = 0.0
         self.calls: list[dict[str, Any]] = []
         self._async_jobs: dict[str, asyncio.Task] = {}
@@ -588,7 +589,7 @@ class FakeAdapter(Adapter):
                         handle.done = True
                         return
                     handle.progress = Progress(percent=round((i + 1) / self.async_steps * 100), text=f"到点 {i + 1}/{self.async_steps}")
-                    await asyncio.sleep(0.04)
+                    await asyncio.sleep(float(getattr(self, "async_sleep_s", 0.04) or 0.04))
                 handle.result = self._commit_write(handle.idem_key, {"kind": "pose", **pose}, {"pose": pose})
                 if self.delay_after_commit:
                     await asyncio.sleep(self.delay_after_commit)
