@@ -1210,3 +1210,108 @@ def test_c13_gone_node_description_clamp(server, tmp_path):
         ctx.close()
         browser.close()
         pw.stop()
+
+
+GONE_ONE_LINE = "Gone."
+
+DEMO_NODE_CLIENT_H = {
+    "start": 60,
+    "fake_set_pose": 132,
+    "fake_gripper": 84,
+    "fake_camera": 60,
+    "output": 60,
+}
+
+
+def _set_en_catalog(page, key: str, text: str) -> None:
+    page.evaluate(
+        """async ({key, text}) => {
+          const m = await import('/js/i18n.js')
+          m.CATALOGS.en[key] = text
+          const cur = m.locale.value
+          m.locale.value = cur === 'en' ? 'zh-CN' : 'en'
+          await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)))
+          m.locale.value = 'en'
+        }""",
+        {"key": key, "text": text},
+    )
+    page.wait_for_function(
+        """({key, text}) => {
+          const el = document.querySelector(
+            '.fn[data-status="missing"] [data-testid="node-summary"]'
+          )
+          return !!(el && el.getAttribute('title') === text)
+        }""",
+        arg={"key": key, "text": text},
+        timeout=5000,
+    )
+
+
+def _gone_card_metrics(page) -> dict:
+    return page.evaluate(
+        """() => {
+          const card = document.querySelector('.fn[data-status="missing"]')
+          const sum = card.querySelector('[data-testid="node-summary"]')
+          const body = getComputedStyle(sum)
+          return {
+            cardH: card.clientHeight,
+            gap: card.clientHeight - (sum.offsetTop + sum.offsetHeight),
+            padL: parseFloat(body.paddingLeft),
+            padB: parseFloat(getComputedStyle(card).paddingBottom),
+            title: sum.getAttribute('title'),
+            portRows: card.querySelectorAll('.fn-port').length,
+            clamp: body.webkitLineClamp || body.lineClamp,
+          }
+        }"""
+    )
+
+
+def test_c14_gone_node_card_follows_content(server, tmp_path):
+    """Gone card hugs the description; a 1-line Gone node is shorter than a 2-line one."""
+    base = server["base"]
+    pw, browser, ctx, page = _open_ui(base)
+    try:
+        page.set_viewport_size({"width": 1280, "height": 800})
+        demo = page.evaluate(
+            """() => {
+              const out = {}
+              for (const el of document.querySelectorAll('.fn')) {
+                out[el.getAttribute('data-node-type')] = el.clientHeight
+              }
+              return out
+            }"""
+        )
+        print(f"C14 demo heights: {demo}", flush=True)
+        for typ, want in DEMO_NODE_CLIENT_H.items():
+            assert typ in demo, demo
+            assert abs(demo[typ] - want) <= 1, (typ, demo[typ], want)
+
+        src = tmp_path / "gone.json"
+        src.write_text(dump_json(_gone_missing_doc()), encoding="utf-8")
+        _ui_import(page, src)
+        page.wait_for_function(
+            """() => {
+              const c = window.__af && window.__af.runCheck && window.__af.runCheck.value
+              return !!(c && (c.action_gone || []).includes('ghost'))
+            }""",
+            timeout=15000,
+        )
+        _set_en_catalog(page, "error.action_missing", GONE_ONE_LINE)
+        one = _gone_card_metrics(page)
+        print(f"C14 gone one-line: {one}", flush=True)
+        assert one["title"] == GONE_ONE_LINE, one
+        assert one["portRows"] == 0, one
+        assert abs(one["gap"] - one["padL"]) <= 1, one
+
+        _set_en_catalog(page, "error.action_missing", GONE_LONG_DESC)
+        two = _gone_card_metrics(page)
+        print(f"C14 gone two-line: {two}", flush=True)
+        assert two["title"] == GONE_LONG_DESC, two
+        assert two["portRows"] == 0, two
+        assert two["clamp"] == "2", two
+        assert abs(two["gap"] - two["padL"]) <= 1, two
+        assert one["cardH"] < two["cardH"], (one, two)
+    finally:
+        ctx.close()
+        browser.close()
+        pw.stop()
