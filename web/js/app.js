@@ -673,6 +673,13 @@ const App = defineComponent({
           run.value = normalizeRun(ev)
           applyNodeStates(ev.nodes)
           applyPauseReason(ev.pause)
+          if (window.__afPauseTimes && ev.status === 'paused' && ev.paused_at_ms) {
+            window.__afPauseTimes.push({
+              at: performance.now(),
+              server_mono: ev.paused_at_mono,
+              paused_at_ms: ev.paused_at_ms,
+            })
+          }
         },
         nodes: (ev) => {
           conn.value = 'ok'

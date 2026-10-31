@@ -128,18 +128,31 @@ _A5_MEASURE = """(kind) => {
     if (kind === 'run') window.__af.doRun('all')
     if (kind === 'user') document.querySelector('.slot-1').click()
     if (kind === 'step') document.querySelector('.slot-2').click()
-    const poll = () => {
+    const t0Of = () => {
       const evs = window.__afPauseTimes
-      if (evs && evs.length && evs[0].paused_at_ms) {
+      if (evs && evs.length && evs[0].paused_at_ms) return evs[0].paused_at_ms
+      const run = window.__af.run.value
+      if (run && run.status === 'paused' && run.paused_at_ms) return run.paused_at_ms
+      return 0
+    }
+    const poll = () => {
+      const t0 = t0Of()
+      if (t0) {
+        const run = window.__af.run.value
         resolve({
-          ms: Date.now() - evs[0].paused_at_ms,
-          reason: (window.__af.run.value && window.__af.run.value.pause
-            && window.__af.run.value.pause.reason) || '',
+          ms: Date.now() - t0,
+          reason: (run && run.pause && run.pause.reason) || '',
         })
         return
       }
       if (Date.now() - started > 20000) {
-        resolve({ ms: null, timed_out: true, reason: '' })
+        const run = window.__af.run.value
+        resolve({
+          ms: null,
+          timed_out: true,
+          reason: (run && run.pause && run.pause.reason) || '',
+          status: run && run.status,
+        })
         return
       }
       requestAnimationFrame(poll)
@@ -156,7 +169,7 @@ def test_a5_pause_latency_frames_in_browser(server):
     http_json(server["base"], "/api/test/step-delay", "POST", {"seconds": 0.04})
     http_json(
         server["base"],
-        f"/api/flows/{fid}/breakpoints/n0/before",
+        f"/api/flows/{fid}/breakpoints/n2/before",
         "PUT",
         {"enabled": True, "mode": "every"},
     )
@@ -184,7 +197,7 @@ def test_a5_pause_latency_frames_in_browser(server):
             by_kind["step"].append(float(rec_s["ms"]))
             _stop_run(page)
 
-        http_json(server["base"], f"/api/flows/{fid}/breakpoints/n0/before", "DELETE")
+        http_json(server["base"], f"/api/flows/{fid}/breakpoints/n2/before", "DELETE")
         page.reload(wait_until="domcontentloaded")
         page.wait_for_function("window.__ready === true", timeout=120000)
         for _ in range(20):
