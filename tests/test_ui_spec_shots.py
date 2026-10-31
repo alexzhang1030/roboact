@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from tests.conftest import chrome_path
+from tests.conftest import launch_chromium
 from tests.http_api import http_json, put_flow
 from tests.test_ui import _launch, _page
 
@@ -128,7 +128,7 @@ def test_ui_spec_screenshots_one_pass(server):
     ART.mkdir(parents=True, exist_ok=True)
     p, path = _launch()
     try:
-        br = p.chromium.launch(executable_path=chrome_path() or path, args=["--no-sandbox"])
+        br = launch_chromium(p, path)
         page = _open(br, server["base"])
         page.wait_for_timeout(200)
 

@@ -1,9 +1,16 @@
 #!/usr/bin/env bash
-# Local and CI gate: ruff, format, pyright, pytest, private-IP, gitleaks.
+# Local gate (same order as CI): uv sync --locked, ruff, format, pyright,
+# pytest, private-IP over git ls-files, gitleaks.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 export ROBOACT_TEST="${ROBOACT_TEST:-1}"
+
+if ! command -v uv >/dev/null 2>&1; then
+  echo "uv is required for uv sync --locked" >&2
+  exit 1
+fi
+uv sync --locked
 
 if [[ -x "$ROOT/.venv/bin/ruff" ]]; then
   RUN=("$ROOT/.venv/bin/ruff")

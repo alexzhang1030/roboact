@@ -6,6 +6,7 @@ import subprocess
 import sys
 import time
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -21,6 +22,22 @@ def chrome_path() -> str | None:
         if Path(p).exists():
             return p
     return None
+
+
+def launch_chromium(playwright_obj: Any, path: str | None = None) -> Any:
+    """Launch Chromium, or skip when no browser is installed.
+
+    The aarch64 CI job is `uv sync --frozen` + pytest (wheel check). It does
+    not install Playwright's browser. Missing Chromium is not a wheel miss.
+    """
+    exe = path or chrome_path()
+    kwargs: dict[str, Any] = {"args": ["--no-sandbox"]}
+    if exe:
+        kwargs["executable_path"] = exe
+    try:
+        return playwright_obj.chromium.launch(**kwargs)
+    except Exception as e:
+        pytest.skip("playwright/chromium not available: " + str(e))
 
 
 def free_port() -> int:

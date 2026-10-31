@@ -6,7 +6,7 @@ import urllib.parse
 
 import pytest
 
-from tests.conftest import chrome_path
+from tests.conftest import chrome_path, launch_chromium
 
 pw = pytest.importorskip("playwright.sync_api")
 
@@ -45,7 +45,7 @@ def _page(browser, base):
 def test_offline_no_external_requests(server):
     p, path = _launch()
     try:
-        br = p.chromium.launch(executable_path=path, args=["--no-sandbox"])
+        br = launch_chromium(p, path)
         page, blocked, errs = _page(br, server["base"])
         page.goto(server["base"] + "/", wait_until="domcontentloaded")
         page.wait_for_function("window.__ready === true", timeout=20000)
@@ -61,7 +61,7 @@ def test_offline_no_external_requests(server):
 def test_breakpoint_flow_ui(server):
     p, path = _launch()
     try:
-        br = p.chromium.launch(executable_path=path, args=["--no-sandbox"])
+        br = launch_chromium(p, path)
         page, blocked, _errs = _page(br, server["base"])
         page.goto(server["base"] + "/", wait_until="domcontentloaded")
         page.wait_for_function("window.__ready === true", timeout=20000)
@@ -84,7 +84,7 @@ def test_breakpoint_flow_ui(server):
 def test_grayscale_states_distinct(server):
     p, path = _launch()
     try:
-        br = p.chromium.launch(executable_path=path, args=["--no-sandbox"])
+        br = launch_chromium(p, path)
         page, blocked, _errs = _page(br, server["base"])
         page.goto(server["base"] + "/?gallery=1", wait_until="domcontentloaded")
         page.wait_for_function("window.__ready === true", timeout=20000)
@@ -200,7 +200,7 @@ def _png_gray(png: bytes):
 def test_prd19_canvas_performance_500_nodes(server):
     p, path = _launch()
     try:
-        br = p.chromium.launch(executable_path=path, args=["--no-sandbox"])
+        br = launch_chromium(p, path)
         page, blocked, _errs = _page(br, server["base"])
         page.goto(server["base"] + "/?n=500", wait_until="domcontentloaded")
         page.wait_for_function("window.__result", timeout=90000)
@@ -219,7 +219,7 @@ def test_prd19_canvas_performance_500_nodes(server):
 def test_zoom_and_select_do_not_remeasure(server):
     p, path = _launch()
     try:
-        br = p.chromium.launch(executable_path=path, args=["--no-sandbox"])
+        br = launch_chromium(p, path)
         page, blocked, _errs = _page(br, server["base"])
         page.goto(server["base"] + "/?n=80&idle=1", wait_until="domcontentloaded")
         page.wait_for_function("window.__ready === true", timeout=30000)

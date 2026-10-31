@@ -13,7 +13,7 @@ try:
 except ImportError:
     Image = None
 
-from tests.conftest import chrome_path
+from tests.conftest import launch_chromium
 from tests.test_contrast_ui_spec import (
     DARK_CSS,
     LIGHT_CSS,
@@ -70,8 +70,7 @@ def _grids_distinct(a: tuple[int, ...], b: tuple[int, ...], min_l1: int = 16) ->
 
 
 def _browser(p):
-    path = chrome_path()
-    return p.chromium.launch(executable_path=path, args=["--no-sandbox"])
+    return launch_chromium(p)
 
 
 def _wired_page(context, base: str):

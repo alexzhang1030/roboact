@@ -11,7 +11,7 @@ Offline, zero-build robot flow canvas. Wire the atomic actions an adapter expose
 
 Licence is [MIT](LICENSE) (`Copyright (c) 2026 alexzhang1030`). This repo is not published to PyPI and has no publish config.
 
-Specs in this tree: [PRD v1.4.10](docs/prd.md), [exec-model v0.2.3](docs/exec-model.md) (token §0.2 / A39 ignored — auth deferred), [system-design](docs/system-design.md), [UI spec](docs/ui-spec.md) (**§17 fonts/themes, §18 language**), [Rams design sheets](docs/design/), [diagrams](docs/diagrams/). History: `docs/prd-v1.md`, `docs/exec-model-v0.md`, `docs/ui-spec-v0.md`, `docs/system-design-v0.md`. Decision records are PCR in [`.agents/docs/`](.agents/docs/).
+Specs in this tree: [PRD v1.4.11](docs/prd.md), [exec-model v0.2.3](docs/exec-model.md) (token §0.2 / A39 ignored — auth deferred), [system-design](docs/system-design.md), [UI spec](docs/ui-spec.md) (**§17 fonts/themes, §18 language**), [Rams design sheets](docs/design/), [diagrams](docs/diagrams/). History: `docs/prd-v1.md`, `docs/exec-model-v0.md`, `docs/ui-spec-v0.md`, `docs/system-design-v0.md`. Decision records are PCR in [`.agents/docs/`](.agents/docs/).
 
 ## Install and run
 
@@ -80,7 +80,7 @@ uv run python -m playwright install chromium   # if this machine has no Chrome
 scripts/check.sh
 ```
 
-`scripts/check.sh` is the gate: `ruff check`, `ruff format --check`, `pyright`, `pytest`, private-IP scan over exactly `git ls-files`, then gitleaks. CI runs the same order on x86_64 (`uv sync --locked`) and a second `ubuntu-24.04-arm` job (`uv sync --frozen` + pytest).
+`scripts/check.sh` is the gate: `uv sync --locked`, `ruff check`, `ruff format --check`, `pyright`, `pytest`, private-IP scan over exactly `git ls-files`, then gitleaks. CI runs the same order on x86_64 (`uv sync --locked`) and a second `ubuntu-24.04-arm` job (`uv sync --frozen` + pytest).
 
 CI also recomputes the sha256 of every file in `vendor-manifest.json` and requires an SPDX `license` plus the text under `vendor/licenses/`. `127.0.0.1` and `0.0.0.0` are allowed in the private-IP scan; other RFC1918 addresses are not. Enable the hook with `git config core.hooksPath .githooks` (it runs `scripts/pre-push.sh`).
 
@@ -101,6 +101,7 @@ Only items exercised **in a browser against the real backend** are marked pass. 
 | PRD 19.5 light and dark | **pass** | `test_prd195_prefers_dark_then_persists_light`: system dark first-loads dark; pick light and reload stays light. `test_prd195_follow_system_tracks_prefers`. `test_prd195_grayscale_six_states_both_themes`. `test_prd195_offline_fonts_both_themes`: offline load of `/static/fonts/` Inter / JetBrains Mono, no remote font request. Contrast: `test_contrast_ui_spec` (uses `docs/design/contrast.py`). |
 | Locale + settings | **pass** | `test_i18n` (catalog keys match; no hard-coded CJK in `web/` outside catalogs). `test_prd196_*` (navigator language including French → English, persist, English overflow). `test_prd197_*` (clear storage, bad `localStorage`, reduced motion, panel/grid, last flow and canvas). `test_prd198_codes_survive_language_switch`. |
 | A40 / Host Origin | **pass** | `test_a40_host_origin_content_type` (`Host: evil.example` → 403, `Content-Type: text/plain` → 415, foreign Origin WS → 403/400; no run starts). |
+| PRD 19.10 toolchain | **pass** | Python 3.12 (`.python-version`, `requires-python = ">=3.12"`; source: Jetson Thor + ROS 2 Jazzy / Ubuntu 24.04, [REP 2000](https://www.ros.org/reps/rep-2000.html)). No `rclpy` in `pyproject.toml`. `scripts/check.sh` and CI `check` + `test-aarch64`. |
 | A39 authentication | **deferred (Alex 2026-10-31)** | No tokens. See [.agents/docs/auth-and-network.md](.agents/docs/auth-and-network.md). |
 
 ## Before a real robot (R1–R8, N/A in v1)
@@ -130,7 +131,7 @@ web/                    Static frontend, served by the backend
 web/i18n/               en.js and zh-CN.js catalogs (ES modules, no build)
 web/vendor/             Vue / Vue Flow / icons (unmodified upstream files)
 assets/logo.svg         Brand mark (favicon is the same drawing)
-docs/prd.md             PRD v1.4.10 (current product doc in this tree; token rows ignored)
+docs/prd.md             PRD v1.4.11 (current product doc in this tree; token rows ignored)
 docs/system-design.md
 docs/ui-spec.md         §17 fonts and themes, §18 language
 docs/design/            Rams light + `-dark` sheets
@@ -138,7 +139,7 @@ docs/design/contrast.py WCAG helpers used by contrast tests
 docs/diagrams/          Deploy / sequence / state sources + PNG
 pyproject.toml          uv + ruff + pyright
 .python-version         3.12
-scripts/check.sh        ruff, format, pyright, pytest, private-IP, gitleaks
+scripts/check.sh        uv sync --locked, ruff, format, pyright, pytest, private-IP, gitleaks
 .githooks/pre-push      Private-IP scan + gitleaks
 vendor/wheels/          Runtime Python wheels
 vendor/licenses/        Third-party licence texts

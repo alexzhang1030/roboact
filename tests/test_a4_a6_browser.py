@@ -6,7 +6,7 @@ import time
 
 import pytest
 
-from tests.conftest import chrome_path
+from tests.conftest import launch_chromium
 from tests.http_api import SSE_WRAP, echo_chain_graph, http_json, motion_graph, put_flow
 from tests.tcp_proxy import TcpProxy
 from tests.test_ui import _launch, _page
@@ -15,8 +15,7 @@ pw = pytest.importorskip("playwright.sync_api")
 
 
 def _browser(p):
-    path = chrome_path()
-    return p.chromium.launch(executable_path=path, args=["--no-sandbox"])
+    return launch_chromium(p)
 
 
 def _open(br, base, wrap_sse=False):

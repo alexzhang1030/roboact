@@ -1,6 +1,6 @@
 # Execution model
 
-**Current conclusion.** Product docs in this tree: [exec-model v0.2.3](../../docs/exec-model.md), [PRD v1.4.10](../../docs/prd.md). Later Alex notes (loopback only, no `--host`, no auth, codes-only, fonts, toolchain) override those docs where they conflict.
+**Current conclusion.** Product docs in this tree: [exec-model v0.2.3](../../docs/exec-model.md), [PRD v1.4.11](../../docs/prd.md). Later Alex notes (loopback only, no `--host`, no auth, codes-only, fonts, toolchain) override those docs where they conflict.
 
 There is no wait node. Optional `precondition_wait_s` on an action lets the adapter re-read `read_state` and send the goal only when the condition holds; otherwise the step is `precondition_failed` and no goal is sent. People waiting uses Human confirm.
 

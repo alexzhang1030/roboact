@@ -13,7 +13,7 @@ These bind every session. They stay **outside** the PCR markers.
 - ui-spec **§17** is authoritative for fonts and themes. Latin UI and digits: Inter. Code, parameter values, times, step counts: JetBrains Mono with tabular digits. CJK is system-only. Themes swap CSS variables; status meanings do not change. Reduced motion (`prefers-reduced-motion` / `roboact.motion=reduce`) is colour and icon only — no animation.
 - First-load language is `detectBrowserLang` in `web/js/prefs.js` (one function). First `navigator.languages` entry starting with `zh` → `zh-CN`, else English. Flip `FOLLOW_BROWSER_LANG` to `false` for always-English; keep the same constant in `web/index.html`. Do not scatter a second rule. Every `localStorage` / `sessionStorage` key uses the `roboact.` prefix.
 - Decision records live in `.agents/docs/` (PCR). Do not add `docs/decisions/`. Never commit chat logs, robot or controller addresses, non-public vendor docs, or tokens. The private-IP scan is `scripts/check_private_ip.py` over exactly `git ls-files`.
-- Python 3.12. Toolchain is uv + ruff + pyright. No rclpy dependency. The check command is `scripts/check.sh` (ruff check, ruff format --check, pyright, pytest, private-IP scan, gitleaks).
+- Python 3.12. Toolchain is uv + ruff + pyright. No rclpy dependency. The check command is `scripts/check.sh` (`uv sync --locked`, ruff check, ruff format --check, pyright, pytest, private-IP scan, gitleaks).
 - No `[VOUCHED …]` stamps unless Alex explicitly asks for one.
 
 <!-- PCR:START -->
