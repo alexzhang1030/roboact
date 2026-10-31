@@ -23,11 +23,11 @@ Match the controller’s system Python. Keep FakeAdapter-only v1 free of ROS imp
 
 ## Rejected
 
-- Adding rclpy (or an extras group that pulls it) from PyPI.
+- Adding rclpy (or an extras group that pulls it) from PyPI. Official PRD v1.4.11 19.10 first wrote an adapter optional extra; Alex 2026-10-31: not declared anywhere — ROS apt + `--system-site-packages` only.
 - A project-wide pyright switch for missing ROS imports.
 - Node / bundler tooling for the canvas.
 - `uv run poe check` or another task-runner wrapper. The entry is `scripts/check.sh`.
 
 ## Who / date / spec
 
-Alex, 2026-10-31. [PRD 19.10](../../docs/prd.md), [README](../../README.md).
+Alex, 2026-10-31. Official [PRD v1.4.11 §5 / 19.8 / 19.10](../../docs/prd.md) (31g). rclpy override as above. [README](../../README.md).
