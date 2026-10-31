@@ -1,0 +1,111 @@
+@font-face {
+  font-family: "Inter";
+  src: url("/static/fonts/InterVariable.woff2") format("woff2");
+  font-weight: 100 900;
+  font-display: block;
+}
+@font-face {
+  font-family: "JetBrains Mono";
+  src: url("/static/fonts/JetBrainsMono-Regular.woff2") format("woff2");
+  font-weight: 400;
+  font-display: block;
+}
+@font-face {
+  font-family: "JetBrains Mono";
+  src: url("/static/fonts/JetBrainsMono-Medium.woff2") format("woff2");
+  font-weight: 500 700;
+  font-display: block;
+}
+
+html, body {
+  margin: 0;
+  background: #8A8A84;
+  font-family: "Inter", "PingFang SC", "Microsoft YaHei", "Noto Sans CJK SC", "Noto Sans SC", sans-serif;
+}
+
+.sheet-intro {
+  max-width: 1440px;
+  margin: 24px auto;
+  padding: 16px 20px;
+  background: #F6F6F4;
+  border: 1px solid #C9C9C3;
+  border-radius: 6px;
+  color: #1A1A18;
+}
+.sheet-intro h1 { margin: 0 0 8px; font-size: 16px; }
+.sheet-intro p { margin: 0; color: #5C5C57; font-size: 13px; }
+
+.shot {
+  margin: 24px auto;
+  background: var(--bg);
+  color: var(--text);
+  position: relative;
+  overflow: hidden;
+  border: 1px solid #5C5C57;
+}
+.shot.w1440 { width: 1440px; height: 900px; }
+.shot.w1680 { width: 1680px; height: 900px; }
+.shot.gray { filter: grayscale(1); }
+
+.shot .top { position: absolute; left: 0; right: 0; top: 0; }
+.shot .left { position: absolute; left: 0; top: 44px; bottom: 0; width: 220px; }
+.shot .right { position: absolute; right: 0; top: 44px; bottom: 0; width: 360px; }
+.shot .canvas-slot {
+  position: absolute; top: 44px; bottom: 0; left: 0; right: 360px;
+  overflow: hidden;
+  background-color: var(--bg);
+  background-image: radial-gradient(var(--grid) 1px, transparent 1.2px);
+  background-size: 20px 20px;
+}
+.shot.has-left .canvas-slot { left: 220px; }
+.shot.has-banner .canvas-slot { top: 80px; }
+.shot .banners { position: absolute; left: 0; right: 360px; top: 44px; z-index: 3; }
+.shot.has-left .banners { left: 220px; }
+
+.shot .vue-flow { width: 100%; height: 100%; background: transparent; }
+.shot .vue-flow__minimap { display: none; }
+.shot .vue-flow__controls { display: none; }
+.shot .vue-flow__attribution { display: none; }
+
+.shot-cap {
+  position: absolute; left: 40px; top: 16px; font-size: 13px; font-weight: 600; color: var(--text); z-index: 2;
+}
+.shot-sub {
+  position: absolute; font-size: 12px; color: var(--muted); white-space: nowrap; z-index: 2;
+}
+
+.zoom-chip {
+  position: absolute; left: 12px; bottom: 12px;
+  display: flex; align-items: center;
+  background: var(--surface); border: 1px solid var(--border); border-radius: 4px;
+  font-size: 12px; font-family: var(--mono); color: var(--muted); z-index: 4;
+}
+.zoom-chip span { height: 28px; min-width: 28px; display: flex; align-items: center; justify-content: center; padding: 0 6px; }
+.zoom-chip span + span { border-left: 1px solid var(--hair); }
+
+.panel-head { padding: 12px 16px 0; }
+.panel-head .t { display: flex; align-items: center; gap: 8px; font-size: 16px; font-weight: 600; }
+.panel-head .meta { font-size: 12px; color: var(--muted); margin-top: 2px; display: flex; gap: 6px; align-items: center; }
+.panel-head .meta.amber { color: var(--amber); }
+.panel-head .meta.red { color: var(--red); }
+.panel-head .meta.blue { color: var(--blue); }
+.rounds {
+  display: flex; align-items: center; justify-content: space-between;
+  margin: 12px 0 0; height: 32px; border: 1px solid var(--hair); border-radius: 4px; padding: 0 4px; font-size: 12px;
+}
+.code {
+  font: 12px/1.6 "JetBrains Mono", ui-monospace, monospace;
+  background: var(--surface2); border: 1px solid var(--hair); border-radius: 4px;
+  padding: 8px 10px; white-space: pre-wrap; color: var(--text);
+}
+.code.err { border-color: var(--red); background: var(--redsoft); color: var(--red); }
+.lbl { font-size: 12px; color: var(--muted); }
+.pf { padding: 12px 16px; border-top: 1px solid var(--hair); display: flex; gap: 8px; align-items: center; }
+.pf .hint { font-size: 12px; color: var(--muted); margin-left: auto; }
+.pb { padding: 12px 16px; display: flex; flex-direction: column; gap: 12px; flex: 1; overflow: hidden; }
+.sel-in {
+  height: 32px; border: 1px solid var(--border); border-radius: 4px;
+  display: flex; align-items: center; padding: 0 10px; font-size: 12px;
+}
+
+.world-abs { position: relative; width: 100%; height: 100%; }

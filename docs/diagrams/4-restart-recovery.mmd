@@ -1,0 +1,33 @@
+flowchart TB
+  CR["服务崩溃<br/>心跳停 → adapter 守护进程取消还在执行的目标<br/>守护进程也没了 → 控制器到期时间兜底"] --> R["服务重启，先连 adapter"]
+  R --> S1["扫 runs：status 是 running 或 paused 的运行"]
+  S1 --> S2["读 pending 未消费的行 → 重建待执行队列<br/>读 steps → 各节点轮次、steps_used"]
+  S2 --> S3{"有 status=running 的记录吗<br/>（T1 提交了、T2 没提交）"}
+  S3 -->|"没有"| P
+  S3 -->|"有，none 或 read"| I1["记 interrupted<br/>pending 恢复成未消费<br/>继续时自动重跑"]
+  S3 -->|"有，motion（动作）"| M1["记 interrupted_unknown<br/>pending 恢复成未消费，不自动重发"]
+  S3 -->|"有，write（仅测试）"| I2["记 interrupted_unknown<br/>pending.retry_idem_key = 原 idem_key"]
+  M1 --> M2["adapter.active_goals()：按 goal_id 问控制器<br/>还在执行 / 已成功 / 已取消 / 已中止 / 查不到<br/>写进 pause.goal_check"]
+  M2 --> M3["adapter 读一次机器人状态<br/>（夹爪是否夹着东西单独一行）<br/>写进 pause.readback"]
+  I1 --> P
+  M3 --> P
+  I2 --> P
+  P["runs.status = paused，reason = restart<br/>停在下一个要派发的节点执行前"]
+  P --> Q["界面：运行记录都在<br/>顶栏「已暂停 · 服务重启后」<br/>动作节点「中断 · 结果未知」<br/>右侧面板：发出的目标、最后反馈、控制器那边的状态、现读的状态"]
+  Q --> W{"用户操作"}
+  W -->|"停止"| STP["runs.status = stopped"]
+  W -->|"动作节点：重新读取 → readback_id<br/>确认看过机器人"| RS{"resolution"}
+  RS -->|"retry"| RT["重做：新步号，retry_of = 原步号"]
+  RS -->|"mark_done"| MD["当作已做完：手填输出"]
+  W -->|"write 节点：继续（pause_id）"| WT["重新派发，idem_key 沿用 run_id:原步号<br/>append_note 查台账：有就返回上次结果，没有才写"]
+  W -->|"没带 readback_id 就继续"| E409["409 readback_required，运行不动"]
+  RT --> T2["T2 提交，给下游写 pending，往下跑"]
+  MD --> T2
+  WT --> T2
+
+  classDef warn fill:#FFF4D6,stroke:#9A6700,color:#1A1A18
+  classDef ok fill:#FFFFFF,stroke:#8A8A84,color:#1A1A18
+  classDef bad fill:#FDECEC,stroke:#B42318,color:#1A1A18
+  class M1,M2,M3,I2,P,Q warn
+  class CR,R,S1,S2,I1,RT,MD,WT,STP,T2 ok
+  class E409 bad

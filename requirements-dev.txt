@@ -1,0 +1,6 @@
+# Dev / CI only. Not needed to run the app. Prefer: uv sync --frozen
+ruff==0.17.3
+pyright==1.1.414
+pytest==8.4.2
+playwright==1.55.0
+pillow==11.3.0

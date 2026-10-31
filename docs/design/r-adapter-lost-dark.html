@@ -1,0 +1,133 @@
+<!doctype html><html data-theme="dark"><head><meta charset="utf-8"><style>
+:root{--bg:#F6F6F4;--grid:#E2E2DD;--surface:#FFFFFF;--surface2:#FAFAF8;--text:#1A1A18;--muted:#5C5C57;--border:#C9C9C3;--edge:#8A8A84;
+--blue:#1F6FEB;--green:#1A7F37;--red:#C62828;--amber:#8F6000;--hair:#E6E6E1;--shadow:0 1px 2px rgb(0 0 0 / .06);--chip:#F0F0EC;--redsoft:#FBEAEA;--ambersoft:#FBF3E0;--control:#85857F}
+[data-theme=dark]{--bg:#141413;--grid:#2A2A27;--surface:#1E1E1C;--surface2:#232321;--text:#ECECE8;--muted:#A3A39C;--border:#3D3D39;--edge:#77776F;
+--blue:#4C8DF6;--green:#3FB950;--red:#F06A6A;--amber:#D4A72C;--hair:#2E2E2B;--shadow:none;--chip:#2A2A27;--redsoft:#3A2222;--ambersoft:#3A3020;--control:#73736C}
+*{box-sizing:border-box;margin:0}
+body{font:13px/1.5 system-ui,-apple-system,"PingFang SC","Microsoft YaHei","Noto Sans CJK SC",sans-serif;color:var(--text);background:var(--bg);width:1440px;height:900px;overflow:hidden;-webkit-font-smoothing:antialiased}
+.mono{font-family:"JetBrains Mono",ui-monospace,monospace;font-variant-numeric:tabular-nums}
+.top{position:absolute;left:0;top:0;right:0;height:44px;background:var(--surface);border-bottom:1px solid var(--hair);display:flex;align-items:center;padding:0 12px;gap:12px}
+.top .name{font-weight:600;font-size:14px}.top .ver{color:var(--muted);font-size:12px}
+.ctl{position:absolute;left:50%;transform:translateX(-50%);display:flex;gap:8px;align-items:center}
+.btn{height:28px;padding:0 12px;border-radius:4px;border:1px solid var(--control);background:var(--surface);color:var(--text);font:inherit;display:inline-flex;align-items:center;gap:6px;white-space:nowrap}
+.btn.w{min-width:72px;justify-content:center}
+.btn.primary{background:var(--blue);border-color:var(--blue);color:#fff}
+[data-theme=dark] .btn.primary{color:#0B1220}
+.btn.off{color:var(--muted);background:var(--surface2);border-color:var(--hair)}
+.btn.big{height:32px}
+.kbd{font-size:11px;color:var(--muted)}.btn.primary .kbd{color:inherit;opacity:1}
+.runstate{font-size:12px;margin-left:8px;display:flex;align-items:center;gap:4px}
+.right-top{margin-left:auto;display:flex;align-items:center;gap:16px;font-size:12px;color:var(--muted)}
+.conn{display:flex;align-items:center;gap:6px}.conn i{width:6px;height:6px;border-radius:50%;background:var(--green);display:inline-block}
+.left{position:absolute;left:0;top:44px;bottom:0;width:220px;background:var(--surface);border-right:1px solid var(--hair);padding:12px}
+.left h4{font-size:12px;color:var(--muted);font-weight:500;margin:12px 4px 4px}
+.left .search{height:28px;border:1px solid var(--control);border-radius:4px;display:flex;align-items:center;padding:0 8px;color:var(--muted);font-size:12px}
+.left .item{height:32px;display:flex;align-items:center;gap:8px;padding:0 8px;border-radius:4px;color:var(--text)}
+.left .item .ic{color:var(--muted)}
+.left .item .w{margin-left:auto;color:var(--muted)}
+.canvas{position:absolute;top:44px;bottom:0;overflow:hidden;background-color:var(--bg);background-image:radial-gradient(var(--grid) 1px,transparent 1.2px);background-size:20px 20px}
+.world{position:absolute;left:0;top:0;transform-origin:0 0}
+.node{position:absolute;width:240px;background:var(--surface);border:1px solid var(--border);border-radius:6px;box-shadow:var(--shadow)}
+.node .hd{height:32px;display:flex;align-items:center;gap:6px;padding:0 12px;border-bottom:1px solid var(--hair)}
+.node .hd .t{font-size:14px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.node .hd .ty{color:var(--muted);display:flex}
+.node .hd .st{margin-left:auto;display:flex;align-items:center;gap:4px;font-size:12px;color:var(--muted);white-space:nowrap}
+.node .sum{height:24px;padding:0 12px;font-size:12px;display:flex;align-items:center;gap:6px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:var(--red);background:var(--redsoft)}
+.node .sum.amber{color:var(--amber);background:var(--ambersoft)}
+.node .rows{padding:4px 0}
+.node .row{height:24px;position:relative;display:flex;align-items:center;font-size:12px;color:var(--muted)}
+.node .row .l{position:absolute;left:12px;white-space:nowrap}.node .row .r{position:absolute;right:12px;white-space:nowrap}
+.port{position:absolute;width:8px;height:8px;border-radius:50%;background:var(--edge);top:8px}
+.port.in{left:-4.5px}.port.out{right:-4.5px}
+.port.hollow{background:var(--surface);border:1.5px solid var(--edge)}
+.port.stale{background:var(--surface);border:1.5px solid var(--edge)}
+.port.stale::after{content:"";position:absolute;left:-2px;top:2px;width:9px;height:1.5px;background:var(--edge);transform:rotate(-45deg)}
+.port.pin{width:10px;height:10px;top:7px;background:var(--text)}.port.pin.in{left:-5.5px}
+.port.pin.unused{background:var(--muted)}
+.port.manual{border-radius:1px;background:var(--text)}
+.src{color:var(--muted)}
+.wmark{color:var(--text);display:flex}
+.s-run{border-color:var(--blue)}.s-run .st{color:var(--blue)!important}
+.s-pause{border-color:var(--amber);box-shadow:inset 0 0 0 1px var(--amber),var(--shadow)}.s-pause .st{color:var(--amber)!important}
+.s-err{border-color:var(--red);box-shadow:inset 0 0 0 1px var(--red),var(--shadow)}.s-err .st{color:var(--red)!important}
+.s-done .st .ic{color:var(--green)}
+.s-skip{border-style:dashed}
+.s-unknown{border-color:var(--amber);box-shadow:inset 0 0 0 1px var(--amber),var(--shadow)}.s-unknown .st{color:var(--amber)!important}
+.sel{outline:2px solid var(--blue);outline-offset:2px}
+.bp{position:absolute;width:10px;height:10px;border-radius:50%;background:var(--red);top:11px}
+.bp.before{left:-19px}.bp.after{right:-19px}
+.bp.cond::after{content:"";position:absolute;left:2px;right:2px;top:4.25px;height:1.5px;background:#fff}
+.bp.ghost{background:transparent;border:1.5px dashed var(--red);opacity:.6}
+svg.edges{position:absolute;left:0;top:0;overflow:visible}
+.e{fill:none;stroke:var(--edge);stroke-width:1.5}
+.e.active{stroke:var(--blue);stroke-dasharray:6 4}
+.e.back{stroke-dasharray:5 4}
+.e.esel{stroke:var(--blue);stroke-width:2}
+.e.dim{opacity:1;stroke:var(--border)}
+.elabel{position:absolute;transform:translate(-50%,-50%);background:var(--surface);border:1px solid var(--border);border-radius:4px;font-size:12px;padding:0 6px;height:22px;white-space:nowrap;display:flex;align-items:center;color:var(--muted)}
+.tip{position:absolute;z-index:5;background:var(--surface);border:1px solid var(--border);border-radius:6px;box-shadow:0 2px 8px rgb(0 0 0 / .08);padding:8px 10px;font-size:12px;width:250px}
+.tip .h{color:var(--muted);margin-bottom:4px}.tip pre{font:11.5px/1.5 "JetBrains Mono",monospace;white-space:pre-wrap;color:var(--text)}
+.tip a{color:var(--blue);display:block;margin-top:6px}
+.group{position:absolute;border:1px dashed var(--edge);border-radius:8px}
+.group .gh{position:absolute;left:0;right:0;top:0;height:36px;display:flex;align-items:center;padding:0 8px 0 12px;font-size:12px;color:var(--muted)}
+.group .gh .btn{margin-left:auto;height:26px}
+.gport{position:absolute;left:-6px;display:flex;align-items:center}
+.right{position:absolute;right:0;top:44px;bottom:0;width:360px;background:var(--surface);border-left:1px solid var(--hair);display:flex;flex-direction:column}
+.ph{padding:12px 16px 0}.ph .t{display:flex;align-items:center;gap:8px;font-size:16px;font-weight:600}
+.ph .t .ty{color:var(--muted);display:flex}
+.ph .meta{font-size:12px;color:var(--muted);margin-top:2px;display:flex;gap:6px;align-items:center}
+.rounds{display:flex;align-items:center;justify-content:space-between;margin:12px 0 0;height:32px;border:1px solid var(--hair);border-radius:4px;padding:0 4px;font-size:12px}
+.rounds b{font-weight:500}.rounds .a{width:24px;height:24px;display:flex;align-items:center;justify-content:center;color:var(--muted)}
+.tabs{display:flex;gap:20px;padding:0 16px;border-bottom:1px solid var(--hair);margin-top:12px}
+.tabs span{height:36px;display:flex;align-items:center;color:var(--muted);font-size:13px}
+.tabs span.on{color:var(--text);box-shadow:inset 0 -2px 0 var(--text)}
+.pb{padding:12px 16px;display:flex;flex-direction:column;gap:12px;overflow:hidden;flex:1}
+.lbl{font-size:12px;color:var(--muted);display:flex;align-items:center;gap:6px}
+.lbl .x{margin-left:auto}
+.code{font:12px/1.6 "JetBrains Mono",monospace;background:var(--surface2);border:1px solid var(--hair);border-radius:4px;padding:8px 10px;white-space:pre-wrap;color:var(--text)}
+.code.edit{border-color:var(--blue);box-shadow:0 0 0 1px var(--blue)}
+.code .k{color:var(--muted)}
+.sel-in{height:32px;border:1px solid var(--control);border-radius:4px;display:flex;align-items:center;padding:0 10px;font-size:12px;gap:6px}
+.sel-in .c{margin-left:auto;color:var(--muted)}
+.kv{display:grid;grid-template-columns:72px 1fr;row-gap:4px;font-size:12px}.kv div:nth-child(odd){color:var(--muted)}
+.pf{padding:12px 16px;border-top:1px solid var(--hair);display:flex;gap:8px;align-items:center}
+.pf .hint{font-size:12px;color:var(--muted);margin-left:auto}
+.banner{position:absolute;left:220px;right:360px;height:36px;background:var(--surface);border-bottom:1px solid var(--hair);display:flex;align-items:center;padding:0 12px 0 15px;font-size:13px;gap:8px;z-index:3}
+.banner.bl-amber{box-shadow:inset 3px 0 0 var(--amber)}.banner.bl-red{box-shadow:inset 3px 0 0 var(--red)}
+.banner .btn{margin-left:auto;height:26px}
+.minimap-btn{position:absolute;right:12px;bottom:12px;display:flex;gap:4px}
+.zoom{position:absolute;left:12px;bottom:12px;display:flex;align-items:center;gap:0;background:var(--surface);border:1px solid var(--border);border-radius:4px;font-size:12px}
+.zoom span{height:28px;min-width:28px;display:flex;align-items:center;justify-content:center;padding:0 6px;color:var(--muted)}
+.zoom span+span{border-left:1px solid var(--hair)}
+.cap{position:absolute;font-size:12px;color:var(--muted);white-space:nowrap}
+.lod .row,.lod .st span,.lod .sum{visibility:hidden}
+</style></head><body><style>
+@font-face{font-family:"Inter";src:url(../fonts/InterVariable.woff2) format("woff2");font-weight:100 900;font-display:block}
+@font-face{font-family:"JetBrains Mono";src:url(../fonts/JetBrainsMono-Regular.woff2) format("woff2");font-weight:400;font-display:block}
+@font-face{font-family:"JetBrains Mono";src:url(../fonts/JetBrainsMono-Medium.woff2) format("woff2");font-weight:500 700;font-display:block}
+body{font-family:"Inter","PingFang SC","Microsoft YaHei","Noto Sans CJK SC","Noto Sans SC",sans-serif;font-feature-settings:"cv05" 1}
+.theme{width:28px;height:28px;display:inline-flex;align-items:center;justify-content:center;border-radius:4px;color:var(--muted)}
+.s-missing{border:1px dashed var(--red);box-shadow:none}.s-missing .st{color:var(--red)!important}
+.top .crumb{color:var(--muted);font-size:13px}.top .logo{width:20px;height:20px;display:block}
+.tgt{font-size:12px;color:var(--muted)}.tgt.real{color:var(--red);border:1px solid var(--red);border-radius:3px;padding:0 5px;height:20px;display:inline-flex;align-items:center;font-weight:600}
+.conn i.red{background:var(--red)}.conn i.amber{background:var(--amber)}
+.field{display:flex;flex-direction:column;gap:4px}.inp{height:32px;border:1px solid var(--control);border-radius:4px;display:flex;align-items:center;padding:0 10px;font-size:12px;gap:6px}
+.inp .u{margin-left:auto;color:var(--muted)}.inp.from{background:var(--surface2);color:var(--muted)}.sub{font-size:12px;color:var(--muted)}
+.warn{font-size:12px;color:var(--amber)}
+.img{width:328px;height:246px;border:1px solid var(--hair);border-radius:4px;background:linear-gradient(135deg,var(--surface2),var(--chip));display:flex;align-items:center;justify-content:center;color:var(--muted);font-size:12px}
+.example{position:absolute;right:372px;top:56px;font-size:11px;color:var(--muted);background:var(--surface);border:1px solid var(--hair);border-radius:4px;padding:2px 6px;z-index:6}
+.token{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;background:var(--bg)}
+.token .box{width:320px;display:flex;flex-direction:column;gap:8px}
+</style><div class="top"><svg class="logo" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <rect width="512" height="512" rx="112" fill="#2B2272"/>
+  <path d="M180 156 H292 A48 48 0 0 1 292 252 H228 L328 352" fill="none" stroke="#FFFFFF" stroke-width="36" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="328" cy="352" r="26" fill="#FF6B5E"/>
+</svg>
+<span class="name">roboact</span><span class="crumb">/ 取杯子</span><span class="ver mono">v3</span>
+<div class="ctl"><span class="btn off w">继续</span><span class="btn off w">单步</span><span class="btn w" title="停在原地，电机不断电。急停请用硬件按钮。"><svg class="ic " viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="4.5" y="4.5" width="7" height="7" rx="1"/></svg>停止</span><span class="runstate"><span style="color:var(--red);display:flex;align-items:center;gap:4px"><svg class="ic " viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M6 4.5v7M10 4.5v7"/></svg>已暂停 · 机器人控制器断开</span></span></div>
+<div class="right-top"><span class="mono">步数 14 / 上限 1000</span><span class="conn"><i class="red"></i><span class="mono">quadruped-ctl</span><span class="tgt real">真机</span><span>断开 · 重连中</span></span><span class="theme" title="外观：跟随系统 / 浅色 / 深色"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="8" cy="8" r="5.5"/><path d="M8 2.5v11a5.5 5.5 0 0 0 0-11z" fill="currentColor"/></svg></span></div></div><div class="canvas" style="left:0px;right:360px"><div class="world" style="transform:translate(16px,80px) scale(0.72)"><svg class="edges" width="2000" height="1400"><path class="e " d="M260,198 C310,198 240,198 290,198"/><path class="e " d="M530,198 C580,198 510,198 560,198"/><path class="e " d="M800,198 C850,198 780,198 830,198"/><path class="e " d="M1070,222 C1120,222 1050,198 1100,198"/><path class="e " d="M1340,198 H1354 Q1364,198 1364,208 V300 Q1364,310 1354,310 H546 Q536,310 536,320 V408 Q536,418 546,418 H560"/><path class="e " d="M800,418 C850,418 780,418 830,418"/><path class="e back" d="M1340,222 H1380 Q1390,222 1390,232 V550 Q1390,560 1380,560 H270 Q260,560 260,550 V208 Q260,198 270,198 H290"/></svg><div class="node s-done" style="left:20px;top:150px"><div class="hd"><span class="ty"><svg class="ic " viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 3.5v9l7-4.5z"/></svg></span><span class="t">开始</span><span class="st"><svg class="ic " viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="m3.5 8.5 3 3 6-7"/></svg><span>完成</span></span></div><div class="rows"><div class="row"><span class="r">目标物体</span><i class="port out"></i></div></div></div><div class="node s-done" style="left:290px;top:150px"><div class="hd"><span class="ty"><svg class="ic " viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 13h4"/><path d="M5 13 6.5 6.5 12 4"/><circle cx="6.5" cy="6.5" r="1.25"/><path d="M12 4v3"/></svg></span><span class="wmark"><svg class="ic " viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 11 11 5"/><path d="M6 5h5v5"/></svg></span><span class="t">走到</span><span class="st"><svg class="ic " viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="m3.5 8.5 3 3 6-7"/></svg><span>完成 · 8.2 s</span></span></div><div class="rows"><div class="row"><i class="port in "></i><span class="l">目标点</span><span class="r">到达位置</span><i class="port out"></i></div></div></div><div class="node s-done" style="left:560px;top:150px"><div class="hd"><span class="ty"><svg class="ic " viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 5.5h2.5l1-1.5h4l1 1.5h2.5v7h-11z"/><circle cx="8" cy="8.75" r="2"/></svg></span><span class="t">拍照</span><span class="st"><svg class="ic " viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="m3.5 8.5 3 3 6-7"/></svg><span>完成 · 0.3 s</span></span></div><div class="rows"><div class="row"><i class="port in "></i><span class="l">相机</span><span class="r">图像 · 640×480</span><i class="port out"></i></div></div></div><div class="node s-done" style="left:830px;top:150px"><div class="hd"><span class="ty"><svg class="ic " viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M10.5 2.5a3 3 0 0 0-2.8 4.1L3 11.3a1.2 1.2 0 0 0 1.7 1.7l4.7-4.7a3 3 0 0 0 4.1-2.8l-1.8 1.8-1.7-.4-.4-1.7z"/></svg></span><span class="t">找东西</span><span class="st"><svg class="ic " viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="m3.5 8.5 3 3 6-7"/></svg><span>完成 · 0.9 s</span></span></div><div class="rows"><div class="row"><i class="port in "></i><span class="l">图像</span><span class="r">位置</span><i class="port out"></i></div><div class="row"><span class="r">找到</span><i class="port out"></i></div></div></div><div class="node s-done" style="left:1100px;top:150px"><div class="hd"><span class="ty"><svg class="ic " viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M8 2.5 13.5 8 8 13.5 2.5 8z"/></svg></span><span class="t">条件判断</span><span class="st"><svg class="ic " viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="m3.5 8.5 3 3 6-7"/></svg><span>完成</span></span></div><div class="rows"><div class="row"><i class="port in "></i><span class="l">找到</span><span class="r">是</span><i class="port out"></i></div><div class="row"><span class="r">否</span><i class="port out"></i></div></div></div><div class="node s-pause sel" style="left:560px;top:370px"><div class="hd"><span class="ty"><svg class="ic " viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 13h4"/><path d="M5 13 6.5 6.5 12 4"/><circle cx="6.5" cy="6.5" r="1.25"/><path d="M12 4v3"/></svg></span><span class="wmark"><svg class="ic " viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 11 11 5"/><path d="M6 5h5v5"/></svg></span><span class="t">抓取</span><span class="st"><svg class="ic " viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M6 4.5v7M10 4.5v7"/></svg><span>已暂停 · 执行前</span></span></div><div class="rows"><div class="row"><i class="port in "></i><span class="l">物体位置</span><span class="r">夹住了</span><i class="port out"></i></div></div></div><div class="node" style="left:830px;top:370px"><div class="hd"><span class="ty"><svg class="ic " viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 8h7"/><path d="M7.5 5 10.5 8 7.5 11"/><path d="M13 3v10"/></svg></span><span class="t">输出</span><span class="st"><svg class="ic " viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="8" r="4.5"/></svg><span>空闲</span></span></div><div class="rows"><div class="row"><i class="port in "></i><span class="l">结果</span></div></div></div><div class="elabel mono" style="left:825.0px;top:560px">第 2 轮</div></div>
+<div class="zoom mono"><span>−</span><span>72%</span><span>+</span><span style="font-family:system-ui">适合</span></div>
+<div class="minimap-btn"><span class="btn" style="height:28px">小地图 <span class="kbd mono">M</span></span></div></div><div class="right"><div class="ph"><div class="t"><span class="ty"><svg class="ic " viewBox="0 0 16 16" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 13h4"/><path d="M5 13 6.5 6.5 12 4"/><circle cx="6.5" cy="6.5" r="1.25"/><path d="M12 4v3"/></svg></span><span style="display:flex" title="会让机器人动"><svg class="ic " viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 11 11 5"/><path d="M6 5h5v5"/></svg></span>抓取</div>
+<div class="meta"><span style="color:var(--amber);display:flex;gap:4px;align-items:center"><svg class="ic " viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M6 4.5v7M10 4.5v7"/></svg>已暂停 · 执行前</span><span class="mono">· 步 14</span></div>
+<div class="rounds"><span class="a">‹</span><span><b>第 2 轮</b> <span style="color:var(--muted)">/ 共 2 轮</span></span><span class="a">›</span></div></div>
+<div class="tabs"><span class="">输入</span><span class="">输出</span><span class="">参数</span><span class="on">记录</span></div><div class="pb"><div class="sub">控制器回来之前「继续」是灰的。回来后先读机器人状态，再决定这一步怎么处理。</div></div><div class="pf"></div></div><div class="example">动作名、参数、数值是示例，等假 adapter 的动作表</div></body></html>

@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>设计对照页 · Roboact</title>
+<link rel="stylesheet" href="../web/vendor/vue-flow-core.css">
+<link rel="stylesheet" href="../web/vendor/vue-flow-theme-default.css">
+<link rel="stylesheet" href="../web/css/app.css">
+<link rel="stylesheet" href="design-sheet.css">
+<script>globalThis.process ??= { env: { NODE_ENV: "production" } }</script>
+<script type="importmap">
+{ "imports": {
+  "vue": "../web/vendor/vue.esm-browser.prod.js",
+  "@vue-flow/core": "../web/vendor/vue-flow-core.mjs",
+  "@vue-flow/minimap": "../web/vendor/vue-flow-minimap.mjs"
+} }
+</script>
+</head>
+<body>
+<div id="sheet"></div>
+<script type="module" src="design-sheet.js"></script>
+</body>
+</html>

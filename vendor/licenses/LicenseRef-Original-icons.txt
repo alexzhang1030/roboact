@@ -1,0 +1,9 @@
+LicenseRef-Original
+
+These 16×16 currentColor SVG icons in web/vendor/icons/ are original
+drawings made for Actflow. They are not taken from a third-party icon
+library.
+
+A project-wide license has not been chosen yet. This notice only
+identifies the origin of the files; it is not a grant of rights beyond
+this repository snapshot.

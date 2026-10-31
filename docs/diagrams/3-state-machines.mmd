@@ -1,0 +1,60 @@
+stateDiagram-v2
+  direction LR
+  state "节点状态（nodes 事件的 state）" as NODE {
+    state "idle 空闲" as idle
+    state "queued 排队" as queued
+    state "paused_before 已暂停 · 执行前" as paused_before
+    state "running 运行中（动作节点可带 · 取消被拒）" as running
+    state "awaiting_approval 等待确认" as awaiting_approval
+    state "paused_after 已暂停 · 执行后" as paused_after
+    state "done 完成" as done
+    state "error 出错" as error
+    state "skipped 跳过" as skipped
+    state "stopped 已停止" as stopped
+    state "interrupted 中断" as interrupted
+    state "interrupted_unknown 中断 · 结果未知" as interrupted_unknown
+
+    [*] --> idle
+    idle --> queued: 必填端口都有待执行数据
+    queued --> running: 调度器派发，T1 提交
+    queued --> paused_before: 执行前断点命中 / 各种暂停
+    paused_before --> running: continue 或 step
+    running --> done: T2 提交
+    running --> paused_after: T2 提交，执行后断点命中
+    paused_after --> done: continue 或 step
+    running --> awaiting_approval: 人工确认节点
+    awaiting_approval --> done: approve
+    running --> error: ① 出错
+    running --> stopped: ② 停止成功
+    running --> running: ③ 取消被拒
+    running --> interrupted_unknown: ④ 结果未知
+    running --> interrupted: 崩溃
+    interrupted --> running: continue 重跑
+    interrupted_unknown --> queued: ⑤ retry，重新排队
+    interrupted_unknown --> done: ⑥ mark_done
+    done --> queued: 环里下一轮数据到齐，round 加一
+    idle --> skipped: 选了另一路，且只能从没选那一路到达
+  }
+
+  state "运行状态（runs.status）" as RUN {
+    state "running 运行中" as r_running
+    state "paused 已暂停（reason）" as r_paused
+    state "completed 完成" as r_completed
+    state "error 出错" as r_error
+    state "step_limit 超出步数上限" as r_limit
+    state "stopped 已停止" as r_stopped
+
+    [*] --> r_running: POST /api/runs 返回 201
+    r_running --> r_paused: ⑦ 暂停
+    r_paused --> r_running: ⑧ 放行
+    r_paused --> r_paused: 重启 → restart
+    r_running --> r_completed: 没有就绪节点
+    r_running --> r_error: 节点 error
+    r_running --> r_limit: steps_used + 1 大于 max_steps
+    r_running --> r_stopped: stop
+    r_paused --> r_stopped: stop
+    r_completed --> [*]
+    r_error --> [*]
+    r_limit --> [*]
+    r_stopped --> [*]
+  }

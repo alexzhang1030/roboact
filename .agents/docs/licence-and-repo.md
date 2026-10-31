@@ -1,0 +1,29 @@
+# Licence and repo
+
+**Current conclusion.** Roboact's own licence is **MIT**. `LICENSE` is the standard MIT text, `Copyright (c) 2026 alexzhang1030`. Third-party licence texts stay under `vendor/licenses/` and are recorded per file in `vendor-manifest.json`.
+
+Alex 2026-10-31 在 RoboAct 房间回复：mit是对的
+
+The public GitHub repository is `alexzhang1030/roboact`. The product name is Roboact. This tree is not published to PyPI.
+
+## Git
+
+- First GitHub push of this project goes to `main`. If `main` already has a commit, do not force-push.
+- After that first push, every further change is a branch + pull request. Do not merge. Do not force-push.
+- Run gitleaks over all commits immediately before a GitHub push.
+- Private IPv4 addresses must not appear in `git ls-files`. The scanner is `scripts/check_private_ip.py`. It scans **exactly** `git ls-files` (not a directory glob) so `.agents/` is included. Proof: staging a tracked RFC1918 canary (`192.168` /16, host `.1.10`) under `.agents/docs/` must fail; removing it must pass. `127.0.0.1` and `0.0.0.0` are allowed. Do not write the canary as a dotted quad in committed docs.
+
+PCR records live in `.agents/docs/`. Do not add `docs/decisions/`.
+
+## Why
+
+The repository is public. A leaked controller address or token cannot be unpublished from git history. `rg` and many globs skip dot-directories; `git ls-files` does not.
+
+## Rejected
+
+- A PyPI publish config.
+- Scanning a directory glob that silently skips `.agents/`.
+
+## Who / date / spec
+
+Alex, 2026-10-31. [PRD header](../../docs/prd.md), [PRD 19.8](../../docs/prd.md).

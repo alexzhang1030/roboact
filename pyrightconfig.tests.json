@@ -1,0 +1,10 @@
+{
+  "include": ["tests"],
+  "extraPaths": ["."],
+  "pythonVersion": "3.12",
+  "venvPath": ".",
+  "venv": ".venv",
+  "typeCheckingMode": "basic",
+  "reportOptionalSubscript": "none",
+  "reportOptionalMemberAccess": "none"
+}
