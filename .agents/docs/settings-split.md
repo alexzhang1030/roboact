@@ -17,7 +17,7 @@
 
 Clearing site storage resets those to browser defaults. It does **not** change `timeout_s`, `precondition_wait_s`, step limit, adapter heartbeat, page-disconnect deadline, expiry, or the flow on disk.
 
-`sessionStorage` is not used for an access token.
+`sessionStorage` is reserved for `roboact.token` only if a token exists. Helpers refuse any key that does not start with `roboact.`.
 
 ## Server
 

@@ -8,7 +8,7 @@ Browser only, no platform default: panel widths and collapse, grid / minimap, la
 
 Server only, shared by every tab, written into the run: 10 s page-disconnect pause, 3 s adapter silence, step limit, timeouts, `--host`. A second tab that changes a pause deadline must see the server value; that key must not appear in `localStorage`.
 
-Until Thompson answers, a non-loopback access token (if one exists) is `sessionStorage` only. Do not persist it.
+Until Thompson answers, a non-loopback access token (if one exists) is `sessionStorage` only, key `roboact.token`. Do not persist it. Every `localStorage` / `sessionStorage` key uses the `roboact.` prefix; helpers refuse any other key.
 
 A bad or unknown stored value is dropped and the browser default is used. No error toast.
 

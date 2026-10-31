@@ -1,6 +1,8 @@
 /** Browser-only display preferences. Keys always use the `roboact.` prefix.
  *  Execution / safety config stays on the server.
  */
+export const STORAGE_PREFIX = 'roboact.'
+
 export const KEYS = {
   theme: 'roboact.theme',
   lang: 'roboact.lang',
@@ -13,11 +15,17 @@ export const KEYS = {
   token: 'roboact.token',
 }
 
+function prefixed(key) {
+  return typeof key === 'string' && key.startsWith(STORAGE_PREFIX)
+}
+
 export function readRaw(key) {
+  if (!prefixed(key)) return null
   try { return localStorage.getItem(key) } catch (_) { return null }
 }
 
 export function writeRaw(key, value) {
+  if (!prefixed(key)) return
   try {
     if (value == null) localStorage.removeItem(key)
     else localStorage.setItem(key, value)
@@ -26,10 +34,12 @@ export function writeRaw(key, value) {
 
 /** Access token for a non-loopback bind. Session only (PRD v1.4.6). */
 export function readSession(key) {
+  if (!prefixed(key)) return null
   try { return sessionStorage.getItem(key) } catch (_) { return null }
 }
 
 export function writeSession(key, value) {
+  if (!prefixed(key)) return
   try {
     if (value == null) sessionStorage.removeItem(key)
     else sessionStorage.setItem(key, value)
@@ -41,11 +51,14 @@ export function readChoice(key, allowed, fallback) {
   return allowed.includes(v) ? v : fallback
 }
 
-/** First-load language. One function so the rule is a one-line change.
- *  Current rule: first navigator.languages entry starting with `zh` → zh-CN,
- *  otherwise English. English also if nothing can be read.
+/** First-load language. Flip to `false` for always-English (pending Alex).
+ *  This constant is the one-line change; keep `index.html` `FOLLOW_BROWSER_LANG` identical.
  */
+export const FOLLOW_BROWSER_LANG = true
+
+/** Sole first-load locale function. Head script mirrors this body. */
 export function detectBrowserLang(languages) {
+  if (!FOLLOW_BROWSER_LANG) return 'en'
   const list = languages || (typeof navigator !== 'undefined' ? navigator.languages : null) || []
   const first = (list && list[0]) || (typeof navigator !== 'undefined' ? navigator.language : '') || ''
   return String(first).toLowerCase().startsWith('zh') ? 'zh-CN' : 'en'

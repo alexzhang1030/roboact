@@ -15,15 +15,7 @@ function interpolate(s, params) {
 export const localeMode = ref(readChoice(KEYS.lang, ['system', 'en', 'zh-CN'], 'system'))
 export const locale = ref(localeMode.value === 'system' ? detectBrowserLang() : localeMode.value)
 
-export const themeMode = ref((() => {
-  const stored = readChoice(KEYS.theme, ['system', 'light', 'dark'], '')
-  if (stored) return stored
-  try {
-    const legacy = localStorage.getItem('roboact-theme')
-    if (legacy === 'light' || legacy === 'dark') return legacy
-  } catch (_) {}
-  return 'system'
-})())
+export const themeMode = ref(readChoice(KEYS.theme, ['system', 'light', 'dark'], 'system'))
 export const theme = ref(themeMode.value === 'system' ? detectBrowserTheme() : themeMode.value)
 
 export const motionMode = ref(readChoice(KEYS.motion, ['system', 'reduce', 'full'], 'system'))
