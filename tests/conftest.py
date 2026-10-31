@@ -37,7 +37,6 @@ def server(tmp_path):
     db = tmp_path / "ui.db"
     env = {
         **os.environ,
-        "ROBOACT_HOST": "127.0.0.1",
         "ROBOACT_PORT": str(port),
         "ROBOACT_DB": str(db),
         "ROBOACT_TEST": "1",
@@ -48,8 +47,6 @@ def server(tmp_path):
             sys.executable,
             "-m",
             "roboact",
-            "--host",
-            "127.0.0.1",
             "--port",
             str(port),
             "--db",

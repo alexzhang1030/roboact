@@ -8,7 +8,7 @@ One-line gist per route. Open the record before changing that area. There is no 
 | Fonts, Inter / JBM, light/dark, reduced motion | [theme-and-fonts.md](theme-and-fonts.md) | §17 is current. Package-static OFL fonts. Colour/icon only when motion is reduced. |
 | Locale, catalogs, codes-only | [i18n.md](i18n.md) | `navigator.languages` (`zh*` → Chinese); catalogs as ES modules; codes on the wire; no r-token keys. |
 | What the browser may store | [settings-split.md](settings-split.md) | `roboact.*` display prefs only. Timeouts and safety stay on the server. |
-| Bind, Host/Origin, no auth | [auth-and-network.md](auth-and-network.md) | Auth deferred; loopback only; SSH forwarding for remote use. A40 on. A39 deferred. |
+| Bind, Host/Origin, no auth | [auth-and-network.md](auth-and-network.md) | Auth deferred; no `--host`; SSH forwarding for remote use. A40 on. A39 deferred. |
 | MIT, GitHub, no PyPI, hygiene | [licence-and-repo.md](licence-and-repo.md) | Copyright line is exact. `git ls-files` private-IP scan. First push is `main`; then branch + PR. |
 | Executor, adapter, pauses | [execution-model.md](execution-model.md) | Codes in records. `motion` default. `precondition_wait_s`. No auto-retry after crash. |
 | Python / uv / ruff / pyright | [toolchain.md](toolchain.md) | Python 3.12. No rclpy. `scripts/check.sh`. |

@@ -55,7 +55,6 @@ MIME = {
     ".map": "application/json",
 }
 
-LOOPBACK = {"127.0.0.1", "localhost", "::1"}
 ALLOWED_HOST_NAMES = frozenset({"127.0.0.1", "localhost", "::1", "[::1]"})
 COMMAND_METHODS = frozenset({"POST", "PUT", "PATCH", "DELETE"})
 
@@ -826,18 +825,16 @@ async def _client(app: App, reader: asyncio.StreamReader, writer: asyncio.Stream
             writer.close()
 
 
-def _is_loopback(host: str) -> bool:
-    name = (host or "").strip().strip("[]")
-    return name in LOOPBACK
+BIND_HOST = "127.0.0.1"
 
 
-def require_loopback_host(host: str) -> None:
-    """Refuse any non-loopback bind. No warning-and-continue path."""
-    if _is_loopback(host):
+def refuse_host_flag(argv: list[str] | None = None) -> None:
+    """PRD v1.4.10: `--host` is not provided. Bind is 127.0.0.1 only."""
+    args = sys.argv[1:] if argv is None else argv
+    if "--host" not in args:
         return
     print(
-        f"error: --host {host} is not loopback. "
-        "Bind only 127.0.0.1, ::1, or localhost. "
+        "error: --host is not provided. Bind is 127.0.0.1 only. "
         "To use the UI from another computer, SSH port-forward: "
         "ssh -L 17465:127.0.0.1:17465 <controller>",
         file=sys.stderr,
@@ -846,31 +843,25 @@ def require_loopback_host(host: str) -> None:
     raise SystemExit(2)
 
 
-async def serve(host: str, port: int, db_path: str, test_mode: bool = False) -> None:
-    require_loopback_host(host)
+async def serve(port: int, db_path: str, test_mode: bool = False) -> None:
     app = App(db_path, test_mode=test_mode, port=port)
     await app.start()
-    server = await asyncio.start_server(lambda r, w: _client(app, r, w), host, port)
+    server = await asyncio.start_server(lambda r, w: _client(app, r, w), BIND_HOST, port)
     sockets = ", ".join(str(s.getsockname()) for s in server.sockets or [])
-    print(f"roboact listening on http://{host}:{port}  ({sockets})", flush=True)
+    print(f"roboact listening on http://{BIND_HOST}:{port}  ({sockets})", flush=True)
     async with server:
         await server.serve_forever()
 
 
 def main(argv: list[str] | None = None) -> None:
+    refuse_host_flag(argv)
     p = argparse.ArgumentParser(description="Roboact")
-    p.add_argument(
-        "--host",
-        default=os.environ.get("ROBOACT_HOST", "127.0.0.1"),
-        help="Bind address. Only 127.0.0.1, ::1, or localhost; anything else exits.",
-    )
     p.add_argument("--port", type=int, default=int(os.environ.get("ROBOACT_PORT", "7465")))
     p.add_argument("--db", default=os.environ.get("ROBOACT_DB", "data/roboact.db"))
     args = p.parse_args(argv)
-    require_loopback_host(args.host)
     test_mode = os.environ.get("ROBOACT_TEST") == "1"
     try:
-        asyncio.run(serve(args.host, args.port, args.db, test_mode=test_mode))
+        asyncio.run(serve(args.port, args.db, test_mode=test_mode))
     except KeyboardInterrupt:
         sys.exit(0)
 

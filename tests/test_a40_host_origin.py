@@ -10,7 +10,7 @@ import urllib.request
 from pathlib import Path
 
 import pytest
-from roboact.server import require_loopback_host
+from roboact.server import refuse_host_flag
 
 from tests.conftest import free_port
 
@@ -25,8 +25,6 @@ def _start(tmp_path: Path) -> tuple[subprocess.Popen[bytes], int, str]:
             sys.executable,
             "-m",
             "roboact",
-            "--host",
-            "127.0.0.1",
             "--port",
             str(port),
             "--db",
@@ -145,14 +143,15 @@ def test_a40_host_origin_content_type(tmp_path: Path, capsys: pytest.CaptureFixt
         print(captured.out)
 
 
-def test_non_loopback_host_flag_exits() -> None:
-    require_loopback_host("127.0.0.1")
-    require_loopback_host("localhost")
-    require_loopback_host("::1")
-    require_loopback_host("[::1]")
+def test_host_flag_is_not_provided() -> None:
+    refuse_host_flag([])
+    refuse_host_flag(["--port", "7465"])
     with pytest.raises(SystemExit) as ei:
-        require_loopback_host("0.0.0.0")
+        refuse_host_flag(["--host", "0.0.0.0"])
     assert ei.value.code == 2
+    with pytest.raises(SystemExit) as ei2:
+        refuse_host_flag(["--host", "127.0.0.1"])
+    assert ei2.value.code == 2
 
     port = free_port()
     proc = subprocess.Popen(
@@ -176,7 +175,7 @@ def test_non_loopback_host_flag_exits() -> None:
         out, _ = proc.communicate(timeout=5)
         print(out)
         assert proc.returncode == 2, out
-        assert "not loopback" in out
+        assert "not provided" in out
         assert "ssh -L 17465:127.0.0.1:17465" in out
         assert "WARNING" not in out
     finally:

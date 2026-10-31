@@ -327,8 +327,6 @@ def test_prd198_codes_survive_language_switch(server):
                 sys.executable,
                 "-m",
                 "roboact",
-                "--host",
-                "127.0.0.1",
                 "--port",
                 str(server["port"]),
                 "--db",

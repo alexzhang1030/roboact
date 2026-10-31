@@ -9,7 +9,7 @@ from roboact.adapter import AdapterInfo, FakeAdapter
 from roboact.errors import ApiError
 from roboact.executor import Executor
 from roboact.nodes import bind_adapter
-from roboact.server import require_loopback_host
+from roboact.server import refuse_host_flag
 from roboact.sse import SseHub
 from roboact.store import Store
 
@@ -282,10 +282,10 @@ def test_adapter_lost_pauses(tmp_path):
     asyncio.run(go())
 
 
-def test_non_loopback_host_exits():
-    require_loopback_host("127.0.0.1")
+def test_host_flag_is_not_provided():
+    refuse_host_flag(["--port", "7465"])
     with pytest.raises(SystemExit) as ei:
-        require_loopback_host("0.0.0.0")
+        refuse_host_flag(["--host", "0.0.0.0"])
     assert ei.value.code == 2
 
 

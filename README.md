@@ -11,7 +11,7 @@ Offline, zero-build robot flow canvas. Wire the atomic actions an adapter expose
 
 Licence is [MIT](LICENSE) (`Copyright (c) 2026 alexzhang1030`). This repo is not published to PyPI and has no publish config.
 
-Specs in this tree: [PRD v1.4.11](docs/prd.md), [exec-model v0.2.3](docs/exec-model.md) (token §0.2 / A39 ignored — auth deferred), [system-design](docs/system-design.md), [UI spec](docs/ui-spec.md) (**§17 fonts/themes, §18 language**), [Rams design sheets](docs/design/), [diagrams](docs/diagrams/). History: `docs/prd-v1.md`, `docs/exec-model-v0.md`, `docs/ui-spec-v0.md`, `docs/system-design-v0.md`. Decision records are PCR in [`.agents/docs/`](.agents/docs/).
+Specs in this tree: [PRD v1.4.10](docs/prd.md), [exec-model v0.2.3](docs/exec-model.md) (token §0.2 / A39 ignored — auth deferred), [system-design](docs/system-design.md), [UI spec](docs/ui-spec.md) (**§17 fonts/themes, §18 language**), [Rams design sheets](docs/design/), [diagrams](docs/diagrams/). History: `docs/prd-v1.md`, `docs/exec-model-v0.md`, `docs/ui-spec-v0.md`, `docs/system-design-v0.md`. Decision records are PCR in [`.agents/docs/`](.agents/docs/).
 
 ## Install and run
 
@@ -39,10 +39,10 @@ uv sync --frozen --find-links vendor/wheels
 ```
 
 ```bash
-uv run python -m roboact --host 127.0.0.1 --port 7465 --db data/roboact.db
+uv run python -m roboact --port 7465 --db data/roboact.db
 ```
 
-Bind is loopback only (`127.0.0.1`, `::1`, `localhost`). `--host` with any other address exits. There is no access token and no login screen. A39 is **deferred (Alex 2026-10-31)** — see [.agents/docs/auth-and-network.md](.agents/docs/auth-and-network.md).
+Bind is `127.0.0.1` only. There is no `--host` flag. There is no access token and no login screen. A39 is **deferred (Alex 2026-10-31)** — see [.agents/docs/auth-and-network.md](.agents/docs/auth-and-network.md).
 
 To use the UI from another computer, SSH port-forward. Do not bind a LAN address:
 
@@ -130,7 +130,7 @@ web/                    Static frontend, served by the backend
 web/i18n/               en.js and zh-CN.js catalogs (ES modules, no build)
 web/vendor/             Vue / Vue Flow / icons (unmodified upstream files)
 assets/logo.svg         Brand mark (favicon is the same drawing)
-docs/prd.md             PRD v1.4.11 (current product doc in this tree; token rows ignored)
+docs/prd.md             PRD v1.4.10 (current product doc in this tree; token rows ignored)
 docs/system-design.md
 docs/ui-spec.md         §17 fonts and themes, §18 language
 docs/design/            Rams light + `-dark` sheets

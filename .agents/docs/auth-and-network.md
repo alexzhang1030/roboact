@@ -1,8 +1,8 @@
 # Auth and network
 
-**Current conclusion.** Auth deferred; loopback only; SSH forwarding for remote use. A39 is **deferred (Alex 2026-10-31)**. There is no warning-and-continue path for a LAN bind.
+**Current conclusion.** Auth deferred; loopback only; SSH forwarding for remote use. A39 is **deferred (Alex 2026-10-31)**. `--host` is **not provided** (PRD v1.4.10, Steve 18:40). Bind is `127.0.0.1` only.
 
-Bind only `127.0.0.1`, `::1`, or `localhost`. `--host` with any other address exits with an error. To open the UI from another computer:
+To open the UI from another computer:
 
 ```
 ssh -L 17465:127.0.0.1:17465 <controller>
@@ -17,6 +17,7 @@ Alex asked to skip login. A half-implemented token would look like a security fe
 ## Rejected
 
 - Warning-and-continue on `--host 0.0.0.0` (revoked 2026-10-31).
+- Keeping `--host` for loopback-only values (PRD v1.4.10: flag removed).
 - Implementing A39 / `r-token` / catalog keys for a token screen in v1.
 - Cookie or `localStorage` tokens (browser would attach them to cross-site requests).
 
@@ -32,6 +33,6 @@ Other pages in the same browser can still POST to `127.0.0.1` (simple form POST 
 
 ## Who / date / spec
 
-Alex + Fadell + Thompson, 2026-10-31.
+Alex + Fadell + Thompson, 2026-10-31. Steve 18:40 on removing `--host`.
 
-[PRD §7 browser / token rows](../../docs/prd.md) (token rows ignored), [exec-model §0.2 / A40](../../docs/exec-model.md) (A39 deferred), [UI spec §18 r-token note](../../docs/ui-spec.md).
+[PRD v1.4.10 §7 / 19.9](../../docs/prd.md), [exec-model §0.2 / A40](../../docs/exec-model.md) (A39 deferred), [UI spec §18 r-token note](../../docs/ui-spec.md).
