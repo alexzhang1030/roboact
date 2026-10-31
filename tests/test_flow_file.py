@@ -1020,10 +1020,36 @@ def test_c12_counts_banner_lock_and_no_overlap(server, tmp_path):
         assert lines == 4
         locked = page.locator('[data-testid="run-locked"]')
         assert locked.count() == 1
-        assert "Review the differences above before running." in locked.inner_text()
+        assert locked.inner_text() == "Review the differences above before running."
         assert page.locator(".slot-1").get_attribute("title") == (
             "Review the differences above before running."
         )
+        assert page.locator(".slot-1").get_attribute("disabled") is not None
+        vis = page.evaluate(
+            """() => {
+              const top = document.querySelector('.top')
+              const lock = document.querySelector('[data-testid="run-locked"]')
+              const right = document.querySelector('.top > .right')
+              const tr = top.getBoundingClientRect()
+              const lr = lock.getBoundingClientRect()
+              const rr = right.getBoundingClientRect()
+              return {
+                innerWidth: window.innerWidth,
+                lockText: lock.textContent,
+                lockW: lock.scrollWidth,
+                lockVisibleW: lock.clientWidth,
+                lockRight: lr.right,
+                topRight: tr.right,
+                rightLeft: rr.left,
+                collapse: top.dataset.collapse || '',
+              }
+            }"""
+        )
+        assert vis["innerWidth"] == 1280, vis
+        assert vis["lockText"] == "Review the differences above before running."
+        assert vis["lockW"] <= vis["lockVisibleW"] + 1, vis
+        assert vis["lockRight"] <= vis["topRight"] + 1, vis
+        assert vis["lockRight"] <= vis["rightLeft"] + 1, vis
         top_h = page.locator(".top").evaluate("el => el.getBoundingClientRect().height")
         assert top_h <= 45, top_h
         steps_box = page.locator(".top .steps")

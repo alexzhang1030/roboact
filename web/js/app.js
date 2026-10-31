@@ -1083,8 +1083,20 @@ const App = defineComponent({
       if (!top) return
       top.dataset.collapse = ''
       const left = top.querySelector('.top-left')
-      if (!left) return
-      const cramped = () => left.scrollWidth > left.clientWidth + 1
+      const right = top.querySelector('.top > .right')
+      const locked = top.querySelector('.run-locked')
+      const clipped = (el) => !!(el && el.scrollWidth > el.clientWidth + 1)
+      const lockHitsRight = () => {
+        if (!locked || !right) return false
+        return locked.getBoundingClientRect().right > right.getBoundingClientRect().left + 1
+      }
+      const cramped = () => (
+        top.scrollWidth > top.clientWidth + 1
+        || clipped(left)
+        || clipped(right)
+        || clipped(locked)
+        || lockHitsRight()
+      )
       if (cramped()) {
         top.dataset.collapse = 'adapter'
         if (cramped()) top.dataset.collapse = 'adapter-ver'
