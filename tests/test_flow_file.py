@@ -268,12 +268,15 @@ def _forged_unlock(adapter: dict[str, Any], file_id: str) -> dict[str, Any]:
 
 def _open_ui(base: str, flow_id: str | None = None):
     pw = pytest.importorskip("playwright.sync_api")
-    playwright = pw.sync_playwright().start()
+    try:
+        playwright = pw.sync_playwright().start()
+    except Exception as e:
+        pytest.skip("playwright/chromium not available: " + str(e))
     try:
         browser = launch_chromium(playwright)
-    except Exception as e:
+    except BaseException:
         playwright.stop()
-        pytest.skip("playwright/chromium not available: " + str(e))
+        raise
     ctx = browser.new_context(
         locale="en-US", accept_downloads=True, viewport={"width": 1440, "height": 900}
     )
