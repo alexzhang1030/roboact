@@ -9,7 +9,7 @@
 - 适配器：同一套接口挡住 SDK / ROS 2。v1 只带 `FakeAdapter`（`target=sim`）
 - **离线**：前端、图标、字体在仓库里；Python 依赖用自带 wheel
 
-规格：`docs/prd-v1.md`（v1.4.1）、`docs/exec-model-v0.md`（v0.2）、`docs/ui-spec-v0.md`（v0.2）、`docs/system-design-v0.md`（v0.2）。
+规格（现行）：[PRD v1.4.3](docs/prd.md)、[exec-model v0.2.1](docs/exec-model.md)、[UI spec](docs/ui-spec.md)、[Rams 设计图](docs/design/)。历史稿：`docs/prd-v1.md`、`docs/exec-model-v0.md`、`docs/ui-spec-v0.md`、`docs/system-design-v0.md`。
 
 本仓库不发布到 PyPI，也不带发布配置。
 
@@ -43,7 +43,7 @@ python -m roboact --host 127.0.0.1 --port 7465 --db data/roboact.db
 8. 服务重启后运行保持暂停。崩溃时正在执行的 `motion` 节点是「中断 · 结果未知」，**不会自动重跑**。先读回机器人状态，再选「重做这一步」或「当作已做完」。测试用 `write` 节点继续时带原幂等键重试。
 9. 适配器 3 s 不可达 → 已暂停 · 机器人控制器断开（红，「继续」要等适配器回来）。后端心跳停了，适配器基类自己取消在飞目标。页面 SSE 10 s 没人连 → 已暂停 · 页面断开（琥珀，重连后可继续；不取消正在跑的节点）。
 
-副作用取值：`none | read | motion | write`。`motion` 是会让机器人动的动作（PRD v1.4.1 与 exec-model v0.2 一致；缺省按 `motion`）。`write` 只给手写测试节点（`append_note` / `demo_notes.db`），不进产品节点面板。
+副作用取值：`none | read | motion | write`。`motion` 是会让机器人动的动作（PRD v1.4.3 与 exec-model v0.2.1 一致；缺省按 `motion`）。`write` 只给手写测试节点（`append_note` / `demo_notes.db`），不进产品节点面板。动作说明可带可选的 `precondition_wait_s`：发目标前 adapter 在这段时间里自己重读 `read_state`，条件一成立马上发；到点仍不满足记 `precondition_failed`、不发目标。没写这个字段就只查一次。读的间隔由写 adapter 的人定，不写进执行器。无论读几次，这一步只有一条运行记录。
 
 ## 测
 
@@ -68,6 +68,22 @@ CI 会重算 `vendor-manifest.json` 里每个文件的 sha256，并且要求每�
 | A6 重连 + 页面断开 | **pass** | `test_a6_reconnect_and_half_open_page_lost`：TCP 代理真切断后重连，事件序号不回退、画布对齐后端；半开（停转发、不发 FIN/RST）后后端以 `operator_lost` 暂停，半开后不再派发新的 motion。服务端 `replay_after` / A33 不单独算通过。 |
 | PRD 19 画布性能 | **pass** | 浏览器 `test_prd19_canvas_performance_500_nodes`（平移/状态洪水 p95 ≤ 33 ms）加上 A4 的真实 SSE 500 节点。 |
 | PRD 19.2 停下不等窗口 | **pass** | 同 A5：`test_a5_pause_latency_frames_in_browser`。 |
+| PRD 19.4 等站稳 | **pass** | FakeAdapter：`test_prd194_wait_then_send_when_stable`、`test_prd194_timeout_precondition_failed_no_goal`、`test_prd194_no_wait_fails_on_first_read`。 |
+
+## 接真机前检查（R1–R8，v1 不测）
+
+v1 只用 `FakeAdapter`（`target=sim`）。下面这些在接真机前必须过，现在标 **N/A**。出处见 [exec-model](docs/exec-model.md) 第 13.1 节。
+
+| 编号 | 测什么 | v1 | 通过条件 |
+|---|---|---|---|
+| R1 | Spot 类 E-Stop 端点 `timeout` 配成 9 s，停止签到 | N/A | 9 s 后进入 SETTLE_THEN_CUT（坐下）；要有厂商出处 |
+| R2 | 话题式速度控制停发指令（仅 ros2_controllers 一类） | N/A | 默认 `cmd_vel_timeout` 0.5 s 后速度置零；四足换成自己的出处 |
+| R3 | 硬件急停后复位 | N/A | 画布运行保持暂停，不自动继续（ISO 13850 4.1.1.2） |
+| R4 | 停发指令后狗怎么做 | N/A | 和厂商文档一致；接真机前必须有出处 |
+| R5 | 控制器断电后狗怎么做；断电时硬件急停仍可用 | N/A | 同上 |
+| R6 | 夹爪断电后能不能夹住 | N/A | `cancel.after` 和 `read_state` 按原文写 |
+| R7 | 「已站稳」能判断 | N/A | 接真机前确认稳定性可检测：blocking 动作只在机器人稳住后返回，**或** `read_state` 有表示站稳的字段；两条都要有厂商出处。都没有就不能接真机，也不能用 `precondition_wait_s` |
+| R8 | 重复 A6 真 TCP 切断 | N/A | 接真机前在真机网络里再用 TCP 代理做一次半开切断（不发 FIN/RST），确认 `operator_lost` 暂停出现在约 10 s 内。没暂停就不能接真机：`motion` 会在没人看着时继续跑 |
 
 ## 仓库怎么摆
 
@@ -76,6 +92,8 @@ roboact/            Python 包（适配器、节点注册表、图、执行器�
 web/                静态前端，由后端直接托管
 web/vendor/         Vue / Vue Flow / JetBrains Mono / 图标（未改动的原文件）
 assets/logo.svg     品牌标志（favicon 同源）
+docs/prd.md         PRD v1.4.3（现行）
+docs/design/        Rams 11 张设计图（PNG + HTML）
 vendor/wheels/      运行时 Python wheel
 vendor/licenses/    第三方许可原文
 vendor-manifest.json

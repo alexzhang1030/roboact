@@ -1,4 +1,4 @@
-"""exec-model v0.2 A23–A37 (PRD §8 mapping in each name). R1–R6 are real-robot N/A."""
+"""exec-model v0.2 A23–A37 (PRD §8 mapping in each name). R1–R8 are real-robot N/A in v1."""
 from __future__ import annotations
 
 import asyncio

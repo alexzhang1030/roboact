@@ -75,6 +75,7 @@ class ActionDescriptor(BaseModel):
     typical_s: float | None = None
     cancel: CancelSpec = Field(default_factory=CancelSpec)
     preconditions: list[Precondition] = Field(default_factory=list)
+    precondition_wait_s: float | None = None
     read_state: bool = False
     expiry: Literal["controller", "adapter_only"] = "controller"
     side_effect_note: str = ""
@@ -121,6 +122,15 @@ class CrashBetweenWriteAndKey(Exception):
     """Test hook: died after the side effect and before the idempotency key."""
 
 
+class PreconditionFailed(Exception):
+    """Preconditions still unmet; the goal was not sent."""
+
+    def __init__(self, message: str = "precondition_failed", state: dict[str, Any] | None = None):
+        super().__init__(message)
+        self.error_type = "precondition_failed"
+        self.state = state or {}
+
+
 class Adapter:
     """Controller-specific implementation. The canvas never sees SDK vs ROS 2."""
 
@@ -142,6 +152,8 @@ class Adapter:
         self._watchdog_task: asyncio.Task | None = None
         self._lost_backend_fired = False
         self.goals_cancelled_by_lost_heartbeat = 0
+        self.last_precondition_wait_s: float | None = None
+        self.last_precondition_state: dict[str, Any] | None = None
 
     def info(self) -> AdapterInfo:
         return AdapterInfo(
@@ -276,6 +288,50 @@ class Adapter:
             "result": handle.result.model_dump() if handle.result else None,
         }
 
+    def precondition_poll_interval(self, desc: ActionDescriptor) -> float:
+        """How often this adapter re-reads state while waiting. Not set by the engine."""
+        return 0.1
+
+    def preconditions_hold(self, desc: ActionDescriptor, state: dict[str, Any]) -> bool:
+        for pre in desc.preconditions:
+            if not pre.check:
+                continue
+            if not state.get(pre.check):
+                return False
+        return True
+
+    async def await_preconditions(self, desc: ActionDescriptor) -> tuple[bool, dict[str, Any] | None]:
+        """Re-read read_state until preconditions hold or the wait window ends.
+
+        No `precondition_wait_s` means one read (current behaviour). The poll
+        interval is this adapter's, not the executor's.
+        """
+        wait_s = desc.precondition_wait_s
+        need = any(p.check for p in desc.preconditions) or wait_s is not None
+        if not need:
+            self.last_precondition_wait_s = 0.0
+            self.last_precondition_state = None
+            return True, None
+        t0 = time.monotonic()
+        deadline = t0 if wait_s is None else t0 + float(wait_s)
+        last: dict[str, Any] | None = None
+        while True:
+            last = await self.read_state(desc.id)
+            self.last_precondition_state = last
+            if self.preconditions_hold(desc, last):
+                self.last_precondition_wait_s = time.monotonic() - t0
+                return True, last
+            now = time.monotonic()
+            if wait_s is None or now >= deadline:
+                self.last_precondition_wait_s = now - t0
+                return False, last
+            interval = self.precondition_poll_interval(desc)
+            remain = deadline - now
+            if remain <= 0:
+                self.last_precondition_wait_s = time.monotonic() - t0
+                return False, last
+            await asyncio.sleep(min(interval, remain))
+
     async def execute(
         self,
         action_id: str,
@@ -285,6 +341,13 @@ class Adapter:
         deadline: float | None = None,
     ) -> ActionResult:
         desc = self.descriptor(action_id)
+        ok, last = await self.await_preconditions(desc)
+        if not ok:
+            return ActionResult(
+                success=False,
+                message="precondition_failed",
+                measured=dict(last or {}),
+            )
         handle = ExecuteHandle(action_id, idem_key, desc.cancel.cancellable, desc.cancel.post_cancel)
         handle.deadline = deadline
         handle.return_mode = "goal_progress" if desc.return_mode in ("goal_progress", "async") else desc.return_mode
@@ -531,25 +594,55 @@ class FakeAdapter(Adapter):
         self._async_jobs: dict[str, asyncio.Task] = {}
         self.extra_raw_actions: list[Any] = []
         self.drop_action_ids: set[str] = set()
+        self.action_updates: dict[str, dict[str, Any]] = {}
+        self.stable: bool = True
+        self.stable_after_s: float | None = None
+        self._read_t0: float | None = None
+        self.read_state_calls = 0
+        self.goals_sent: list[dict[str, Any]] = []
+        self.goal_sent_at: float | None = None
+        self.precondition_poll_s = 0.05
+
+    def precondition_poll_interval(self, desc: ActionDescriptor) -> float:
+        return float(self.precondition_poll_s)
 
     def list_actions(self) -> list[Any]:
         out: list[Any] = []
         for a in FAKE_ACTIONS:
             if a.id in self.drop_action_ids:
                 continue
+            updates = dict(self.action_updates.get(a.id) or {})
             if self.force_uncancellable and a.id == "fake_gripper":
-                out.append(a.model_copy(update={"cancel": CancelSpec(cancellable=False, post_cancel=a.cancel.post_cancel, after=a.cancel.after)}))
-            else:
-                out.append(a)
+                updates["cancel"] = CancelSpec(cancellable=False, post_cancel=a.cancel.post_cancel, after=a.cancel.after)
+            out.append(a.model_copy(update=updates) if updates else a)
         out.extend(self.extra_raw_actions)
         return out
 
     async def read_state(self, action_id: str) -> dict[str, Any]:
+        self.read_state_calls += 1
+        now = time.monotonic()
+        if self._read_t0 is None:
+            self._read_t0 = now
+        if self.stable_after_s is not None:
+            stable = (now - self._read_t0) >= float(self.stable_after_s)
+        else:
+            stable = bool(self.stable)
+        state: dict[str, Any] = {
+            "stable": stable,
+            "connected": bool(self.connected),
+        }
         if action_id == "fake_gripper":
-            return {"open": self.gripper_open}
-        return {"pose": dict(self.pose)}
+            state["open"] = self.gripper_open
+        else:
+            state["pose"] = dict(self.pose)
+        return state
+
+    def _note_goal_sent(self, action_id: str, inputs: dict[str, Any], idem_key: str | None) -> None:
+        self.goal_sent_at = time.monotonic()
+        self.goals_sent.append({"action": action_id, "inputs": inputs, "idem_key": idem_key, "at": self.goal_sent_at})
 
     async def run_blocking(self, action_id: str, inputs: dict[str, Any], handle: ExecuteHandle) -> ActionResult:
+        self._note_goal_sent(action_id, inputs, handle.idem_key)
         self.calls.append({"action": action_id, "inputs": inputs, "idem_key": handle.idem_key})
         if self.block_s:
             t0 = time.monotonic()
@@ -572,6 +665,7 @@ class FakeAdapter(Adapter):
         raise KeyError(action_id)
 
     async def send_goal(self, action_id: str, inputs: dict[str, Any], handle: ExecuteHandle) -> None:
+        self._note_goal_sent(action_id, inputs, handle.idem_key)
         self.calls.append({"action": action_id, "inputs": inputs, "idem_key": handle.idem_key})
         if action_id != "fake_set_pose":
             raise KeyError(action_id)

@@ -10,7 +10,7 @@ from typing import Any, ClassVar
 from pydantic import BaseModel, ConfigDict, Field, create_model
 
 from . import NODE_TIMEOUT_S
-from .adapter import ActionDescriptor, Adapter, ActionResult, CancelResult, Progress
+from .adapter import ActionDescriptor, Adapter, ActionResult, CancelResult, PreconditionFailed, Progress
 from .util import compare, dump, get_path, sha256_text
 
 
@@ -598,6 +598,8 @@ def make_action_node(desc: ActionDescriptor, adapter: Adapter) -> type[NodeType]
             result: ActionResult = await exec_task
             self._handle = bound.handle_by_idem(ctx.idempotency_key) if hasattr(bound, "handle_by_idem") else self._handle
             if not result.success:
+                if result.message == "precondition_failed":
+                    raise PreconditionFailed(result.message, result.measured)
                 raise RuntimeError(result.message or "动作失败")
             return out_model.model_validate(result.outputs)
 

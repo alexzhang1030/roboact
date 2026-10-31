@@ -1037,7 +1037,10 @@ class Executor:
                 err = None
             else:
                 status = "error"
-                err = {"type": type(e).__name__, "message": str(e)}
+                err = {"type": getattr(e, "error_type", None) or type(e).__name__, "message": str(e)}
+                state = getattr(e, "state", None)
+                if state:
+                    err["state"] = state
         finally:
             if elapsed_task:
                 elapsed_task.cancel()
