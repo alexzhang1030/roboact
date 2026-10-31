@@ -207,14 +207,18 @@ Version 1.5 (2026-10-31). Companion to `prd-en-v1.5.md` section 4. exec-model = 
 ## 20 Flow file import / export
 
 1. Build a flow with a loop, a control node, a `motion` node and a param marked secret.
-2. Export as JSON, import, export again: the two files are byte-identical; the secret param is `null` and its node shows "missing input" with Run disabled until it is filled in.
+2. From the UI (not the API), export as JSON twice with no edits: identical files. Import, export again: byte-identical; the secret param is `null` and its node shows "missing input" with Run disabled until it is filled in.
 3. Export as YAML, convert to JSON: equals the JSON export from step 2.
 4. Files contain no run records, pins, images, breakpoints, undo history, zoom, theme, language or server address.
 5. Import a hand-written `.yml` file with unquoted `mode: on`: it stays a string (swap the parser to YAML 1.1 rules: this must fail). In the same file, unquoted `ver: 1.10` for a string param imports, but Run is blocked and names that node and param; quoted `"1.10"` runs with `1.10`.
-6. Import, one at a time, files with a newer `format_version`, an unknown field, a duplicate id, an edge to a missing port, mismatched port types, a loop without an exit, a custom tag, an alias: each is refused, nothing changes, the dialog shows the path of each error.
+6. Import, one at a time, files with a newer `format_version`, an unknown field, a duplicate id, an edge to a missing port, mismatched port types, a loop without an exit, a custom tag, an alias, a duplicate key, two YAML documents, a `%YAML 1.1` directive, 1000 levels of nesting in 2 KB: each is refused (never a 500), nothing changes, the dialog shows the path of each error.
 7. Import a file with an older `format_version`: it is migrated and loads.
 8. Import a file with an unknown action: that node shows "action gone"; the Run button shows 1 remaining. "Review and enable run" does not enable Run; replacing the action or deleting the node does.
-9. Import a file from a different robot, adapter, `action_list_version` or units: the amber bar lists each difference; Run is disabled until "Review and enable run".
+9. Import a file from a different robot, adapter, `action_list_version` or units: the amber bar lists each difference; Run is disabled until "Review and enable run". Then switch to another robot: Run locks again. Send the approval field from the client yourself: Run stays locked.
 10. Import while a flow is open: a new flow is created; the old one is unchanged; the run list has no new entry.
 11. Set a `motion` param above the connected robot's joint or velocity limit, press Run: the run is blocked and the node and param are named. Switch to a robot with wider limits: the same flow runs.
-12. Import a file over 5 MiB: refused before parsing.
+12. Import a file over 5 MiB: refused before the body is fully read.
+13. Start a flow on the robot, then import an 800 KB YAML file: the running flow does not pause and the adapter heartbeat does not time out.
+14. Set an enum param to a value outside its enum, and a nested `motion` param over its limit: Run is blocked and each is named.
+15. Fill in the secret param on a "missing input" node: the mark clears without a reload.
+16. Follow the README offline install on a clean machine: YAML import works.

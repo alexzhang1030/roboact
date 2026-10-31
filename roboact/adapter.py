@@ -189,6 +189,7 @@ class Adapter:
         self.velocity_limits: dict[str, tuple[float, float]] = dict(
             type(self)._DEFAULT_VELOCITY_LIMITS
         )
+        self.heartbeat_times: list[float] = []
 
     def info(self) -> AdapterInfo:
         return AdapterInfo(
@@ -235,7 +236,9 @@ class Adapter:
 
     def receive_heartbeat(self) -> None:
         """Backend → adapter heartbeat. Missing beats cancel in-flight goals."""
-        self._last_backend_beat = time.monotonic()
+        now = time.monotonic()
+        self.heartbeat_times.append(now)
+        self._last_backend_beat = now
         self._lost_backend_fired = False
 
     async def ping(self) -> bool:
@@ -703,7 +706,14 @@ FAKE_NOTE_ACTION = ActionDescriptor(
     name="Note",
     labels={"en": "Note", "zh-CN": "Note"},
     params=[
-        ParamSpec(name="mode", type="string", default="on", required=False, title="Mode"),
+        ParamSpec(
+            name="mode",
+            type="string",
+            default="on",
+            required=False,
+            title="Mode",
+            enum=["on", "off"],
+        ),
         ParamSpec(name="ver", type="string", default="1.10", required=False, title="Ver"),
         ParamSpec(
             name="token",

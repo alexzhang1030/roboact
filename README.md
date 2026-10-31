@@ -17,6 +17,17 @@ uv run python -m roboact          # http://127.0.0.1:7465
 
 `Host` must be `127.0.0.1` / `localhost` / `[::1]`. SSE/WebSocket `Origin` must be this page. Commands need `Content-Type: application/json`.
 
+## Offline install
+
+Wheels live in `vendor/wheels` (including `ruamel.yaml`, required for YAML import). No network:
+
+```bash
+python3 -m venv .venv
+.venv/bin/pip install --no-index --find-links vendor/wheels -r requirements.txt
+.venv/bin/python -c "import ruamel.yaml"
+.venv/bin/python -m roboact
+```
+
 ## Connection drop
 
 - Page gone ~10 s → pause `operator_lost` after the current node. That node is not cancelled.

@@ -13,6 +13,19 @@ jobs:
         with:
           python-version: "3.12"
           enable-cache: true
+      - name: Offline ruamel from vendor wheels
+        run: |
+          set -euo pipefail
+          OFF=/tmp/offline-ruamel
+          rm -rf "$OFF"
+          if python3 -m venv "$OFF"; then
+            "$OFF/bin/pip" install --no-index --no-deps --find-links vendor/wheels 'ruamel.yaml==0.18.16'
+          else
+            rm -rf "$OFF"
+            python3 -m venv --without-pip "$OFF"
+            uv pip install --python "$OFF/bin/python" --no-index --no-deps --find-links vendor/wheels 'ruamel.yaml==0.18.16'
+          fi
+          "$OFF/bin/python" -c "import ruamel.yaml; print(ruamel.yaml.__version__)"
       - name: Vendor hash check
         run: python3 scripts/check_manifest.py
       - name: Tamper must fail
@@ -55,6 +68,19 @@ jobs:
         with:
           python-version: "3.12"
           enable-cache: true
+      - name: Offline ruamel from vendor wheels
+        run: |
+          set -euo pipefail
+          OFF=/tmp/offline-ruamel
+          rm -rf "$OFF"
+          if python3 -m venv "$OFF"; then
+            "$OFF/bin/pip" install --no-index --no-deps --find-links vendor/wheels 'ruamel.yaml==0.18.16'
+          else
+            rm -rf "$OFF"
+            python3 -m venv --without-pip "$OFF"
+            uv pip install --python "$OFF/bin/python" --no-index --no-deps --find-links vendor/wheels 'ruamel.yaml==0.18.16'
+          fi
+          "$OFF/bin/python" -c "import ruamel.yaml; print(ruamel.yaml.__version__)"
       - name: Install (frozen, aarch64 wheels)
         run: uv sync --frozen
       - name: Pytest

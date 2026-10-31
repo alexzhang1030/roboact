@@ -1104,7 +1104,7 @@ const App = defineComponent({
     window.__af = {
       nodes, edges, run, adapter, doRun, cmd, toggleBp, vf, nodeStatus, decide, pausePending,
       slot1Label, slot1Disabled, slot2Disabled, banners, mismatch, pauseRun, runWord, runWordKind,
-      runCheck, importErrors, exportFlow, importFlow, reviewEnable,
+      runCheck, importErrors, exportFlow, importFlow, reviewEnable, updateParam,
       adapterLost, uiLost, operatorLost, rejectedActions, resolveMotion, theme, themeMode, setThemeMode,
       applyTheme, selected, tab, toggleTheme, locale, localeMode, setLocaleMode, motion, motionMode,
       setMotionMode, t, leftOpen, rightW, showMini, meta, logFilter,

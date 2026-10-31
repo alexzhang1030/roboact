@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import contextlib
+import itertools
 import json
 import mimetypes
 import os
@@ -656,6 +657,21 @@ class App:
         if self.test_mode and route == "/api/test/step-delay" and method == "POST":
             self.ex.step_delay_s = float((data or {}).get("seconds") or 0)
             await self._json(writer, 200, {"ok": True, "seconds": self.ex.step_delay_s})
+            return
+        if self.test_mode and route == "/api/test/adapter" and method == "GET":
+            times = list(getattr(self.adapter, "heartbeat_times", []))
+            gaps = [b - a for a, b in itertools.pairwise(times)]
+            await self._json(
+                writer,
+                200,
+                {
+                    "beats": times,
+                    "max_gap_s": max(gaps) if gaps else 0.0,
+                    "goals_cancelled_by_lost_heartbeat": getattr(
+                        self.adapter, "goals_cancelled_by_lost_heartbeat", 0
+                    ),
+                },
+            )
             return
         if self.test_mode and route == "/api/test/adapter" and method == "POST":
             data = data or {}

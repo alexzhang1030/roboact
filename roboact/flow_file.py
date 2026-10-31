@@ -406,39 +406,7 @@ def inspect_values(
     cls = get_type(typ)
     specs = {s.name: s for s in _param_specs(typ)}
     schema = _params_schema(typ)
-    props = schema.get("properties") if isinstance(schema.get("properties"), dict) else {}
-    for key, val in values.items():
-        spec = specs.get(key)
-        if spec is not None and spec.secret and val is None:
-            continue
-        schema_type = ""
-        prop = props.get(key) if isinstance(props, dict) else None
-        if isinstance(prop, dict):
-            raw_t = prop.get("type")
-            if isinstance(raw_t, list):
-                schema_type = str(raw_t[0] if raw_t else "")
-            elif raw_t is not None:
-                schema_type = str(raw_t)
-            enum = prop.get("enum")
-            if isinstance(enum, list) and val not in enum:
-                dest.type_errors.append({"node": title, "param": key, "type": "enum"})
-                continue
-        declared = (spec.type if spec is not None else schema_type) or schema_type
-        if spec is not None and spec.enum is not None and val not in spec.enum:
-            dest.type_errors.append({"node": title, "param": key, "type": "enum"})
-            continue
-        if declared and not _value_matches_type(val, declared):
-            dest.type_errors.append({"node": title, "param": key, "type": declared})
-            continue
-        if (
-            spec is not None
-            and spec.range is not None
-            and isinstance(val, (int, float))
-            and not isinstance(val, bool)
-        ):
-            lo, hi = spec.range
-            if val < lo or val > hi:
-                dest.limit_errors.append({"node": title, "param": key})
+    _check_against_schema(values, schema, schema, title, dest, specs)
     if cls.side_effect == SideEffect.motion:
         _collect_motion_limits(values, title, adapter, dest)
     return dest
@@ -941,6 +909,184 @@ def _params_schema(typ: str) -> dict[str, Any]:
     except Exception:
         return {}
     return schema
+
+
+def _schema_ref(schema: dict[str, Any], root: dict[str, Any]) -> dict[str, Any]:
+    ref = schema.get("$ref")
+    if not isinstance(ref, str) or not ref.startswith("#/"):
+        return schema
+    cur: Any = root
+    for part in ref[2:].split("/"):
+        if not isinstance(cur, dict) or part not in cur:
+            return schema
+        cur = cur[part]
+    return cur if isinstance(cur, dict) else schema
+
+
+def _as_type_list(raw: Any) -> list[str]:
+    if isinstance(raw, list):
+        return [str(t) for t in raw]
+    if isinstance(raw, str):
+        return [raw]
+    return []
+
+
+def _flatten_schema(schema: dict[str, Any], root: dict[str, Any]) -> dict[str, Any]:
+    schema = _schema_ref(schema, root)
+    out = dict(schema)
+    types = _as_type_list(schema.get("type"))
+    enums: list[Any] = list(schema["enum"]) if isinstance(schema.get("enum"), list) else []
+    props: dict[str, Any] = (
+        dict(schema["properties"]) if isinstance(schema.get("properties"), dict) else {}
+    )
+    items = schema.get("items")
+    minimum = schema.get("minimum")
+    maximum = schema.get("maximum")
+
+    allof = schema.get("allOf")
+    if isinstance(allof, list):
+        for part in allof:
+            if not isinstance(part, dict):
+                continue
+            flat = _flatten_schema(part, root)
+            types.extend(_as_type_list(flat.get("type")))
+            if isinstance(flat.get("enum"), list):
+                enums.extend(flat["enum"])
+            if isinstance(flat.get("properties"), dict):
+                props.update(flat["properties"])
+            if "items" in flat:
+                items = flat["items"]
+            if "minimum" in flat:
+                minimum = flat["minimum"]
+            if "maximum" in flat:
+                maximum = flat["maximum"]
+
+    alts = schema.get("anyOf") or schema.get("oneOf")
+    if isinstance(alts, list):
+        for part in alts:
+            if not isinstance(part, dict):
+                continue
+            flat = _flatten_schema(part, root)
+            types.extend(_as_type_list(flat.get("type")))
+            if isinstance(flat.get("enum"), list):
+                enums.extend(flat["enum"])
+            if isinstance(flat.get("properties"), dict):
+                props.update(flat["properties"])
+            if "items" in flat:
+                items = flat["items"]
+            if isinstance(flat.get("minimum"), (int, float)) and (
+                not isinstance(minimum, (int, float)) or float(flat["minimum"]) < float(minimum)
+            ):
+                minimum = flat["minimum"]
+            if isinstance(flat.get("maximum"), (int, float)) and (
+                not isinstance(maximum, (int, float)) or float(flat["maximum"]) > float(maximum)
+            ):
+                maximum = flat["maximum"]
+
+    if types:
+        out["type"] = types
+    if enums:
+        out["enum"] = enums
+    if props:
+        out["properties"] = props
+    if items is not None:
+        out["items"] = items
+    if minimum is not None:
+        out["minimum"] = minimum
+    if maximum is not None:
+        out["maximum"] = maximum
+    return out
+
+
+def _check_against_schema(
+    values: dict[str, Any],
+    schema: dict[str, Any],
+    root: dict[str, Any],
+    title: str,
+    dest: RunBlockers,
+    specs: dict[str, ParamSpec],
+    prefix: str = "",
+) -> None:
+    resolved = _flatten_schema(schema, root)
+    props = resolved.get("properties")
+    if not isinstance(props, dict):
+        props = {}
+    for key, val in values.items():
+        spec = specs.get(key) if prefix == "" else None
+        path = f"{prefix}.{key}" if prefix else key
+        if spec is not None and spec.secret and val is None:
+            continue
+        prop = props.get(key)
+        if isinstance(prop, dict):
+            before = len(dest.type_errors) + len(dest.limit_errors)
+            _check_schema_value(val, prop, root, title, path, dest)
+            if spec is not None and len(dest.type_errors) + len(dest.limit_errors) == before:
+                _check_spec_value(val, spec, title, path, dest)
+            continue
+        _check_spec_value(val, spec, title, path, dest)
+
+
+def _check_schema_value(
+    val: Any,
+    schema: dict[str, Any],
+    root: dict[str, Any],
+    title: str,
+    path: str,
+    dest: RunBlockers,
+) -> None:
+    schema = _flatten_schema(schema, root)
+    types = _as_type_list(schema.get("type"))
+    if val is None and ("null" in types or not types):
+        return
+    enum = schema.get("enum")
+    if isinstance(enum, list) and enum and val not in enum:
+        dest.type_errors.append({"node": title, "param": path, "type": "enum"})
+        return
+    if types:
+        ok = False
+        for declared in types:
+            if declared == "null" and val is None:
+                ok = True
+                break
+            if _value_matches_type(val, declared):
+                ok = True
+                break
+        if not ok:
+            dest.type_errors.append({"node": title, "param": path, "type": types[0]})
+            return
+    if isinstance(val, (int, float)) and not isinstance(val, bool):
+        lo = schema.get("minimum")
+        hi = schema.get("maximum")
+        if isinstance(lo, (int, float)) and val < float(lo):
+            dest.limit_errors.append({"node": title, "param": path})
+            return
+        if isinstance(hi, (int, float)) and val > float(hi):
+            dest.limit_errors.append({"node": title, "param": path})
+            return
+    if isinstance(val, dict) and ("object" in types or isinstance(schema.get("properties"), dict)):
+        _check_against_schema(val, schema, root, title, dest, {}, prefix=path)
+    items = schema.get("items")
+    if isinstance(val, list) and isinstance(items, dict):
+        for i, item in enumerate(val):
+            _check_schema_value(item, items, root, title, f"{path}[{i}]", dest)
+
+
+def _check_spec_value(
+    val: Any, spec: ParamSpec | None, title: str, path: str, dest: RunBlockers
+) -> None:
+    if spec is None:
+        return
+    if spec.enum is not None and val not in spec.enum:
+        dest.type_errors.append({"node": title, "param": path, "type": "enum"})
+        return
+    declared = spec.type or ""
+    if declared and not _value_matches_type(val, declared):
+        dest.type_errors.append({"node": title, "param": path, "type": declared})
+        return
+    if spec.range is not None and isinstance(val, (int, float)) and not isinstance(val, bool):
+        lo, hi = spec.range
+        if val < lo or val > hi:
+            dest.limit_errors.append({"node": title, "param": path})
 
 
 def _collect_motion_limits(obj: Any, title: str, adapter: Adapter, out: RunBlockers) -> None:

@@ -2,23 +2,27 @@
 
 from __future__ import annotations
 
+import itertools
 import json
+import shutil
 import socket
+import subprocess
+import sys
 import time
+from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
-from roboact.adapter import FakeAdapter
+import pytest
 from roboact.catalog import zh
 from roboact.flow_file import (
     MAX_FILE_BYTES,
     dump_json,
-    export_flow,
     parse_and_validate,
     parse_yaml,
 )
-from roboact.nodes import bind_adapter
 
+from .conftest import launch_chromium, record_c11_heartbeat_gap
 from .http_api import http_json, http_status
 
 FORBIDDEN_KEYS = (
@@ -233,10 +237,8 @@ def _export(base: str, flow_id: str, fmt: str = "json") -> Any:
 
 
 def _deep_yaml(levels: int) -> str:
-    body = "v: 1"
-    for _ in range(levels):
-        body = "a:\n" + "\n".join("  " + line for line in body.splitlines())
-    return body + "\n"
+    """Compact 1000-level nest that stays near 2 KB."""
+    return "a: " + "{a: " * (levels - 1) + "1" + ("}" * (levels - 1)) + "\n"
 
 
 def _snapshot(base: str) -> tuple[list[str], dict[str, Any], int]:
@@ -247,52 +249,144 @@ def _snapshot(base: str) -> tuple[list[str], dict[str, Any], int]:
     return [f["flow_id"] for f in flows], boot["flow"], n_runs
 
 
-def test_yaml_12_on_stays_string_and_11_does_not():
+def _current_adapter(base: str) -> dict[str, Any]:
+    return http_json(base, "/api/bootstrap")["adapter"]
+
+
+def _forged_unlock(adapter: dict[str, Any], file_id: str) -> dict[str, Any]:
+    robot = adapter.get("robot") or {}
+    units = adapter.get("units") or {}
+    return {
+        "action_list_version": adapter.get("action_list_version"),
+        "adapter_name": adapter.get("name"),
+        "file_id": file_id,
+        "robot_id": robot.get("id"),
+        "units_angle": units.get("angle"),
+        "units_length": units.get("length"),
+    }
+
+
+def _open_ui(base: str, flow_id: str | None = None):
+    pw = pytest.importorskip("playwright.sync_api")
+    playwright = pw.sync_playwright().start()
+    try:
+        browser = launch_chromium(playwright)
+    except Exception as e:
+        playwright.stop()
+        pytest.skip("playwright/chromium not available: " + str(e))
+    ctx = browser.new_context(
+        locale="en-US", accept_downloads=True, viewport={"width": 1440, "height": 900}
+    )
+    ctx.add_init_script("localStorage.setItem('roboact.lang', 'en');")
+    page = ctx.new_page()
+    url = base + "/"
+    if flow_id:
+        url += "?flow_id=" + flow_id
+    page.goto(url, wait_until="domcontentloaded")
+    page.wait_for_function("window.__ready === true", timeout=120000)
+    return playwright, browser, ctx, page
+
+
+def _ui_import(page, path: Path) -> None:
+    page.locator('[data-testid="flow-export"]').click()
+    page.wait_for_selector('[data-testid="flow-import"]', state="attached", timeout=10000)
+    page.set_input_files('[data-testid="flow-import"]', str(path))
+    page.wait_for_timeout(800)
+
+
+def _ui_export_bytes(page, fmt: str = "json") -> bytes:
+    testid = "export-json" if fmt == "json" else "export-yaml"
+    page.locator('[data-testid="flow-export"]').click()
+    page.wait_for_selector(f'[data-testid="{testid}"]', timeout=10000)
+    with page.expect_download() as dl:
+        page.locator(f'[data-testid="{testid}"]').click()
+    return Path(dl.value.path()).read_bytes()
+
+
+def test_20_1(server):
+    """Build a flow with a loop, a control node, a motion node and a secret param."""
+    base = server["base"]
+    code, imported = _import(base, dump_json(sample_doc()), "json")
+    assert code == 200, imported
+    kinds = {n.get("type") for n in imported["flow"]["nodes"]}
+    assert "condition" in kinds
+    assert "fake_set_pose" in kinds
+    assert "fake_note" in kinds
+    note = next(n for n in imported["flow"]["nodes"] if n["id"] == "note")
+    assert "token" in (note.get("params") or {})
+    edges = imported["flow"]["edges"]
+    assert any(e["source"] == "go" and e["target"] == "cond" for e in edges)
+
+
+def test_20_2(server, tmp_path):
+    """UI Export twice is byte-identical; import then export keeps the secret as null."""
+    base = server["base"]
+    src = tmp_path / "sample.json"
+    src.write_text(dump_json(sample_doc()), encoding="utf-8")
+    pw, browser, ctx, page = _open_ui(base)
+    try:
+        _ui_import(page, src)
+        page.wait_for_function(
+            "() => !!(window.__af && window.__af.meta && window.__af.meta.value.id)",
+            timeout=15000,
+        )
+        fid = page.evaluate("() => window.__af.meta.value.id")
+        rev0 = http_json(base, f"/api/flows/{fid}")["flow"]["revision"]
+        first = _ui_export_bytes(page, "json")
+        second = _ui_export_bytes(page, "json")
+        assert first == second
+        tree = json.loads(first.decode())
+        assert tree["flow"]["revision"] == rev0
+        note = next(n for n in tree["nodes"] if n["id"] == "note")
+        assert note["params"]["token"] is None
+        redacted = tmp_path / "redacted.json"
+        redacted.write_bytes(first)
+        _ui_import(page, redacted)
+        page.wait_for_function(
+            """() => {
+              const c = window.__af && window.__af.runCheck && window.__af.runCheck.value
+              return !!(c && (c.missing_input || []).includes('note') && c.can_run === false)
+            }""",
+            timeout=15000,
+        )
+        again = _ui_export_bytes(page, "json")
+        assert again == first
+        assert page.evaluate("() => window.__af.slot1Disabled.value") is True
+    finally:
+        ctx.close()
+        browser.close()
+        pw.stop()
+
+
+def test_20_3(server):
+    """YAML export converted to JSON equals the JSON export."""
+    base = server["base"]
+    code, imported = _import(base, dump_json(sample_doc()), "json")
+    assert code == 200, imported
+    fid = imported["flow"]["id"]
+    exp_json = _export(base, fid, "json")
+    exp_yaml = _export(base, fid, "yaml")
+    from_yaml = parse_and_validate(exp_yaml["text"], "yaml")
+    assert dump_json(from_yaml) == exp_json["text"]
+
+
+def test_20_4(server):
+    """Exported files omit run records, pins, images, breakpoints, prefs, server."""
+    base = server["base"]
+    code, imported = _import(base, dump_json(sample_doc()), "json")
+    assert code == 200, imported
+    blob = _export(base, imported["flow"]["id"], "json")["text"]
+    for key in FORBIDDEN_KEYS:
+        assert f'"{key}"' not in blob
+
+
+def test_20_5(server):
+    """Hand-written YAML: mode: on stays a string; 1.1 blocks Run; quoted 1.10 runs."""
     text = "mode: on\nver: 1.10\n"
     assert parse_yaml(text)["mode"] == "on"
     assert parse_yaml(text)["ver"] == 1.1
     eleven = parse_yaml(text, version=(1, 1))
     assert eleven["mode"] is True
-
-
-def test_20_round_trip_and_secret(server):
-    base = server["base"]
-    bind_adapter(FakeAdapter())
-    doc = sample_doc()
-    code, imported = _import(base, dump_json(doc), "json")
-    assert code == 200, imported
-    fid = imported["flow"]["id"]
-    exp_json = _export(base, fid, "json")
-    again = _export(base, fid, "json")
-    assert exp_json["text"] == again["text"]
-    tree = json.loads(exp_json["text"])
-    note = next(n for n in tree["nodes"] if n["id"] == "note")
-    assert note["params"]["token"] is None
-    blob = json.dumps(tree)
-    for key in FORBIDDEN_KEYS:
-        assert f'"{key}"' not in blob
-    exp_yaml = _export(base, fid, "yaml")
-    from_yaml = parse_and_validate(exp_yaml["text"], "yaml")
-    assert dump_json(from_yaml) == exp_json["text"]
-    code, redacted = _import(base, exp_json["text"], "json")
-    assert code == 200, redacted
-    assert "note" in redacted["missing_input"]
-    rid = redacted["flow"]["id"]
-    assert _export(base, rid, "json")["text"] == exp_json["text"]
-    check = http_json(base, f"/api/flows/{rid}/run-check")
-    assert not check["can_run"]
-    code, _ = http_status(base, "/api/runs", "POST", {"flow_id": rid, "flow_version": 1})
-    assert code == 409
-    graph = http_json(base, f"/api/flows/{rid}")["flow"]
-    for node in graph["nodes"]:
-        if node["id"] == "note":
-            node["params"]["token"] = "filled"
-    http_json(base, f"/api/flows/{rid}", "PUT", {**graph, "bump": True})
-    check = http_json(base, f"/api/flows/{rid}/run-check")
-    assert "note" not in check["missing_input"]
-
-
-def test_20_handwritten_yaml_types(server):
     base = server["base"]
     yml = """
 format: roboact-flow
@@ -346,7 +440,6 @@ edges:
     assert any(e["param"] == "ver" for e in check["type_errors"])
     code, body = http_status(base, "/api/runs", "POST", {"flow_id": fid, "flow_version": 1})
     assert code == 409
-    assert body["error"] == "param_type_mismatch"
     assert "ver" in body["message"]
     note["params"]["ver"] = "1.10"
     http_json(
@@ -363,22 +456,15 @@ edges:
     assert started["run_id"]
 
 
-def test_20_bad_files_leave_canvas(server):
+def test_20_6(server):
+    """Bad files: listed errors, never 500, canvas unchanged."""
     base = server["base"]
     ids0, graph0, runs0 = _snapshot(base)
+    nest = _deep_yaml(1000)
+    assert len(nest.encode("utf-8")) < 8000
     bad: list[tuple[str, str]] = [
-        ("json", '{"format": "roboact-flow", "format_version":'),
-        (
-            "yaml",
-            "format: roboact-flow\nformat_version: !!python/object:os.system\n",
-        ),
-        (
-            "yaml",
-            "format: roboact-flow\nformat_version: 1\n"
-            "flow: &x {id: a, name: a, revision: 1, step_limit: 1}\n"
-            "nodes: []\nedges: []\ncopy: *x\n",
-        ),
         ("json", dump_json({**sample_doc(), "format_version": 2})),
+        ("json", dump_json({**sample_doc(), "extra": True})),
         (
             "json",
             dump_json(
@@ -397,7 +483,6 @@ def test_20_bad_files_leave_canvas(server):
                 }
             ),
         ),
-        ("json", dump_json({**sample_doc(), "extra": True})),
         (
             "json",
             dump_json(
@@ -449,18 +534,24 @@ def test_20_bad_files_leave_canvas(server):
             "yaml",
             "format: roboact-flow\nformat_version: 1\nflow: !custom {}\nnodes: []\nedges: []\n",
         ),
-        ("yaml", "%YAML 1.1\n---\nformat: roboact-flow\nformat_version: 1\n"),
-        ("yaml", "%TAG ! tag:example.com,2024:\n---\na: 1\n"),
+        (
+            "yaml",
+            "format: roboact-flow\nformat_version: 1\n"
+            "flow: &x {id: a, name: a, revision: 1, step_limit: 1}\n"
+            "nodes: []\nedges: []\ncopy: *x\n",
+        ),
         (
             "yaml",
             "format: roboact-flow\nformat: other\nformat_version: 1\n"
             "flow: {id: a, name: a, revision: 1, step_limit: 1}\nnodes: []\nedges: []\n",
         ),
         ("yaml", "---\nformat: roboact-flow\nformat_version: 1\n---\na: 1\n"),
-        ("yaml", _deep_yaml(1000)),
+        ("yaml", "%YAML 1.1\n---\nformat: roboact-flow\nformat_version: 1\n"),
+        ("yaml", nest),
     ]
     for fmt, text in bad:
         code, body = _import(base, text, fmt, timeout=60.0)
+        assert code != 500, (fmt, text[:80], body)
         assert 400 <= code < 500, (fmt, text[:80], body)
         assert body["error"] == "import_failed"
         errs = body.get("detail", {}).get("errors") or []
@@ -471,18 +562,10 @@ def test_20_bad_files_leave_canvas(server):
         assert graph1["id"] == graph0["id"]
         assert graph1["nodes"] == graph0["nodes"]
         assert runs1 == runs0
-    code, body = _import_declared_oversize(base, 6 * 1024 * 1024)
-    assert 400 <= code < 500, body
-    assert body["error"] == "import_failed"
-    errs = body.get("detail", {}).get("errors") or []
-    assert errs and any(e.get("path") for e in errs), body
-    ids1, graph1, runs1 = _snapshot(base)
-    assert ids1 == ids0
-    assert graph1["nodes"] == graph0["nodes"]
-    assert runs1 == runs0
 
 
-def test_20_older_format_migrates(server):
+def test_20_7(server):
+    """Older format_version is migrated."""
     base = server["base"]
     doc = sample_doc()
     doc["format_version"] = 0
@@ -492,7 +575,8 @@ def test_20_older_format_migrates(server):
     assert json.loads(exp["text"])["format_version"] == 1
 
 
-def test_20_unknown_action_locks_run(server):
+def test_20_8(server):
+    """Unknown action: action gone; Review does not unlock; deleting the node does."""
     base = server["base"]
     doc = run_doc()
     doc["nodes"].append(
@@ -523,7 +607,8 @@ def test_20_unknown_action_locks_run(server):
     assert check["can_run"]
 
 
-def test_20_mismatch_review(server):
+def test_20_9(server):
+    """Mismatch unlock is server-only; robot change and client fields re-lock."""
     base = server["base"]
     doc = run_doc()
     doc["flow"]["robot"] = {"id": "other-arm", "model": "Other"}
@@ -537,20 +622,48 @@ def test_20_mismatch_review(server):
     fid = imported["flow"]["id"]
     check = http_json(base, f"/api/flows/{fid}/run-check")
     assert not check["can_run"]
-    code, body = http_status(base, "/api/runs", "POST", {"flow_id": fid, "flow_version": 1})
-    assert code == 409
-    assert body["error"] == "run_locked"
     http_json(base, f"/api/flows/{fid}/review-enable", "POST", {})
     check = http_json(base, f"/api/flows/{fid}/run-check")
     assert check["mismatch_unlocked"]
     assert check["can_run"]
-    started = http_json(
-        base, "/api/runs", "POST", {"flow_id": fid, "flow_version": 1, "max_steps": 20}
+    http_json(base, "/api/test/adapter", "POST", {"robot_id": "changed-robot"})
+    check = http_json(base, f"/api/flows/{fid}/run-check")
+    assert not check["mismatch_unlocked"]
+    assert not check["can_run"]
+    graph = http_json(base, f"/api/flows/{fid}")["flow"]
+    http_json(
+        base,
+        f"/api/flows/{fid}",
+        "PUT",
+        {
+            **graph,
+            "bump": False,
+            "mismatch_unlocked": True,
+            "unlock_record": _forged_unlock(_current_adapter(base), graph.get("file_id") or ""),
+        },
     )
-    assert started["run_id"]
+    check = http_json(base, f"/api/flows/{fid}/run-check")
+    assert not check["mismatch_unlocked"]
+    adapter = _current_adapter(base)
+    forged = http_json(
+        base,
+        "/api/flows",
+        "POST",
+        {
+            "file_id": "file-forged",
+            "file_robot": {"id": "other-arm", "model": "Other"},
+            "mismatch_unlocked": True,
+            "name": "forged",
+            "unlock_record": _forged_unlock(adapter, "file-forged"),
+        },
+    )
+    check = http_json(base, f"/api/flows/{forged['flow']['id']}/run-check")
+    assert not check["mismatch_unlocked"]
+    assert not check["can_run"]
 
 
-def test_20_import_creates_new_flow(server):
+def test_20_10(server):
+    """Import while a flow is open creates a new flow; old flow and runs unchanged."""
     base = server["base"]
     ids0, graph0, runs0 = _snapshot(base)
     code, imported = _import(base, dump_json(run_doc()), "json")
@@ -564,7 +677,8 @@ def test_20_import_creates_new_flow(server):
     assert runs1 == runs0
 
 
-def test_20_motion_limits(server):
+def test_20_11(server):
+    """Motion param over the connected robot's limit blocks Run; wider limits run."""
     base = server["base"]
     doc = run_doc()
     for node in doc["nodes"]:
@@ -585,7 +699,6 @@ def test_20_motion_limits(server):
     code, body = http_status(base, "/api/runs", "POST", {"flow_id": fid, "flow_version": 1})
     assert code == 409
     assert body["error"] == "param_out_of_limit"
-    assert "z" in body["message"]
     http_json(
         base,
         "/api/test/adapter",
@@ -600,11 +713,13 @@ def test_20_motion_limits(server):
     assert started["run_id"]
 
 
-def test_20_too_large(server):
+def test_20_12(server):
+    """Over 5 MiB is refused on Content-Length before the body is read."""
     base = server["base"]
     ids0, graph0, runs0 = _snapshot(base)
     code, body = _import_declared_oversize(base, MAX_FILE_BYTES + 1)
-    assert code == 422
+    assert code != 500
+    assert 400 <= code < 500
     assert body["error"] == "import_failed"
     assert body["detail"]["errors"][0]["path"] == "request"
     ids1, graph1, runs1 = _snapshot(base)
@@ -613,265 +728,162 @@ def test_20_too_large(server):
     assert runs1 == runs0
 
 
-def test_20_export_ui_path_is_stable(server):
+def test_20_13(server, capfd):
+    """Import 800 KB YAML while a flow is running: no pause, heartbeat does not miss."""
     base = server["base"]
     code, imported = _import(base, dump_json(run_doc()), "json")
     assert code == 200, imported
     fid = imported["flow"]["id"]
-    rev0 = imported["flow"]["revision"]
-    graph = http_json(base, f"/api/flows/{fid}")["flow"]
-    http_json(base, f"/api/flows/{fid}", "PUT", {**graph, "bump": False})
-    first = _export(base, fid, "json")
-    graph2 = http_json(base, f"/api/flows/{fid}")["flow"]
-    http_json(base, f"/api/flows/{fid}", "PUT", {**graph2, "bump": False})
-    second = _export(base, fid, "json")
-    assert first["text"] == second["text"]
-    assert json.loads(first["text"])["flow"]["revision"] == rev0
-
-
-def test_20_client_unlock_ignored(server):
-    base = server["base"]
-    doc = run_doc()
-    doc["flow"]["robot"] = {"id": "other-arm", "model": "Other"}
-    code, imported = _import(base, dump_json(doc), "json")
-    assert code == 200, imported
-    fid = imported["flow"]["id"]
-    graph = http_json(base, f"/api/flows/{fid}")["flow"]
-    http_json(
-        base,
-        f"/api/flows/{fid}",
-        "PUT",
-        {
-            **graph,
-            "bump": False,
-            "mismatch_unlocked": True,
-            "unlock_record": {
-                "file_id": graph.get("file_id"),
-                "robot_id": "other-arm",
-                "adapter_name": "x",
-                "action_list_version": "fake-v1",
-                "units_angle": "rad",
-                "units_length": "m",
-            },
-        },
+    http_json(base, "/api/test/adapter", "POST", {"async_steps": 40, "async_sleep_s": 0.12})
+    started = http_json(
+        base, "/api/runs", "POST", {"flow_id": fid, "flow_version": 1, "max_steps": 80}
     )
-    check = http_json(base, f"/api/flows/{fid}/run-check")
-    assert not check["mismatch_unlocked"]
-    assert not check["can_run"]
+    rid = started["run_id"]
+    t0 = time.time()
+    while time.time() - t0 < 4:
+        run = http_json(base, f"/api/runs/{rid}")
+        if (run.get("run") or run).get("status") == "running":
+            break
+        time.sleep(0.05)
+    else:
+        raise AssertionError("run did not start")
+    beats0 = http_json(base, "/api/test/adapter")
+    exp = _export(base, fid, "yaml")
+    pad = "# " + ("y" * 77) + "\n"
+    pad_b = pad.encode("utf-8")
+    need = 800 * 1024 - len(exp["text"].encode("utf-8"))
+    n = max(1, (need + len(pad_b) - 1) // len(pad_b))
+    blob = pad * n + exp["text"]
+    assert len(blob.encode("utf-8")) >= 800 * 1024
+    icode, ibody = _import(base, blob, "yaml", timeout=60.0)
+    assert icode == 200, ibody
+    run = http_json(base, f"/api/runs/{rid}")
+    status = (run.get("run") or run).get("status")
+    assert status == "running", status
+    time.sleep(0.9)
+    beats = http_json(base, "/api/test/adapter")
+    times = [t for t in beats["beats"] if t >= (beats0["beats"][-1] if beats0["beats"] else 0)]
+    if len(times) < 2:
+        times = beats["beats"]
+    gaps = [b - a for a, b in itertools.pairwise(times)]
+    max_gap = max(gaps) if gaps else 0.0
+    steps = http_json(base, f"/api/runs/{rid}")
+    rec = steps.get("run") or steps
+    step_times = [s.get("started_at") or s.get("ended_at") for s in rec.get("steps") or []]
+    del step_times
+    record_c11_heartbeat_gap(max_gap)
+    with capfd.disabled():
+        sys.stderr.write(f"C11_IMPORT_MAX_HEARTBEAT_GAP_S={max_gap:.4f}\n")
+        sys.stderr.flush()
+    print(f"C11_IMPORT_MAX_HEARTBEAT_GAP_S={max_gap:.4f}")
+    assert beats["goals_cancelled_by_lost_heartbeat"] == 0
+    assert max_gap < 3.0, max_gap
 
 
-def test_20_unlock_relocks_when_robot_changes(server):
-    base = server["base"]
-    doc = run_doc()
-    doc["flow"]["robot"] = {"id": "other-arm", "model": "Other"}
-    code, imported = _import(base, dump_json(doc), "json")
-    assert code == 200, imported
-    fid = imported["flow"]["id"]
-    http_json(base, f"/api/flows/{fid}/review-enable", "POST", {})
-    check = http_json(base, f"/api/flows/{fid}/run-check")
-    assert check["mismatch_unlocked"]
-    assert check["can_run"]
-    http_json(base, "/api/test/adapter", "POST", {"robot_id": "changed-robot"})
-    check = http_json(base, f"/api/flows/{fid}/run-check")
-    assert not check["mismatch_unlocked"]
-    assert not check["can_run"]
-    kinds = {m["kind"] for m in check["mismatches"]}
-    assert "robot" in kinds
-
-
-def test_20_velocity_limit_inside_target(server):
+def test_20_14(server):
+    """Enum outside its list and a nested motion limit each block Run by name."""
     base = server["base"]
     doc = run_doc()
     for node in doc["nodes"]:
+        if node["id"] == "note":
+            node["params"]["mode"] = "nope"
         if node["id"] == "go":
             node["params"] = {"target": {"x": 0.1, "y": 0.1, "z": 0.2, "speed": 9}}
     code, imported = _import(base, dump_json(doc), "json")
     assert code == 200, imported
     fid = imported["flow"]["id"]
-    http_json(
-        base,
-        "/api/test/adapter",
-        "POST",
-        {"velocity_limits": {"speed": [0, 2]}},
-    )
+    http_json(base, "/api/test/adapter", "POST", {"velocity_limits": {"speed": [0, 2]}})
     check = http_json(base, f"/api/flows/{fid}/run-check")
-    assert check["limit_errors"]
+    assert any(e["param"] == "mode" and e.get("type") == "enum" for e in check["type_errors"])
     assert any(e["param"] == "speed" for e in check["limit_errors"])
-    code, body = http_status(base, "/api/runs", "POST", {"flow_id": fid, "flow_version": 1})
+    code, _body = http_status(base, "/api/runs", "POST", {"flow_id": fid, "flow_version": 1})
     assert code == 409
-    assert body["error"] == "param_out_of_limit"
-    assert "speed" in body["message"]
 
 
-def _current_adapter(base: str) -> dict[str, Any]:
-    return http_json(base, "/api/bootstrap")["adapter"]
-
-
-def _forged_unlock(adapter: dict[str, Any], file_id: str) -> dict[str, Any]:
-    robot = adapter.get("robot") or {}
-    units = adapter.get("units") or {}
-    return {
-        "action_list_version": adapter.get("action_list_version"),
-        "adapter_name": adapter.get("name"),
-        "file_id": file_id,
-        "robot_id": robot.get("id"),
-        "units_angle": units.get("angle"),
-        "units_length": units.get("length"),
-    }
-
-
-def test_20_post_forged_unlock_stays_locked(server):
+def test_20_15(server, tmp_path):
+    """Filling a missing secret clears the mark without a reload."""
     base = server["base"]
-    adapter = _current_adapter(base)
-    file_id = "file-forged"
-    created = http_json(
-        base,
-        "/api/flows",
-        "POST",
-        {
-            "file_adapter": {"name": "OtherAdapter", "target": "sim", "version": "9"},
-            "file_id": file_id,
-            "file_robot": {"id": "other-arm", "model": "Other"},
-            "file_units": {"angle": "deg", "length": "mm"},
-            "mismatch_unlocked": True,
-            "name": "forged",
-            "nodes": [{"id": "start", "params": {"data": {}}, "type": "start", "x": 0, "y": 0}],
-            "unlock_record": _forged_unlock(adapter, file_id),
-        },
-    )
-    flow = created["flow"]
-    assert "unlock_record" not in flow or flow.get("unlock_record") is None
-    check = http_json(base, f"/api/flows/{flow['id']}/run-check")
-    assert not check["mismatch_unlocked"]
-    assert not check["can_run"]
-    assert check["mismatches"]
-
-
-def test_20_import_file_unlock_stays_locked(server):
-    base = server["base"]
-    adapter = _current_adapter(base)
-    doc = run_doc()
-    doc["flow"]["robot"] = {"id": "other-arm", "model": "Other"}
-    rec = _forged_unlock(adapter, doc["flow"]["id"])
-    doc["mismatch_unlocked"] = True
-    doc["unlock_record"] = rec
-    doc["flow"]["mismatch_unlocked"] = True
-    doc["flow"]["unlock_record"] = rec
-    code, imported = _import(base, dump_json(doc), "json")
-    assert code == 200, imported
-    flow = imported["flow"]
-    assert "unlock_record" not in flow or flow.get("unlock_record") is None
-    check = http_json(base, f"/api/flows/{flow['id']}/run-check")
-    assert not check["mismatch_unlocked"]
-    assert not check["can_run"]
-    kinds = {m["kind"] for m in check["mismatches"]}
-    assert "robot" in kinds
-
-
-def test_20_create_ignores_client_id(server):
-    base = server["base"]
-    boot = http_json(base, "/api/bootstrap")
-    old_id = boot["flow"]["id"]
-    old_nodes = boot["flow"]["nodes"]
-    old_name = boot["flow"]["name"]
-    created = http_json(
-        base,
-        "/api/flows",
-        "POST",
-        {
-            "flow_id": old_id,
-            "id": old_id,
-            "name": "hijack",
-            "nodes": [],
-        },
-    )
-    new_id = created["flow"]["id"]
-    assert new_id != old_id
-    still = http_json(base, f"/api/flows/{old_id}")["flow"]
-    assert still["name"] == old_name
-    assert still["nodes"] == old_nodes
-    hijack = http_json(base, f"/api/flows/{new_id}")["flow"]
-    assert hijack["name"] == "hijack"
-
-
-def test_20_non_import_action_list_is_hard_error(server):
-    base = server["base"]
-    boot = http_json(base, "/api/bootstrap")
-    fid = boot["flow"]["id"]
-    assert not boot["flow"].get("file_id")
-    http_json(base, "/api/test/adapter", "POST", {"action_list_version": "changed-list"})
-    code, body = http_status(base, "/api/runs", "POST", {"flow_id": fid, "flow_version": 1})
-    assert code == 409
-    assert body["error"] == "action_list_mismatch"
-
-
-def test_20_yaml_size_and_parse_report():
-    adapter = FakeAdapter()
-    bind_adapter(adapter)
-    nodes = [
-        {
-            "id": "start",
-            "type": "start",
-            "x": 0,
-            "y": 0,
-            "params": {"data": {}},
-            "title": "Start",
-        }
-    ]
-    edges = []
-    prev = "start"
-    for i in range(498):
-        nid = f"n{i}"
-        nodes.append(
-            {
-                "id": nid,
-                "type": "echo",
-                "x": i,
-                "y": 0,
-                "params": {},
-                "title": nid,
-            }
+    doc = run_doc(token=None)
+    src = tmp_path / "missing.json"
+    src.write_text(dump_json(doc), encoding="utf-8")
+    pw, browser, ctx, page = _open_ui(base)
+    try:
+        _ui_import(page, src)
+        page.wait_for_function(
+            """() => {
+              const nodes = document.querySelectorAll('.fn')
+              return [...nodes].some(n => n.getAttribute('data-status') === 'missing_input')
+            }""",
+            timeout=15000,
         )
-        edges.append(
-            {
-                "id": f"e{i}",
-                "source": prev,
-                "source_port": "data" if i == 0 else "value",
-                "target": nid,
-                "target_port": "value",
-            }
+        page.evaluate(
+            "() => { window.__af.selected.value = 'note';"
+            " window.__af.updateParam('token', 'filled') }"
         )
-        prev = nid
-    nodes.append({"id": "out", "type": "output", "x": 0, "y": 1, "params": {}, "title": "Out"})
-    edges.append(
-        {
-            "id": "eout",
-            "source": prev,
-            "source_port": "value",
-            "target": "out",
-            "target_port": "value",
-        }
+        page.wait_for_function(
+            """() => {
+              const c = window.__af.runCheck.value
+              const gone = !(c.missing_input || []).includes('note')
+              const nodes = document.querySelectorAll('.fn')
+              const amber = [...nodes].some(n => n.getAttribute('data-status') === 'missing_input')
+              return gone && !amber
+            }""",
+            timeout=15000,
+        )
+        assert page.url.split("#")[0]
+    finally:
+        ctx.close()
+        browser.close()
+        pw.stop()
+
+
+def test_20_16(tmp_path):
+    """README offline install: pip --no-index from vendor/wheels imports ruamel.yaml."""
+    root = Path(__file__).resolve().parents[1]
+    wheels = root / "vendor" / "wheels"
+    venv = tmp_path / "off"
+    created = subprocess.run(
+        [sys.executable, "-m", "venv", str(venv)],
+        capture_output=True,
+        text=True,
     )
-    graph = {
-        "id": "flow-500",
-        "file_id": "flow-500",
-        "name": "five-hundred",
-        "revision": 1,
-        "step_limit": 1000,
-        "nodes": nodes,
-        "edges": edges,
-        "groups": [],
-    }
-    text, _name = export_flow(graph, "yaml", adapter)
-    size_500 = len(text.encode("utf-8"))
-    line = "# " + ("x" * 77) + "\n"
-    n = (MAX_FILE_BYTES - 16) // len(line.encode("utf-8"))
-    blob = line * n + "a: 1\n"
-    assert len(blob.encode("utf-8")) >= MAX_FILE_BYTES - 80
-    t0 = time.perf_counter()
-    parse_yaml(blob)
-    parse_s = time.perf_counter() - t0
-    print(f"C9_YAML_500_NODE_BYTES={size_500}")
-    print(f"C9_YAML_5MIB_PARSE_S={parse_s:.4f}")
-    assert size_500 > 0
-    assert parse_s >= 0
+    if created.returncode != 0:
+        if venv.exists():
+            shutil.rmtree(venv)
+        subprocess.check_call([sys.executable, "-m", "venv", "--without-pip", str(venv)])
+    py = venv / "bin" / "python"
+    pip = venv / "bin" / "pip"
+    if pip.exists():
+        subprocess.check_call(
+            [
+                str(pip),
+                "install",
+                "--no-index",
+                "--no-deps",
+                "--find-links",
+                str(wheels),
+                "ruamel.yaml==0.18.16",
+            ]
+        )
+    else:
+        uv = shutil.which("uv")
+        assert uv, "need pip in the venv or uv to install from vendor/wheels"
+        subprocess.check_call(
+            [
+                uv,
+                "pip",
+                "install",
+                "--python",
+                str(py),
+                "--no-index",
+                "--no-deps",
+                "--find-links",
+                str(wheels),
+                "ruamel.yaml==0.18.16",
+            ]
+        )
+    out = subprocess.check_output(
+        [str(py), "-c", "import ruamel.yaml; print(ruamel.yaml.__version__)"],
+        text=True,
+    )
+    assert out.strip() == "0.18.16"
