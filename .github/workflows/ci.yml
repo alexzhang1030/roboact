@@ -15,6 +15,10 @@ jobs:
         run: python scripts/check_manifest.py
       - name: Private IPv4 scan (git ls-files only)
         run: python scripts/check_private_ip.py
+      - name: Gitleaks
+        run: |
+          curl -sSfL https://github.com/gitleaks/gitleaks/releases/download/v8.24.3/gitleaks_8.24.3_linux_x64.tar.gz | tar -xz -C /tmp gitleaks
+          /tmp/gitleaks detect --source . --no-banner --redact --exit-code 1
       - name: Tamper must fail
         run: |
           f=web/vendor/vue-flow-minimap.css

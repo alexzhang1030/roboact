@@ -10,6 +10,7 @@ export const KEYS = {
   grid: 'roboact.grid',
   lastFlow: 'roboact.lastFlow',
   canvas: 'roboact.canvas',
+  token: 'roboact.token',
 }
 
 export function readRaw(key) {
@@ -20,6 +21,18 @@ export function writeRaw(key, value) {
   try {
     if (value == null) localStorage.removeItem(key)
     else localStorage.setItem(key, value)
+  } catch (_) {}
+}
+
+/** Access token for a non-loopback bind. Session only (PRD v1.4.6). */
+export function readSession(key) {
+  try { return sessionStorage.getItem(key) } catch (_) { return null }
+}
+
+export function writeSession(key, value) {
+  try {
+    if (value == null) sessionStorage.removeItem(key)
+    else sessionStorage.setItem(key, value)
   } catch (_) {}
 }
 
@@ -52,4 +65,35 @@ export function detectBrowserMotionReduce() {
   } catch (_) {
     return false
   }
+}
+
+/** Last opened flow id. Reject junk so a bad localStorage value is ignored. */
+export function readLastFlow() {
+  const v = readRaw(KEYS.lastFlow)
+  if (!v || v.length > 80 || /[^a-zA-Z0-9_-]/.test(v)) return null
+  return v
+}
+
+/** Canvas pan/zoom. Bad or partial JSON falls back to Vue Flow defaults. */
+export function readCanvas() {
+  const raw = readRaw(KEYS.canvas)
+  if (!raw) return null
+  try {
+    const v = JSON.parse(raw)
+    if (!v || typeof v !== 'object') return null
+    const x = Number(v.x), y = Number(v.y), zoom = Number(v.zoom)
+    if (![x, y, zoom].every(Number.isFinite)) return null
+    if (zoom <= 0 || zoom > 8) return null
+    return { x, y, zoom }
+  } catch (_) {
+    return null
+  }
+}
+
+export function writeCanvas(v) {
+  if (!v) {
+    writeRaw(KEYS.canvas, null)
+    return
+  }
+  writeRaw(KEYS.canvas, JSON.stringify({ x: v.x, y: v.y, zoom: v.zoom }))
 }

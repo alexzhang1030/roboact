@@ -162,6 +162,13 @@ class App:
                 return g
         return self.store.create_flow("假适配器演示", self._demo_graph())
 
+    def _pick_flow(self, wanted: str | None) -> dict[str, Any]:
+        if wanted:
+            g = self.store.latest_graph(wanted)
+            if g:
+                return g
+        return self._ensure_flow()
+
     async def start(self) -> None:
         self.hub.start()
         self.ex.start_background()
@@ -209,7 +216,7 @@ class App:
             await self._static(writer, route, head=True)
             return
         if route == "/api/bootstrap" and method == "GET":
-            flow = self._ensure_flow()
+            flow = self._pick_flow(query.get("flow_id") or query.get("flow"))
             fid = flow["id"]
             runs = self.store.list_runs(fid)
             current = None

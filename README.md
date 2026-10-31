@@ -11,7 +11,7 @@ Offline, zero-build robot flow canvas. Wire the atomic actions an adapter expose
 
 Licence is [MIT](LICENSE) (`Copyright (c) 2026 alexzhang1030`). This repo is not published to PyPI and has no publish config.
 
-Specs in this tree: [PRD v1.4.4](docs/prd.md), [exec-model v0.2.1](docs/exec-model.md), [system-design](docs/system-design.md), [UI spec](docs/ui-spec.md) (**§17 is the current font and theme spec**), [Rams design sheets](docs/design/), [diagrams](docs/diagrams/). History: `docs/prd-v1.md`, `docs/exec-model-v0.md`, `docs/ui-spec-v0.md`, `docs/system-design-v0.md`. Project context for agents lives in [`.agents/docs/`](.agents/docs/), not `docs/decisions/`.
+Specs in this tree: [PRD v1.4.6](docs/prd.md), [exec-model](docs/exec-model.md), [system-design](docs/system-design.md), [UI spec](docs/ui-spec.md) (**§17 fonts/themes, §18 language** — first load follows `navigator.languages`, not the old “always English” line), [Rams design sheets](docs/design/), [diagrams](docs/diagrams/), [decision records](docs/decisions/). History: `docs/prd-v1.md`, `docs/exec-model-v0.md`, `docs/ui-spec-v0.md`, `docs/system-design-v0.md`. Agent-facing context also lives in [`.agents/docs/`](.agents/docs/).
 
 ## Install and run (offline)
 
@@ -66,7 +66,7 @@ python -m playwright install chromium   # if this machine has no Chrome
 pytest -q
 ```
 
-CI recomputes the sha256 of every file in `vendor-manifest.json` and requires an SPDX `license` plus the text under `vendor/licenses/`. It also scans **exactly** `git ls-files` for private IPv4 addresses (`10/8`, `192.168/16`, `172.16–31`); `127.0.0.1` and `0.0.0.0` are allowed.
+CI recomputes the sha256 of every file in `vendor-manifest.json` and requires an SPDX `license` plus the text under `vendor/licenses/`. It also scans **exactly** `git ls-files` for private IPv4 addresses (`10/8`, `192.168/16`, `172.16–31`); `127.0.0.1` and `0.0.0.0` are allowed, then runs gitleaks. The same pair is `scripts/pre-push.sh`. Enable the hook with `git config core.hooksPath .githooks`.
 
 `append_note` / `demo_notes.db` stay off the product path. They exist so executor / idempotency tests (A18, A20) have a write side effect. Product writes go through FakeAdapter memory.
 
@@ -83,7 +83,7 @@ Only items exercised **in a browser against the real backend** are marked pass. 
 | PRD 19.2 stop without waiting for the window | **pass** | Same as A5. |
 | PRD 19.4 wait until stable | **pass** | FakeAdapter: `test_prd194_wait_then_send_when_stable`, `test_prd194_timeout_precondition_failed_no_goal`, `test_prd194_no_wait_fails_on_first_read`. |
 | PRD 19.5 light and dark | **pass** | `test_prd195_prefers_dark_then_persists_light`: system dark first-loads dark; pick light and reload stays light. `test_prd195_follow_system_tracks_prefers`. `test_prd195_grayscale_six_states_both_themes`. `test_prd195_offline_fonts_both_themes`: offline load of `/static/fonts/` Inter / JetBrains Mono, no remote font request. Contrast: `test_contrast_ui_spec` (uses `docs/design/contrast.py`). |
-| Locale + settings | **pass** | `test_i18n` (catalog keys match; no hard-coded CJK in `web/` outside catalogs). `test_prd196_*` (navigator language, persist, English overflow, clear storage resets display prefs not timeouts). `test_prd198_codes_survive_language_switch`. |
+| Locale + settings | **pass** | `test_i18n` (catalog keys match; no hard-coded CJK in `web/` outside catalogs). `test_prd196_*` (navigator language including French → English, persist, English overflow). `test_prd197_*` (clear storage, bad `localStorage`, reduced motion, panel/grid, last flow and canvas). `test_prd198_codes_survive_language_switch`. |
 | A40 / loopback | **pass** | `test_a40_host_origin_content_type` (`Host: evil.example` → 403, `Content-Type: text/plain` → 415, foreign Origin WS → 403/400). `test_non_loopback_host_flag_exits`. `test_loopback_only_bind`. |
 | A39 authentication | **deferred** | Alex 2026-10-31. No tokens. See `.agents/docs/auth-and-network.md`. |
 
@@ -114,16 +114,19 @@ web/                    Static frontend, served by the backend
 web/i18n/               en.js and zh-CN.js catalogs (ES modules, no build)
 web/vendor/             Vue / Vue Flow / icons (unmodified upstream files)
 assets/logo.svg         Brand mark (favicon is the same drawing)
-docs/prd.md             PRD v1.4.4 (current product doc in this tree)
+docs/prd.md             PRD v1.4.6 (current product doc in this tree)
 docs/system-design.md
-docs/ui-spec.md         §17 fonts and themes
+docs/ui-spec.md         §17 fonts and themes, §18 language
+docs/decisions/         One Markdown record per product decision
 docs/design/            Rams light + `-dark` sheets
 docs/design/contrast.py WCAG helpers used by contrast tests
 docs/diagrams/          Deploy / sequence / state sources + PNG
+.githooks/pre-push      Private-IP scan + gitleaks
 vendor/wheels/          Runtime Python wheels
 vendor/licenses/        Third-party licence texts
 vendor-manifest.json
 scripts/check_manifest.py
 scripts/check_private_ip.py
+scripts/pre-push.sh
 tests/
 ```

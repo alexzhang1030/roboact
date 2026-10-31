@@ -414,6 +414,7 @@ label { display: block; color: var(--muted); font-size: 12px; margin: 8px 0 4px;
 .lang-btn, .motion-btn {
   height: 28px; padding: 0 8px; font-size: var(--fs-12); line-height: var(--lh-12);
   color: var(--muted); background: transparent; border-color: transparent; white-space: nowrap;
+  display: inline-flex; align-items: center; justify-content: center;
 }
 .lang-btn:hover, .motion-btn:hover { background: var(--bg); border-color: var(--control); }
 

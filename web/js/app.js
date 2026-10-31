@@ -12,7 +12,7 @@ import {
   setLocaleMode, setThemeMode, setMotionMode, applyTheme, applyLocale, applyMotion,
   applyStorageEvent, syncAll, actionLabel, mapError, fieldLabel, CATALOGS,
 } from './i18n.js'
-import { KEYS, writeRaw, readRaw, detectBrowserMotionReduce } from './prefs.js'
+import { KEYS, writeRaw, readRaw, readLastFlow, readCanvas, writeCanvas } from './prefs.js'
 
 const q = new URLSearchParams(location.search)
 const PERF_N = +(q.get('n') || 0)
@@ -83,7 +83,12 @@ const App = defineComponent({
     const conn = ref('ok')
     const themeOpen = ref(false)
     const langOpen = ref(false)
+    const motionOpen = ref(false)
     const showMini = ref(readRaw(KEYS.grid) !== '0')
+    const savedViewport = (!PERF_N && !GALLERY) ? readCanvas() : null
+    const defaultViewport = { x: 0, y: 0, zoom: 1 }
+    let canvasReady = false
+    let canvasTimer = null
     const addMenu = ref(null)
     const addQ = ref('')
     const rejectMsg = ref('')
@@ -119,11 +124,11 @@ const App = defineComponent({
     const onMotionMq = () => { if (motionMode.value === 'system') applyMotion() }
     if (motionMq.addEventListener) motionMq.addEventListener('change', onMotionMq)
     else if (motionMq.addListener) motionMq.addListener(onMotionMq)
-    const onStorage = (e) => applyStorageEvent(e)
     window.addEventListener('storage', onStorage)
 
     function pickTheme(mode) { setThemeMode(mode); themeOpen.value = false }
     function pickLang(mode) { setLocaleMode(mode); langOpen.value = false }
+    function pickMotion(mode) { setMotionMode(mode); motionOpen.value = false }
 
     const vf = useVueFlow()
     provide('nodeTypes', nodeTypesList)
@@ -295,6 +300,7 @@ const App = defineComponent({
     watch(leftOpen, v => writeRaw(KEYS.leftOpen, v ? '1' : '0'))
     watch(rightW, v => writeRaw(KEYS.rightW, String(v)))
     watch(showMini, v => writeRaw(KEYS.grid, v ? '1' : '0'))
+    watch(() => meta.value && meta.value.id, id => { if (id) writeRaw(KEYS.lastFlow, id) })
     const selectedSpec = computed(() => specOf(selectedNode.value))
     const deadlineAdapterOnly = computed(() => {
       const act = selectedSpec.value && selectedSpec.value.action
@@ -463,7 +469,8 @@ const App = defineComponent({
     }
 
     async function loadAll() {
-      const b = await get('/api/bootstrap')
+      const last = readLastFlow()
+      const b = await get('/api/bootstrap' + (last ? ('?flow_id=' + encodeURIComponent(last)) : ''))
       nodeTypesList.value = (b.node_types || []).map(t => ({ ...t, type: t.type || t.type_id, label: t.label || t.title }))
       tools.value = b.tools || []
       adapter.value = b.adapter || { name: '', status: 'disconnected', target: 'sim' }
@@ -498,6 +505,7 @@ const App = defineComponent({
         applyPauseReason(b.run.pause)
         listen(run.value.run_id || run.value.id)
       }
+      if (meta.value.id) writeRaw(KEYS.lastFlow, meta.value.id)
     }
 
     function normalizeRun(r) {
@@ -774,7 +782,7 @@ const App = defineComponent({
       else if ((ev.ctrlKey || ev.metaKey) && (ev.key === 'y' || (ev.shiftKey && ev.key === 'z'))) { ev.preventDefault(); applySnap(hist.redo(snap())) }
       else if ((ev.ctrlKey || ev.metaKey) && ev.key === 'g') { ev.preventDefault(); makeGroup() }
       else if (ev.key === 'm' || ev.key === 'M') { showMini.value = !showMini.value }
-      else if (ev.key === 'Escape') { addMenu.value = null; themeOpen.value = false; langOpen.value = false }
+      else if (ev.key === 'Escape') { addMenu.value = null; themeOpen.value = false; langOpen.value = false; motionOpen.value = false }
     }
 
     function onRightDown(ev) {
@@ -849,19 +857,58 @@ const App = defineComponent({
       el.style.backgroundPosition = v.x + 'px ' + v.y + 'px'
       el.style.backgroundSize = (20 * v.zoom) + 'px ' + (20 * v.zoom) + 'px'
     }
-    watch(() => vf.viewport.value, () => {
+    function applyGrid() {
       const pane = document.querySelector('.vue-flow')
-      if (pane) {
+      if (!pane) return
+      if (showMini.value) {
         pane.style.backgroundImage = 'radial-gradient(var(--grid) 1px, transparent 1px)'
         fitGrid(pane)
+      } else {
+        pane.style.backgroundImage = 'none'
       }
+    }
+    function persistViewportNow() {
+      if (PERF_N || GALLERY || !canvasReady) return
+      const v = vf.viewport.value
+      if (!v) return
+      writeCanvas({ x: v.x, y: v.y, zoom: v.zoom })
+    }
+    function persistViewport() {
+      if (PERF_N || GALLERY || !canvasReady) return
+      clearTimeout(canvasTimer)
+      canvasTimer = setTimeout(persistViewportNow, 200)
+    }
+    function restoreCanvas() {
+      const saved = savedViewport || readCanvas()
+      if (saved) vf.setViewport(saved)
+    }
+    watch(() => vf.viewport.value, () => {
+      applyGrid()
+      persistViewport()
     }, { deep: true })
+    watch(showMini, () => applyGrid())
 
     function onDocClick(ev) {
       const tWrap = ev.target && ev.target.closest && ev.target.closest('.theme-wrap')
       const lWrap = ev.target && ev.target.closest && ev.target.closest('.lang-wrap')
+      const mWrap = ev.target && ev.target.closest && ev.target.closest('.motion-wrap')
       if (!tWrap) themeOpen.value = false
       if (!lWrap) langOpen.value = false
+      if (!mWrap) motionOpen.value = false
+    }
+    function onStorage(e) {
+      applyStorageEvent(e)
+      if (!e || !e.key || !String(e.key).startsWith('roboact.')) return
+      if (e.key === KEYS.leftOpen) leftOpen.value = e.newValue !== '0'
+      else if (e.key === KEYS.rightW) {
+        const n = Number(e.newValue)
+        if (Number.isFinite(n) && n >= 320) rightW.value = n
+      } else if (e.key === KEYS.grid) {
+        showMini.value = e.newValue !== '0'
+      } else if (e.key === KEYS.canvas && e.newValue) {
+        const v = readCanvas()
+        if (v) vf.setViewport(v)
+      }
     }
     function groupTitle(name) {
       if (name === 'control') return t('palette.control')
@@ -926,7 +973,16 @@ const App = defineComponent({
       } catch (e) {
         overlay.value = mapError(e.code) || e.message
       }
-      vf.onNodesInitialized(() => { window.__ready = true })
+      vf.onNodesInitialized(() => {
+        restoreCanvas()
+        nextTick(() => {
+          requestAnimationFrame(() => {
+            canvasReady = true
+            applyGrid()
+            window.__ready = true
+          })
+        })
+      })
     })
     onUnmounted(() => {
       window.removeEventListener('keydown', onKeyDown)
@@ -946,12 +1002,13 @@ const App = defineComponent({
       slot1Label, slot1Disabled, slot2Disabled, banners, mismatch, pauseRun, runWord, runWordKind,
       adapterLost, uiLost, operatorLost, rejectedActions, resolveMotion, theme, themeMode, setThemeMode,
       applyTheme, selected, tab, toggleTheme, locale, localeMode, setLocaleMode, motion, motionMode,
-      setMotionMode, t,
+      setMotionMode, t, leftOpen, rightW, showMini, meta,
     }
 
     return {
       nodeTypesList, tools, adapter, meta, nodes, edges, groups, leftOpen, rightW, tab, selected, selectedNode,
       run, records, runs, conn, theme, themeMode, themeOpen, setThemeMode, pickTheme, langOpen, locale, localeMode, pickLang,
+      motion, motionMode, motionOpen, pickMotion, savedViewport, defaultViewport, persistViewportNow,
       showMini, addMenu, addQ, rejectMsg, overlay, specOf, t, displayType, fieldLabel, groupTitle, slot1Key,
       nodeRecords, rounds, shownRec, viewRound, runActive, waitingApproval, confirmNote, versionWarn, stepsClass, stepsText,
       filteredTypes, paletteTypes, paletteGroups, paletteStatus, groupBoxes, portSources, stepLimit, overrides, singleRound, compareA, compareB, compareOut,
@@ -996,6 +1053,18 @@ const App = defineComponent({
             <button type="button" role="menuitem" data-lang-mode="system" :class="{ on: localeMode==='system' }" @click="pickLang('system')">{{ t('lang.follow') }}</button>
             <button type="button" role="menuitem" data-lang-mode="en" :class="{ on: localeMode==='en' }" @click="pickLang('en')">{{ t('lang.en') }}</button>
             <button type="button" role="menuitem" data-lang-mode="zh-CN" :class="{ on: localeMode==='zh-CN' }" @click="pickLang('zh-CN')">{{ t('lang.zh') }}</button>
+          </div>
+        </div>
+        <div class="pref-wrap motion-wrap">
+          <button type="button" class="motion-btn" :title="t('motion.title')" aria-haspopup="menu" :aria-expanded="motionOpen ? 'true' : 'false'" data-testid="motion-btn" @click="motionOpen = !motionOpen">
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
+              <path d="M2 11c1.5-3 3-3 4 0s2.5 3 4 0 2.5-3 4 0"/>
+            </svg>
+          </button>
+          <div class="menu theme-menu" v-if="motionOpen" role="menu">
+            <button type="button" role="menuitem" data-motion-mode="system" :class="{ on: motionMode==='system' }" @click="pickMotion('system')">{{ t('motion.follow') }}</button>
+            <button type="button" role="menuitem" data-motion-mode="reduce" :class="{ on: motionMode==='reduce' }" @click="pickMotion('reduce')">{{ t('motion.reduce') }}</button>
+            <button type="button" role="menuitem" data-motion-mode="full" :class="{ on: motionMode==='full' }" @click="pickMotion('full')">{{ t('motion.full') }}</button>
           </div>
         </div>
         <div class="theme-wrap">
@@ -1055,9 +1124,12 @@ const App = defineComponent({
         <button class="collapse" @click="leftOpen=!leftOpen">{{ leftOpen ? t('palette.collapse') : t('palette.expand') }}</button>
         <VueFlow :nodes="nodes" :edges="edges" :node-types="nodeTypes" :edge-types="edgeTypes"
                  :min-zoom="0.05" :max-zoom="4" :snap-to-grid="true" :snap-grid="[20,20]"
-                 :is-valid-connection="isValidConnection" fit-view-on-init
+                 :default-viewport="savedViewport || defaultViewport"
+                 :fit-view-on-init="!savedViewport"
+                 :is-valid-connection="isValidConnection"
                  @connect="onConnect" @node-drag-stop="onNodeDragStop" @nodes-change="onNodesChange"
-                 @pane-click="onPaneClick" @node-click="e => selected = e.node.id">
+                 @pane-click="onPaneClick" @node-click="e => selected = e.node.id"
+                 @move-end="persistViewportNow">
           <MiniMap v-if="showMini" pannable zoomable />
         </VueFlow>
         <div class="group-box" v-for="g in groupBoxes" :key="g.id"

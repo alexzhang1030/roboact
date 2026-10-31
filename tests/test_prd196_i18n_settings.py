@@ -74,7 +74,8 @@ def test_prd196_storage_event_syncs_second_tab(server):
 
 OVERFLOW_SEL = (
     ".slot-1, .slot-2, .slot-3, .run-word, .real-tag, .gstate, .gstate-word, "
-    ".fn-st-word, .file-open, .top .right > button, [data-testid=theme-btn], [data-testid=lang-btn]"
+    ".fn-st-word, .file-open, .top .right > button, [data-testid=theme-btn], "
+    "[data-testid=lang-btn], [data-testid=motion-btn]"
 )
 
 OVERFLOW_JS = """(sel) => {
@@ -331,6 +332,165 @@ def test_prd198_codes_survive_language_switch(server):
         assert not any("中断" in w for w in words), words
         body = page.inner_text("body")
         assert "Redo this step" in body or "Mark done" in body, body[:800]
+        br.close()
+    finally:
+        p.stop()
+
+
+def test_prd196_french_navigator_is_english(server):
+    p, _path = _launch()
+    try:
+        br = _browser(p)
+        ctx = br.new_context(viewport={"width": 1280, "height": 800}, locale="fr-FR")
+        page, _, _, _ = _wired_page(ctx, server["base"])
+        _goto_ready(page, server["base"] + "/")
+        langs = page.evaluate("() => Array.from(navigator.languages || [])")
+        assert langs and str(langs[0]).lower().startswith("fr"), langs
+        assert page.evaluate("() => localStorage.getItem('roboact.lang')") in (None, "system")
+        assert page.evaluate("() => document.documentElement.dataset.lang") == "en"
+        assert page.locator(".slot-1").inner_text().startswith("Run")
+        br.close()
+    finally:
+        p.stop()
+
+
+def test_prd197_reduced_motion_first_load_and_follow_browser(server):
+    p, _path = _launch()
+    try:
+        br = _browser(p)
+        ctx = br.new_context(
+            viewport={"width": 1280, "height": 800},
+            locale="en-US",
+            color_scheme="dark",
+            reduced_motion="reduce",
+        )
+        page, _, _, _ = _wired_page(ctx, server["base"])
+        _goto_ready(page, server["base"] + "/")
+        assert page.evaluate("() => document.documentElement.dataset.theme") == "dark"
+        assert page.evaluate("() => document.documentElement.dataset.motion") == "reduce"
+        page.locator('[data-testid="motion-btn"]').click()
+        page.locator('[data-motion-mode="full"]').click()
+        page.wait_for_function("() => document.documentElement.dataset.motion === 'full'")
+        assert page.evaluate("() => localStorage.getItem('roboact.motion')") == "full"
+        page.locator('[data-testid="motion-btn"]').click()
+        page.locator('[data-motion-mode="system"]').click()
+        page.wait_for_function("() => document.documentElement.dataset.motion === 'reduce'")
+        assert page.evaluate("() => localStorage.getItem('roboact.motion')") == "system"
+        br.close()
+    finally:
+        p.stop()
+
+
+def test_prd197_bad_localstorage_falls_back_to_browser(server):
+    p, _path = _launch()
+    try:
+        br = _browser(p)
+        ctx = br.new_context(
+            viewport={"width": 1280, "height": 800},
+            locale="en-US",
+            color_scheme="dark",
+            reduced_motion="reduce",
+        )
+        page, _, _, _ = _wired_page(ctx, server["base"])
+        _goto_ready(page, server["base"] + "/")
+        page.evaluate(
+            """() => {
+              localStorage.setItem('roboact.theme', 'neon')
+              localStorage.setItem('roboact.lang', 'de')
+              localStorage.setItem('roboact.motion', 'maybe')
+              localStorage.setItem('roboact.canvas', '{bad')
+              localStorage.setItem('roboact.rightW', 'nope')
+              localStorage.setItem('roboact.lastFlow', '!!!')
+            }"""
+        )
+        page.reload(wait_until="domcontentloaded")
+        page.wait_for_function("window.__ready === true", timeout=20000)
+        assert page.evaluate("() => document.documentElement.dataset.theme") == "dark"
+        assert page.evaluate("() => document.documentElement.dataset.lang") == "en"
+        assert page.evaluate("() => document.documentElement.dataset.motion") == "reduce"
+        assert page.evaluate("() => document.documentElement.dataset.themeMode") == "system"
+        assert page.evaluate("() => document.documentElement.dataset.langMode") == "system"
+        assert page.evaluate("() => document.documentElement.dataset.motionMode") == "system"
+        width = page.evaluate("() => window.__af.rightW.value")
+        assert width == 360
+        br.close()
+    finally:
+        p.stop()
+
+
+def test_prd197_panel_grid_persist_and_follow_theme(server):
+    p, _path = _launch()
+    try:
+        br = _browser(p)
+        ctx = br.new_context(viewport={"width": 1280, "height": 800}, locale="en-US", color_scheme="dark")
+        page, _, _, _ = _wired_page(ctx, server["base"])
+        _goto_ready(page, server["base"] + "/")
+        page.evaluate(
+            """() => {
+              window.__af.setThemeMode('light')
+              window.__af.setLocaleMode('zh-CN')
+              window.__af.leftOpen.value = false
+              window.__af.rightW.value = 400
+              window.__af.showMini.value = false
+            }"""
+        )
+        page.wait_for_timeout(80)
+        page.reload(wait_until="domcontentloaded")
+        page.wait_for_function("window.__ready === true", timeout=20000)
+        assert page.evaluate("() => document.documentElement.dataset.theme") == "light"
+        assert page.evaluate("() => document.documentElement.dataset.lang") == "zh-CN"
+        assert page.evaluate("() => localStorage.getItem('roboact.leftOpen')") == "0"
+        assert page.evaluate("() => localStorage.getItem('roboact.rightW')") == "400"
+        assert page.evaluate("() => localStorage.getItem('roboact.grid')") == "0"
+        assert page.evaluate("() => window.__af.leftOpen.value") is False
+        assert page.evaluate("() => window.__af.rightW.value") == 400
+        assert page.evaluate("() => window.__af.showMini.value") is False
+        page.locator('[data-testid="theme-btn"]').click()
+        page.locator('[data-theme-mode="system"]').click()
+        page.wait_for_function("() => document.documentElement.dataset.theme === 'dark'")
+        page.locator('[data-testid="lang-btn"]').click()
+        page.locator('[data-lang-mode="system"]').click()
+        page.wait_for_function("() => document.documentElement.dataset.lang === 'en'")
+        br.close()
+    finally:
+        p.stop()
+
+
+def test_prd197_last_flow_and_canvas_persist(server):
+    created = http_json(server["base"], "/api/flows", "POST", {"name": "second-flow"})
+    fid = created["flow"]["id"]
+    assert fid
+    boot = http_json(server["base"], f"/api/bootstrap?flow_id={fid}")
+    assert boot["flow"]["id"] == fid
+    missing = http_json(server["base"], "/api/bootstrap?flow_id=fl_nope")
+    assert missing["flow"]["id"] != "fl_nope"
+
+    p, _path = _launch()
+    try:
+        br = _browser(p)
+        ctx = br.new_context(viewport={"width": 1280, "height": 800}, locale="en-US")
+        page, _, _, _ = _wired_page(ctx, server["base"])
+        _goto_ready(page, server["base"] + "/")
+        page.evaluate(
+            """(id) => {
+              localStorage.setItem('roboact.lastFlow', id)
+              localStorage.setItem('roboact.canvas', JSON.stringify({x: 120, y: -40, zoom: 1.35}))
+            }""",
+            fid,
+        )
+        page.reload(wait_until="domcontentloaded")
+        page.wait_for_function("window.__ready === true", timeout=20000)
+        assert page.evaluate("() => window.__af.meta.value.id") == fid
+        page.wait_for_timeout(200)
+        vp = page.evaluate(
+            """() => {
+              const v = window.__af.vf.viewport.value
+              return { x: v.x, y: v.y, zoom: v.zoom }
+            }"""
+        )
+        assert abs(vp["x"] - 120) < 4, vp
+        assert abs(vp["y"] + 40) < 4, vp
+        assert abs(vp["zoom"] - 1.35) < 0.05, vp
         br.close()
     finally:
         p.stop()

@@ -99,3 +99,13 @@ def test_no_hardcoded_catalog_strings_in_frontend_source():
 def test_no_rtoken_catalog_keys():
     en = _catalog(EN)
     assert not any("token" in k.lower() for k in en)
+
+
+def test_pref_keys_use_roboact_prefix():
+    src = (ROOT / "web" / "js" / "prefs.js").read_text(encoding="utf-8")
+    assert "theme: 'roboact.theme'" in src
+    assert "lang: 'roboact.lang'" in src
+    assert "motion: 'roboact.motion'" in src
+    assert "lastFlow: 'roboact.lastFlow'" in src
+    assert "canvas: 'roboact.canvas'" in src
+    assert "function detectBrowserLang" in src
