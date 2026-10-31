@@ -11,7 +11,7 @@ Offline, zero-build robot flow canvas. Wire the atomic actions an adapter expose
 
 Roboact is licensed under the **MIT** License (`LICENSE`, Copyright (c) 2026 alexzhang1030). Third-party texts stay under `vendor/licenses/`. This repo is not published to PyPI and has no publish config.
 
-Specs in this tree: [PRD v1.4.13](docs/prd.md), [exec-model v0.2.3](docs/exec-model.md) (token §0.2 / A39 ignored — auth deferred), [system-design](docs/system-design.md), [UI spec](docs/ui-spec.md) (**§17 fonts/themes, §18 language**), [Rams design sheets](docs/design/), [diagrams](docs/diagrams/). History: `docs/prd-v1.md`, `docs/exec-model-v0.md`, `docs/ui-spec-v0.md`, `docs/system-design-v0.md`. Decision records are PCR in [`.agents/docs/`](.agents/docs/).
+Specs in this tree: [PRD v1.4.14](docs/prd.md), [exec-model v0.2.3](docs/exec-model.md) (token §0.2 / A39 ignored — auth deferred), [system-design](docs/system-design.md), [UI spec](docs/ui-spec.md) (**§17 fonts/themes, §18 language**), [Rams design sheets](docs/design/), [diagrams](docs/diagrams/). History: `docs/prd-v1.md`, `docs/exec-model-v0.md`, `docs/ui-spec-v0.md`, `docs/system-design-v0.md`. Decision records are PCR in [`.agents/docs/`](.agents/docs/).
 
 ## Install and run
 
@@ -95,7 +95,7 @@ Only items exercised **in a browser against the real backend** are marked pass. 
 | A4 / PRD 19.1 push merge | **pass** | Chromium, 500 nodes, real SSE: `n=117 duration_s=12.449 batches_per_sec=9.398` (≤ 10). Canvas matched backend. |
 | A5 / PRD 19.2 pause latency | **pass** | Chromium rAF over 5 runs: `min=2 median=3.0 max=4` (all ≤ 20). samples=`[2, 3, 3, 4, 4]`. |
 | A6 reconnect + page lost | **部分通过** | Real TCP-proxy half-open → `operator_lost`, no new motion node (`nodes=['start', 'go']`). Pause was `11.251s` (need ≤ 10 s). Reconnect cut `1.604s`, event ids did not go backwards. |
-| PRD 19 canvas performance | **pass** | `test_prd19_canvas_performance_500_nodes` plus A4’s 500-node real SSE run. |
+| PRD 19 canvas performance | **部分通过** | CI records only; formal check on Alex's computer. |
 | PRD 19.2 stop without waiting for the window | **pass** | Same as A5 (rAF min/median/max all ≤ 20). |
 | PRD 19.4 wait until stable | **pass** | `test_a38_wait_then_send_when_stable`, `test_a38_deadline_precondition_failed_no_goal`, `test_a38_no_wait_fails_on_first_read`. |
 | PRD 19.5 light and dark | **pass** | `test_prd195_prefers_dark_then_persists_light`; grayscale six states; `test_prd195_offline_fonts_both_themes` (no remote font request). Contrast: `test_section_17_4_table_values`. |
@@ -131,7 +131,7 @@ web/                    Static frontend, served by the backend
 web/i18n/               en.js and zh-CN.js catalogs (ES modules, no build)
 web/vendor/             Vue / Vue Flow / icons (unmodified upstream files)
 assets/logo.svg         Brand mark (favicon is the same drawing)
-docs/prd.md             PRD v1.4.13 (current product doc in this tree; token rows ignored)
+docs/prd.md             PRD v1.4.14 (current product doc in this tree; token rows ignored)
 docs/system-design.md
 docs/ui-spec.md         §17 fonts and themes, §18 language
 docs/design/            Rams light + `-dark` sheets
