@@ -1,6 +1,6 @@
 # PRD v1：roboact（Agent 流程画布，第一期：flow）
 
-日期：2026-10-31　状态：v1.4.3（18:05 第 5.2 节定稿：不加「等待」节点，动作说明加 `precondition_wait_s`，Tedrake）；v1.4.2（17:40 加第 5.2 节手写控制节点）；v1.4.1 定稿（17:25 按 Thompson exec-model v0.2 对齐 11 处）；v1.4 定稿（Alex 2026-10-31 答完具身问题：程序跑在机器人控制器上，节点由 adapter 交出的原子动作生成，运行日志保留），画布库定为 Vue Flow 1.48.2　仓库：`alexzhang1030/roboact`（公开，Alex 2026-10-31 定名）　负责：Fadell · PRD
+日期：2026-10-31　状态：v1.4.4（18:10 加浅色/深色和字体要求；第 5.2 节对齐 exec-model v0.2.1 第 2.5.5 节）；v1.4.3（18:05 第 5.2 节定稿：不加「等待」节点，动作说明加 `precondition_wait_s`，Tedrake）；v1.4.2（17:40 加第 5.2 节手写控制节点）；v1.4.1 定稿（17:25 按 Thompson exec-model v0.2 对齐 11 处）；v1.4 定稿（Alex 2026-10-31 答完具身问题：程序跑在机器人控制器上，节点由 adapter 交出的原子动作生成，运行日志保留），画布库定为 Vue Flow 1.48.2　仓库：`alexzhang1030/roboact`（公开，Alex 2026-10-31 定名）　负责：Fadell · PRD
 
 ## 1. 用户和场景
 
@@ -50,7 +50,7 @@
 - 画布库：Vue Flow 1.48.2，6 个文件直接用 npm 包里的原文件，运行时只依赖 vue。React Flow 作备选。LiteGraph 不用。理由：节点要显示中文状态、出错摘要、悬停说明和输入来源，Vue Flow 的节点是普通网页元素，这些浏览器本来就支持；LiteGraph 在 canvas 上画节点，这些都要自己写，而且它的独立仓库已归档，代码并进了需要 Vite 构建的 ComfyUI_frontend，0.17.2 以后拿不到修复。500 个节点下三个库性能分不出高下，所以性能不是理由。（Torvalds 评估：`/workspace/agent-ui/flow-lib-eval-2026-10-31.md`）
 - Vue Flow 的 dist 文件里有 `process.env.NODE_ENV`，页面要在 import map 前加 `globalThis.process ??= {env:{NODE_ENV:"production"}}`，否则报 `process is not defined`。（Torvalds）
 - 节点尺寸不随状态和缩放变：缩放低于 0.6 时只用 `visibility:hidden` 藏内容，不用 `display:none`；选中态用 outline 或 box-shadow，不改边框宽度。改变尺寸会让 500 个节点全部重新测量，实测每次 250–297 ms 卡顿。（Torvalds 实测，Rams 规格第 14 节）
-- 界面：普通 CSS 和 CSS 变量，不用需要编译的样式方案（Tailwind、StyleX）。界面用系统字体；只有 JetBrains Mono 放进仓库并记入依赖清单。细节以 Rams 的界面规格 `/workspace/agent-ui/ui-spec-v0.md` 为准。
+- 界面：普通 CSS 和 CSS 变量，不用需要编译的样式方案（Tailwind、StyleX）。界面用系统字体；只有 JetBrains Mono 放进仓库并记入依赖清单。浅色和深色两套（Alex 2026-10-31「light/dark 搞下」）：第一次打开跟系统设置走，顶栏可以手动切，选择存在浏览器本地，刷新后不变；两套都只换 CSS 变量，不另写一份样式。字体用哪几款、两套颜色具体取值，由 Rams 定。细节以 Rams 的界面规格 `/workspace/agent-ui/ui-spec-v0.md` 为准。
 - 数据：流程定义（节点、端口、连线、参数，带版本号）和运行记录（run id、节点 id、流程版本、输入、输出、状态、耗时、错误）分开存，都在服务端。
 - 接口：执行器要支持「跑整条」「从某节点开始跑」「只跑一个子图」「在节点前/后暂停」「恢复」「单步」「停止」。这些指令走普通 HTTP 请求，带 run id 和流程版本号。节点状态由服务端用 SSE（服务端单向往浏览器推事件，浏览器自带 `EventSource` 就能接）推到页面。页面重连后先拉一次当前状态，再接着收推送。（Thompson 提议，Steve 已定）
 - 状态推送合并：后端每 100 ms 把这段时间的状态变更合成一条 SSE 事件，同一节点只留最后一个状态；前端收到后在下一帧一次改完。运行暂停、碰到断点或单步结束时，后端立刻推出还没发的变更，不等 100 ms。运行记录仍然一步一条，合并只在推送这一层。（Thompson、Torvalds）
@@ -98,7 +98,7 @@
 
 「等到某个状态再往下走」怎么做（Tedrake 2026-10-31 定）：不加第七个控制节点，分两种情况。
 - 等机械臂到位、等走到目标点：用动作的 `return_mode = blocking`，由控制器自己判断到没到位。ROS 2 的 joint_trajectory_controller 要每个关节进了目标容差、并在 `constraints.goal_time` 内，才报成功（[JTC 文档](https://control.ros.org/master/doc/ros2_controllers/joint_trajectory_controller/doc/userdoc.html)）；Nav2 要 goal checker 判定位置和朝向进了容差才结束（[SimpleGoalChecker](https://docs.nav2.org/configuration/packages/nav2_controller-plugins/simple_goal_checker.html)）。
-- 等站稳：动作说明加可选字段 `precondition_wait_s`。发目标前，adapter 在这段时间内反复调 `read_state`，条件一成立马上发；到时间还不成立，记 `precondition_failed`。没写这个字段，就和现在一样只查一次。读的间隔和要看哪些字段由写 adapter 的人定；运行记录只记这一个节点的一条，不是每读一次一条。
+- 等站稳：动作说明加可选字段 `precondition_wait_s`。发目标前，adapter 在这段时间内反复调 `read_state`，条件一成立马上发；到时间还不成立，记 `precondition_failed`。没写这个字段，就和现在一样只查一次。等的时候节点显示「运行中 · 等待前提条件」；`timeout_s` 从目标发出时才开始算；等的时候按停止记「已停止」，不读回机器人；暂停或断开后再继续，从零重新等；服务重启时如果这一步还在等，回到待执行，不当作「中断 · 结果未知」（Thompson exec-model v0.2.1 第 2.5.5 节，A38）。读的间隔和要看哪些字段由写 adapter 的人定；运行记录只记这一个节点的一条，不是每读一次一条。
 - 等人把东西放好：用「人工确认」节点。等电量回升这类要等几十分钟的，v1 不做。
 
 为什么不做成节点：暂停和断点在节点之间生效。「等待」节点判定条件成立后，如果用户在下一个动作前停了一会儿，发命令时这个判定已经过期；放进动作发命令前的检查，检查完马上发，中间插不进停顿。另外，现在的控制节点都不调 adapter，加这个节点会破掉这条边界。
@@ -155,6 +155,7 @@
 19. 画布性能（推断，阈值要在 Alex 的电脑上重测后才定为正式验收）：500 个节点、约 550 条边，每个节点每秒切 10 次状态，同时平移缩放，p95 帧时间不超过 33 ms，挂载后没有超过 100 ms 的长任务。参考：Torvalds 2026-10-31 无头 Chrome 加软件渲染实测，Vue Flow 按尺寸规则改完后 p95 16.7 ms，最长一帧 33.4 ms，长任务 0 次（`/workspace/agent-ui/spike/results.json`）。
 19.1 推送合并：用 Python 后端真实的 SSE 推送重跑第 19 条，浏览器每秒收到的状态事件不超过 10 条，帧时间满足第 19 条。等 v1 后端写好后测。
 19.2 停下时不等窗口：断点、单步、用户暂停各测 20 次。服务端写完暂停状态时记时间，浏览器收到暂停事件后的第一帧记时间，两边在同一台机器上。每次的差都不超过 100 ms，p95 不超过 20 ms（20 ms 是 Thompson 的推断，Torvalds 实测后定；见 `exec-model-v0.md` A5）。
+19.5 浅色和深色：系统设成深色后第一次打开，界面是深色；手动切到浅色后刷新，仍是浅色。两套各截一张灰度图，出错、断点、完成、中断 · 结果未知、页面断开、机器人控制器断开六种状态仍能分清（同第 10 条的测法）。断网时两套的字体都正常显示，网络面板里没有字体请求发往外网。
 19.4 等站稳：假 adapter 的一个动作写 `precondition_wait_s = 2`，让 `read_state` 前 1 s 返回「未站稳」、之后返回「已站稳」。动作在约 1 s 后发出，记录只有一条。改成一直「未站稳」：2 s 后记 `precondition_failed`，动作没有发出。去掉这个字段：第一次读到「未站稳」就记 `precondition_failed`。
 19.3 节点尺寸不变：缩放跨过 0.6、切换选中态，各做 6 次，Vue Flow 的节点尺寸更新次数为 0。（Torvalds 测法，`spike/results_select.json`）
 
