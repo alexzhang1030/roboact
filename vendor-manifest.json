@@ -136,6 +136,17 @@
       "license_file": "vendor/licenses/MIT-pydantic.txt"
     },
     {
+      "file": "vendor/wheels/ruamel.yaml-0.18.16-py3-none-any.whl",
+      "package": "ruamel.yaml",
+      "version": "0.18.16",
+      "source_url": "https://files.pythonhosted.org/packages/0f/73/bb1bc2529f852e7bf64a2dec885e89ff9f5cc7bbf6c9340eed30ff2c69c5/ruamel.yaml-0.18.16-py3-none-any.whl",
+      "conversion": "none",
+      "bytes": 119858,
+      "sha256": "048f26d64245bae57a4f9ef6feb5b552a386830ef7a826f235ffb804c59efbba",
+      "license": "MIT",
+      "license_file": "vendor/licenses/MIT-ruamel-yaml.txt"
+    },
+    {
       "file": "vendor/wheels/pydantic_core-2.50.2-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.whl",
       "package": "pydantic-core",
       "version": "2.50.2",

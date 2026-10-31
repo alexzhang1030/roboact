@@ -8,6 +8,7 @@ license = { text = "MIT" }
 authors = [{ name = "alexzhang1030" }]
 dependencies = [
     "pydantic==2.14.2",
+    "ruamel-yaml==0.18.16",
 ]
 
 [dependency-groups]

@@ -17,6 +17,7 @@ from .adapter import (
     image_summary,
 )
 from .errors import ApiError
+from .flow_file import inspect_run, inspect_values, is_imported, unlock_valid
 from .graph import (
     connected_types,
     cycle_exit_details,
@@ -443,25 +444,71 @@ class Executor:
                 "adapter_disconnected",
                 "robot controller is not connected. the flow can open, but cannot run",
             )
-        saved = graph.get("action_list_version")
-        current = getattr(self.adapter, "action_list_version", None)
-        if saved and current and saved != current:
-            raise ApiError(
-                409,
-                "action_list_mismatch",
-                "adapter action list changed; cannot run this flow version",
-                {
-                    "saved": saved,
-                    "current": current,
-                },
-            )
-        missing = [n["id"] for n in graph.get("nodes") or [] if not known_type(n["type"])]
-        if missing:
+        if not is_imported(graph):
+            saved = graph.get("action_list_version")
+            current = getattr(self.adapter, "action_list_version", None)
+            if saved and current and saved != current:
+                raise ApiError(
+                    409,
+                    "action_list_mismatch",
+                    "adapter action list changed; cannot run this flow version",
+                    {"saved": saved, "current": current},
+                )
+        blockers = inspect_run(graph, self.adapter)
+        if blockers.action_gone:
             raise ApiError(
                 409,
                 "action_missing",
                 "an action on this flow no longer exists",
-                {"nodes": missing, "node_ids": missing},
+                {"nodes": blockers.action_gone, "node_ids": blockers.action_gone},
+            )
+        if blockers.missing_input:
+            raise ApiError(
+                409,
+                "missing_input",
+                f"{len(blockers.missing_input)} nodes need input",
+                {"nodes": blockers.missing_input, "node_ids": blockers.missing_input},
+            )
+        if blockers.type_errors:
+            err = blockers.type_errors[0]
+            raise ApiError(
+                409,
+                "param_type_mismatch",
+                f"{err['node']}: {err['param']} must be {err['type']}",
+                {"errors": blockers.type_errors},
+            )
+        if blockers.limit_errors:
+            err = blockers.limit_errors[0]
+            raise ApiError(
+                409,
+                "param_out_of_limit",
+                f"{err['node']}: {err['param']} is outside this robot's limits",
+                {"errors": blockers.limit_errors},
+            )
+        if is_imported(graph) and blockers.mismatches and not unlock_valid(graph, self.adapter):
+            raise ApiError(
+                409,
+                "run_locked",
+                "Review the differences above before running.",
+                {"mismatches": blockers.mismatches},
+            )
+
+    def _raise_value_blockers(self, blockers: Any) -> None:
+        if blockers.type_errors:
+            err = blockers.type_errors[0]
+            raise ApiError(
+                409,
+                "param_type_mismatch",
+                f"{err['node']}: {err['param']} must be {err['type']}",
+                {"errors": blockers.type_errors},
+            )
+        if blockers.limit_errors:
+            err = blockers.limit_errors[0]
+            raise ApiError(
+                409,
+                "param_out_of_limit",
+                f"{err['node']}: {err['param']} is outside this robot's limits",
+                {"errors": blockers.limit_errors},
             )
 
     def _validate_graph(self, graph: dict[str, Any]) -> None:
@@ -795,7 +842,7 @@ class Executor:
                 cls = get_type(node["type"])
                 if cls.side_effect == SideEffect.motion:
                     raise ApiError(
-                        422, "motion_output_readonly", "motion node outputs cannot be edited"
+                        422, "motion_output_readonly", "motion node outputs are read-only"
                     )
             step = pause.get("step")
             if not isinstance(step, int):
@@ -1048,6 +1095,16 @@ class Executor:
                 node = node_map(ctrl.flow)[nid]
                 nxt_round = self._next_round(ctrl, nid)
                 peeked, item_ids = self._peek_inputs(ctrl, nid)
+                known = dict(node.get("params") or {})
+                known.update({k: v for k, v in peeked.items() if v is not None})
+                self._raise_value_blockers(
+                    inspect_values(
+                        str(node.get("type") or ""),
+                        known,
+                        self.adapter,
+                        str(node.get("title") or nid),
+                    )
+                )
                 if ctrl.edits and ctrl.edits.get("inputs") is not None:
                     peeked = ctrl.edits["inputs"]
                     original = ctrl.edits.get("original")

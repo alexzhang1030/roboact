@@ -30,6 +30,23 @@ fi
 "${PYRIGHT[@]}"
 "${PYRIGHT[@]}" --project pyrightconfig.tests.json
 "${PYTEST[@]}" -q --tb=short
+OFF=/tmp/offline-ruamel
+rm -rf "$OFF"
+if python3 -m venv "$OFF"; then
+  "$OFF/bin/pip" install --no-index --no-deps --find-links vendor/wheels 'ruamel.yaml==0.18.16'
+else
+  rm -rf "$OFF"
+  python3 -m venv --without-pip "$OFF"
+  SITE=$(echo "$OFF"/lib/python*/site-packages)
+  if command -v uv >/dev/null 2>&1; then
+    uv pip install --python "$OFF/bin/python" --no-index --no-deps --find-links vendor/wheels 'ruamel.yaml==0.18.16'
+  elif [[ -x "$ROOT/.venv/bin/pip" ]]; then
+    "$ROOT/.venv/bin/pip" install --no-index --no-deps --find-links vendor/wheels --target "$SITE" 'ruamel.yaml==0.18.16'
+  else
+    python3 -m pip install --no-index --no-deps --find-links vendor/wheels --target "$SITE" 'ruamel.yaml==0.18.16'
+  fi
+fi
+"$OFF/bin/python" -c "import ruamel.yaml; print(ruamel.yaml.__version__)"
 python3 scripts/check_private_ip.py
 if ! command -v gitleaks >/dev/null 2>&1; then
   echo "gitleaks not found on PATH" >&2

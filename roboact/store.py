@@ -6,6 +6,7 @@ from typing import Any, Protocol
 
 from . import FORMAT_VERSION
 from .catalog import en
+from .flow_meta import persist_unlock_record, with_file_meta
 from .util import dump, new_id, now_iso, sha256_text
 
 
@@ -151,9 +152,11 @@ class MemoryStore:
             g["name"] = meta["name"]
         return g
 
-    def create_flow(self, name: str = "", body: dict[str, Any] | None = None) -> dict[str, Any]:
+    def create_flow(
+        self, name: str = "", body: dict[str, Any] | None = None, *, flow_id: str | None = None
+    ) -> dict[str, Any]:
         name = name or en("flow.untitled")
-        flow_id = (body or {}).get("id") or (body or {}).get("flow_id") or new_id("fl_")
+        flow_id = flow_id or new_id("fl_")
         nodes = (body or {}).get("nodes") or [
             {"id": "start", "type": "start", "x": 240, "y": 200, "params": {"data": {}}}
         ]
@@ -169,6 +172,7 @@ class MemoryStore:
             "adapter_id": (body or {}).get("adapter_id"),
             "action_list_version": (body or {}).get("action_list_version"),
         }
+        with_file_meta(graph, body)
         self._write()
         self._flows[flow_id] = {
             "flow_id": flow_id,
@@ -183,9 +187,7 @@ class MemoryStore:
     def save_flow(self, flow_id: str, body: dict[str, Any], bump: bool = True) -> dict[str, Any]:
         meta = self.get_flow_meta(flow_id)
         if meta is None:
-            return self.create_flow(
-                body.get("name") or en("flow.untitled"), {**body, "id": flow_id}
-            )
+            return self.create_flow(body.get("name") or en("flow.untitled"), body, flow_id=flow_id)
         version = int(meta["latest_version"]) + (1 if bump else 0)
         graph = {
             "id": flow_id,
@@ -199,6 +201,8 @@ class MemoryStore:
             "adapter_id": body.get("adapter_id"),
             "action_list_version": body.get("action_list_version"),
         }
+        with_file_meta(graph, body)
+        persist_unlock_record(graph, body)
         self._write()
         self._flows[flow_id] = {
             **meta,

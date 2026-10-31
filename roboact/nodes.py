@@ -491,6 +491,14 @@ def _models_from_desc(desc: ActionDescriptor) -> tuple[type[BaseModel], type[Bas
     in_fields: dict[str, Any] = {}
     for p in desc.params:
         extra: dict[str, Any] = {"port_type": p.type if p.type != "number" else "any"}
+        schema_type = _param_json_type(p.type)
+        if schema_type is not None:
+            extra["type"] = schema_type
+        if p.enum:
+            extra["enum"] = list(p.enum)
+        if p.range:
+            extra["minimum"] = p.range[0]
+            extra["maximum"] = p.range[1]
         default = (
             ...
             if p.required and p.default is None
@@ -514,6 +522,27 @@ def _models_from_desc(desc: ActionDescriptor) -> tuple[type[BaseModel], type[Bas
     )
     Outputs = create_model(f"{desc.id}_Out", **out_fields) if out_fields else Empty
     return Inputs, Outputs
+
+
+def _param_json_type(declared: str) -> str | None:
+    kind = (declared or "").lower()
+    mapping = {
+        "array": "array",
+        "bool": "boolean",
+        "boolean": "boolean",
+        "float": "number",
+        "image": "object",
+        "int": "integer",
+        "integer": "integer",
+        "json": "object",
+        "null": "null",
+        "number": "number",
+        "object": "object",
+        "str": "string",
+        "string": "string",
+        "text": "string",
+    }
+    return mapping.get(kind)
 
 
 def _as_action_dict(raw: Any) -> dict[str, Any]:
@@ -631,7 +660,7 @@ def make_action_node(desc: ActionDescriptor, adapter: Adapter) -> type[NodeType]
         timeout_s = desc.timeout_s
         typical_s = desc.typical_s
         icon = desc.icon or ("node-tool" if side == SideEffect.motion else "node-constant")
-        palette = True
+        palette = desc.id != "fake_note"
         from_adapter = True
         adapter_id = adapter.adapter_id
         group = adapter.name

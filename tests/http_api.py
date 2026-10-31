@@ -28,6 +28,27 @@ def http_json(
         raise RuntimeError(f"{method} {path} -> {e.code} {payload}") from e
 
 
+def http_status(
+    base: str, path: str, method: str = "GET", body: Any = None, timeout: float = 8.0
+) -> tuple[int, Any]:
+    data = None if body is None else json.dumps(body).encode()
+    req = urllib.request.Request(base + path, data=data, method=method)
+    if method in ("POST", "PUT", "PATCH", "DELETE"):
+        req.add_header("Content-Type", "application/json")
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            raw = r.read()
+            payload = json.loads(raw.decode()) if raw else None
+            return r.status, payload
+    except urllib.error.HTTPError as e:
+        raw = e.read()
+        try:
+            payload = json.loads(raw.decode())
+        except Exception:
+            payload = {"error": raw.decode(errors="replace")}
+        return e.code, payload
+
+
 def echo_chain_graph(n_nodes: int, name: str = "") -> dict[str, Any]:
     """start + echoes + output. n_nodes includes start and output."""
     n_echo = max(0, n_nodes - 2)

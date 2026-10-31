@@ -80,6 +80,34 @@ export function t(key, params) {
   return catalogLookup(key, locale.value, params)
 }
 
+const SERVER_LABEL_KEYS = ['adapter.fake', 'adapter.generic', 'flow.demo', 'flow.untitled']
+
+export function serverLabel(value, keys) {
+  if (value == null || value === '') return ''
+  const s = String(value)
+  const list = keys || SERVER_LABEL_KEYS
+  for (const key of list) {
+    if (s === key) return t(key)
+    if (s === CATALOGS.en[key] || s === CATALOGS['zh-CN'][key]) return t(key)
+  }
+  return s
+}
+
+const EN_COUNT_ONE = {
+  'run.action_missing_count': '1 missing action',
+  'run.missing_input_count': '1 node needs input',
+}
+
+export function countLabel(key, n) {
+  const loc = locale.value
+  const num = Number(n)
+  if (loc === 'en') {
+    const form = new Intl.PluralRules('en').select(num)
+    if (form === 'one' && EN_COUNT_ONE[key]) return EN_COUNT_ONE[key]
+  }
+  return t(key, { n: num })
+}
+
 export function catalogLookup(key, loc, params) {
   const L = loc || locale.value
   const primary = CATALOGS[L] || CATALOGS.en
@@ -117,7 +145,14 @@ export function fieldLabel(key, fallback, loc) {
 
 export function mapError(code, params) {
   if (!code) return ''
-  const key = 'error.' + code
+  const aliases = {
+    import_failed: 'flow.import_failed',
+    run_locked: 'flow.run_locked',
+    param_type_mismatch: 'run.param_type_mismatch',
+    param_out_of_limit: 'run.param_out_of_limit',
+    missing_input: 'status.missing_input',
+  }
+  const key = aliases[code] || ('error.' + code)
   const hit = t(key, params)
   if (hit) return hit
   if (/^[a-z][a-z0-9_]*$/.test(String(code))) {
@@ -132,6 +167,7 @@ export function statusWord(st) {
   const status = st.state || st.status || 'idle'
   if (status === 'cancel_rejected') return t('status.cancel_rejected')
   if (status === 'action_missing') return t('status.action_missing')
+  if (status === 'missing_input') return t('status.missing_input')
   if (status === 'interrupted_unknown' || status === 'interrupted') return t('status.' + status)
   if (status === 'running') {
     if (st.phase === 'waiting_precondition') return t('status.running_wait')

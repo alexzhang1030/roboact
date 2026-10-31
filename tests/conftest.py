@@ -13,6 +13,7 @@ import pytest
 ROOT = Path(__file__).resolve().parents[1]
 
 _prd19_ci_record: dict[str, Any] | None = None
+_c11_heartbeat_gap_s: float | None = None
 
 
 def record_prd19_ci(recorded: dict[str, Any]) -> None:
@@ -37,14 +38,24 @@ def emit_prd19_ci_past_capture(recorded: dict[str, Any], capfd: Any) -> None:
         sys.stderr.flush()
 
 
+def record_c11_heartbeat_gap(gap_s: float) -> None:
+    """Keep the 20.13 import-vs-heartbeat number for the CI log."""
+    global _c11_heartbeat_gap_s
+    _c11_heartbeat_gap_s = gap_s
+
+
 def pytest_terminal_summary(terminalreporter: Any, exitstatus: int, config: Any) -> None:
     del exitstatus, config
-    if _prd19_ci_record is None:
-        return
-    line = prd19_ci_log_line()
-    notice = f"::notice title=PRD19 canvas perf::{line}"
-    terminalreporter.write_line(line)
-    terminalreporter.write_line(notice)
+    if _prd19_ci_record is not None:
+        line = prd19_ci_log_line()
+        notice = f"::notice title=PRD19 canvas perf::{line}"
+        terminalreporter.write_line(line)
+        terminalreporter.write_line(notice)
+    if _c11_heartbeat_gap_s is not None:
+        line = f"C11_IMPORT_MAX_HEARTBEAT_GAP_S={_c11_heartbeat_gap_s:.4f}"
+        notice = f"::notice title=C11 import heartbeat::{line}"
+        terminalreporter.write_line(line)
+        terminalreporter.write_line(notice)
 
 
 def chrome_path() -> str | None:

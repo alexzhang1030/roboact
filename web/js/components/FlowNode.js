@@ -19,7 +19,8 @@ const ICONS = {
   interrupted: 'state-interrupted',
   interrupted_unknown: 'state-unknown',
   cancel_rejected: 'state-running',
-  action_missing: 'state-error',
+  action_missing: 'state-unknown',
+  missing_input: 'state-unknown',
 }
 
 const KIND = {
@@ -32,6 +33,7 @@ const KIND = {
   interrupted_unknown: 'unknown',
   cancel_rejected: 'running',
   action_missing: 'missing',
+  missing_input: 'missing_input',
 }
 
 export default markRaw(defineComponent({
@@ -60,6 +62,25 @@ export default markRaw(defineComponent({
       if (custom) return custom
       return actionLabel(spec.value, locale.value) || props.data.nodeType
     })
+    const isActionMissing = computed(() => kind.value === 'missing')
+    const isMissingInput = computed(() => kind.value === 'missing_input')
+    const emptyPorts = computed(() => {
+      const set = new Set()
+      if (!isMissingInput.value) return set
+      const params = (props.data && props.data.params) || {}
+      for (const p of ins.value) {
+        const v = params[p.name]
+        if (v == null || v === '') set.add(p.name)
+      }
+      const listed = (spec.value && spec.value.action && spec.value.action.params) || []
+      for (const p of listed) {
+        if (!p || !p.name) continue
+        const v = params[p.name]
+        if ((p.secret || p.required) && (v == null || v === '')) set.add(p.name)
+      }
+      return set
+    })
+    const portMissing = (port) => !!(port && emptyPorts.value.has(port.name))
     const isTimeout = computed(() => {
       const s = st.value
       if (s.status === 'interrupted_unknown') return false
@@ -72,6 +93,7 @@ export default markRaw(defineComponent({
     const summary = computed(() => {
       void locale.value
       const s = st.value
+      if (isActionMissing.value) return t('error.action_missing')
       if (kind.value === 'unknown') {
         const code = s.error_type || s.error
         return (code && mapError(code)) || t('error.may_have_written')
@@ -115,6 +137,7 @@ export default markRaw(defineComponent({
     return {
       Position, ins, outs, st, word, write, rows, spec, bpBefore, bpAfter, srcOf, toggleBp,
       kind, icon, typeIcon, iconBase, icoUrl, summary, title, sideTitle, bpBeforeTitle, bpAfterTitle, t, locale, portLabel,
+      isActionMissing, isMissingInput, portMissing,
     }
   },
   template: `
@@ -132,15 +155,16 @@ export default markRaw(defineComponent({
     <div class="fn-title">
       <span v-if="typeIcon" class="fn-type-ico" :style="{ '--ico': icoUrl(typeIcon) }"></span>
       <span v-if="write" class="fn-side" :style="{ '--ico': icoUrl('mark-write') }" :title="sideTitle"></span>
-      <span class="fn-name">{{ title }}</span>
-      <span class="fn-st">
+      <span class="fn-name" :class="{ full: isActionMissing }">{{ title }}</span>
+      <span v-if="isActionMissing" class="fn-gone-x" aria-hidden="true">×</span>
+      <span class="fn-st" v-else>
         <span class="ico" :data-kind="kind" :style="{ '--ico': icoUrl(icon) }"></span>
         <span class="fn-st-word">{{ word }}</span>
       </span>
     </div>
     <div class="fn-err" v-if="summary" :class="{ amber: kind === 'unknown' }">{{ summary }}</div>
     <div class="fn-ports">
-      <div class="fn-port" v-for="n in rows" :key="n">
+      <div class="fn-port" v-for="n in rows" :key="n" :class="{ 'port-missing': portMissing(ins[n-1]) }">
         <template v-if="ins[n-1]">
           <Handle type="target" :position="Position.Left" :id="ins[n-1].name"
                   :class="(srcOf(ins[n-1].name) && srcOf(ins[n-1].name).kind) || ''" />

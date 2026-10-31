@@ -17,6 +17,17 @@ uv run python -m roboact          # http://127.0.0.1:7465
 
 `Host` must be `127.0.0.1` / `localhost` / `[::1]`. SSE/WebSocket `Origin` must be this page. Commands need `Content-Type: application/json`.
 
+## Offline install
+
+Wheels live in `vendor/wheels` (including `ruamel.yaml`, required for YAML import). No network:
+
+```bash
+python3 -m venv .venv
+.venv/bin/pip install --no-index --find-links vendor/wheels -r requirements.txt
+.venv/bin/python -c "import ruamel.yaml"
+.venv/bin/python -m roboact
+```
+
 ## Connection drop
 
 - Page gone ~10 s → pause `operator_lost` after the current node. That node is not cancelled.
@@ -26,7 +37,7 @@ uv run python -m roboact          # http://127.0.0.1:7465
 
 ## Limits
 
-Step limit 1000. Node timeout 60 s (deadline given to the adapter). SSE retry 2 s. SQLite `busy_timeout` 5000 ms. Browser stores only display prefs (`roboact.lang|theme|motion|viewport.*|panels|grid|logFilter`). Timeouts stay on the server.
+Step limit 1000. Node timeout 60 s (deadline given to the adapter). SSE retry 2 s. SQLite `busy_timeout` 5000 ms. Browser stores only display prefs (`roboact.lang|theme|motion|viewport.*|panels|grid|minimap|logFilter`). Timeouts stay on the server.
 
 Storage, HTTP, SSE, and exported flows carry **codes**. UI maps codes via `web/i18n/en.js` and `web/i18n/zh-CN.js`.
 
