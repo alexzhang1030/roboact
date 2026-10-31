@@ -1,219 +1,235 @@
-# PRD v1：roboact（Agent 流程画布，第一期：flow）
+# PRD v1: RoboAct (agent flow canvas, phase 1: flow)
 
-日期：2026-10-31　状态：v1.4.15（21:10 第 19 条加帧数判法 `round(dt / 16.67)`，Thompson、Steve）；v1.4.14（20:52 第 19 条阈值改按帧数写，CI 上只报告不拦；19.8 不写完整 IP）；v1.4.13（20:40 许可证定为 MIT，Alex）；v1.4.12（20:16 19.10 改：`rclpy` 不写进 `pyproject.toml`，Tedrake；pyright 规则和 Python 3.12，Torvalds）；v1.4.11（18:58 决定记录改放 `.agents/docs/`，按 PCR；开发工具链 uv、ruff、类型检查）；v1.4.10（18:42 去掉 `--host`，加 Host/Origin/Content-Type 检查，对齐 exec-model v0.2.3）；v1.4.9（v1 不做鉴权，令牌暂不实现）；v1.4.8（18:30 访问令牌按 Thompson exec-model v0.2.2 第 0.2 节）；v1.4.7（18:25 设置表、词表文件名、docs/decisions）；v1.4.6（18:20 界面设置统一：先读浏览器设置，再存本地；多语言对齐 Steve、Tedrake、Thompson）；v1.4.5（18:15 加界面语言：英文默认，可切中文）；v1.4.4（18:10 加浅色/深色和字体要求，18:12 字体对齐 Rams 第 17 节；第 5.2 节对齐 exec-model v0.2.1 第 2.5.5 节）；v1.4.3（18:05 第 5.2 节定稿：不加「等待」节点，动作说明加 `precondition_wait_s`，Tedrake）；v1.4.2（17:40 加第 5.2 节手写控制节点）；v1.4.1 定稿（17:25 按 Thompson exec-model v0.2 对齐 11 处）；v1.4 定稿（Alex 2026-10-31 答完具身问题：程序跑在机器人控制器上，节点由 adapter 交出的原子动作生成，运行日志保留），画布库定为 Vue Flow 1.48.2　仓库：`alexzhang1030/roboact`（公开，Alex 2026-10-31 定名）　负责：Fadell · PRD
+Version 1.5 (2026-10-31). Owner: Fadell · PRD. Repo: alexzhang1030/roboact.
 
-## 1. 用户和场景
+exec-model = `exec-model-v0.md` (A-numbers: its acceptance items); ui-spec = `ui-spec-v0.md`. Backticked Chinese = zh locale value; English wording: Rams.
 
-用户是 Alex，以后是搭具身 agent 的开发者。agent 控制的是一台四足狗，背上装了机械臂，相机在臂末端，算力是 Jetson Thor（Alex 2026-10-31，经 Steve 转达）。打开后第一件事：把一个任务拆成几个节点连起来（比如看、走过去、抓），跑一遍，看哪一步出错。
-做不成会怎样：任务出问题只能从头跑，机器人每次都要回到起点重摆现场，再翻日志，也找不到是哪一步的观测、判断或动作不对。
-难处：画布要好看、好拖，同时每个节点要带运行状态、断点和数据，还能只重跑一部分，画布不能因此变乱。
+## 1. Goal
 
-## 2. 约束（Alex 已定）
+- User: Alex, later embodied-agent developers. Robot: quadruped, arm, camera at arm end, Jetson Thor.
+- Wire a task as nodes (look, walk, grasp), run, find the failing step without a full rerun.
 
-- 后端必须是 Python。执行器（一个节点一个节点调度、能停在断点上的那部分程序）放在 Python 服务端。
-- 前端不用打包工具（bundler）。页面用浏览器原生 ES 模块或 import map 加载，不跑 npm 构建。
-- 零构建步骤：浏览器直接加载 ES module，不编译 TypeScript，不用 bundler。理由：机器人软件再加一套打包流程太麻烦。
-- 必须离线：所有前端依赖放进仓库（vendored），不走 CDN。仓库里放一份依赖清单，每个本地文件记五项：包名、版本、下载地址、转成 ES 模块用的工具和命令（不需转换的写「无」）、sha256。升级只改清单和对应文件，回滚两样一起退。（Thompson）
-- 形态：网页。
-- 节点都是提前写好的节点类型。用户在画布里只能选节点、连线、填参数，不能写任意 Python。
-- 程序跑在机器人控制器上。adapter（对接机器人控制器的那层代码）从控制器取到原子动作（控制器能直接执行的最小动作）的清单；每个原子动作生成一个节点类型；用户用这些节点拼业务流程（Alex 2026-10-31）。
-- 暂时不写本地盘，但运行日志保留（Alex 2026-10-31）。不写的是相机图像和传感器数据，图像只在内存里（推断，按 Torvalds 的理解，Alex 没反对）。测试用节点 `append_note` 和它写的 `demo_notes.db` 保留，只用来跑 A18、A20，不进产品节点面板（Thompson v0.2 第 2.4、11 节）。
-- adapter 针对每种控制器单独写。控制器是哪家、走 ROS 2 还是 SDK、接真机还是仿真，都不影响画布，差别都藏在 adapter 里（Alex 2026-10-31）。
-- 流程可以有环。执行器和数据模型按有环设计，不能只支持无环图（DAG）。
+## 2. User flow
 
-## 3. 用户怎么用
+First run
 
-1. 启动：`pip install` 后启动服务，浏览器打开地址。不需要 Node，也没有构建步骤。
-2. 新建：打开就是一张无限画布（可以一直平移、缩放）。中间有一个「开始」节点。
-3. 搭流程：从侧栏拖入或双击空白处加节点，拖线连起来。缩小时节点只显示标题和状态，放大才显示端口。参数放在右侧面板，不堆在节点上。
-4. 下断点：点节点左边缘设断点。断在执行前和执行后分开设。
-5. 跑整条：节点按状态变化（空闲、排队、运行、停在断点、等待确认、完成、出错、跳过、已停止、中断、中断 · 结果未知）。超时不单独算一种状态：普通节点超时记为「出错」，摘要写「超时」；`write` 测试节点和 `motion`（会动）节点超时都记为「中断 · 结果未知」，运行暂停，因为外部可能已经写进去、机器人可能已经动了。「中断」只在服务崩溃时出现；用户点停止得到的是「已停止」，之后不会自动重跑。「中断 · 结果未知」只用于 `write` 和 `motion` 节点：它可能已经执行过，不自动重跑，要先读回机器人状态（`read_state`），再由用户选重跑或标为完成，所以不能和「出错」用同一个图标。状态定义见 `exec-model-v0.md` 的失败模式表。只有正在传数据的那条线有动画。
-6. 停在断点：顶栏出现继续、单步、停止。右侧显示当前节点的输入、输出、耗时，可以改输入后继续。
-7. 单跑一个节点：输入取自某次运行的记录，或者手填，或者把上游输出固定下来（data pinning）。固定的值只在单跑一个节点、单跑一组时用；跑整条时总是用真实上游，固定的端口上标「本次未用固定值」。点「只跑这个」，上游不重跑。用的是缓存输入时，入口端口显示为空心圆，并写明来自哪次运行。
-8. 单跑一组：框选后生成分组框。组外接进来的线在框上显示成入口，入口数据同样可以固定。点「跑这一组」，组外节点不跑。
-9. 出错：节点变红，同时有图标和文字（不只靠颜色）。点开看输入、输出、报错。可以从这个节点重跑，上游不重跑。
-10. 有副作用的节点（发邮件、写文件、调外部写接口）：标题前有固定标记。重放时默认走模拟返回，节点上写「模拟」。要真的执行，用户得自己点一下。
-11. 环：从下游节点往上游拉一条线，就形成一个环（比如「想一步 → 调工具 → 判断是否完成 → 回到想一步」）。回边（连回上游的那条线）用虚线，从节点下方绕回去，线上只写「第 3 轮」，即回边指向的节点被执行了第几次。每个环要有一个预先写好的条件节点作为出口。顶栏显示整次运行的「步数 37 / 上限 N」。节点上只显示最近一轮的状态，各轮历史在右侧面板一轮一条。（Rams、Thompson）
-12. 改图：每次开跑锁定当时那一版流程。停在断点时改了画布，提示「从新版本重跑」。点了就按新版本从头开一次新运行，因为新旧两版的节点和连线可能对不上；旧运行保持暂停，用户自己决定停不停。
-12.1 人工确认：流程跑到「人工确认」节点时停下，节点状态写「等待确认」。右侧显示它收到的输入，下面两个按钮「通过」「驳回」，可以附一句说明。点哪个就往对应那一路发数据，继续跑。和断点不同：断点只在调试时设，人工确认是流程的一部分，每次运行都会停。
-13. 日常：保存流程文件，打开历史运行，对比两次运行在同一节点上的输入输出。
-14. 断线：刷新页面，或断开不到 10 s，运行在服务端照常继续或保持暂停。超过 10 s 没有页面连着，当前节点做完后暂停，顶栏写「已暂停 · 页面断开」（第 7 节）。回来后看到同样的状态。
+1. `pip install`, start, open browser. No Node, no build.
+2. Infinite canvas, one Start node.
+3. Add nodes (sidebar, double-click), drag edges. Zoomed out: title and state; zoomed in: ports. Params in right panel.
+4. Breakpoint: click node's left edge; before-run and after-run separate.
+5. Run. States: idle `status.idle` "Idle", queued `status.queued` "Queued", running `run.start` "Run", at breakpoint `停在断点`, waiting for approval `status.awaiting` "Awaiting confirmation", done `status.done` "Done", error `status.error` "Error", skipped `status.skipped` "Skipped", stopped `status.stopped` "Stopped" (user Stop), interrupted `status.interrupted` "Interrupted" (crash only), interrupted · result unknown `status.interrupted_unknown` "Interrupted · result unknown" (exec-model failure table). None auto-rerun.
+   - Timeout: plain node → error "timeout"; `write`/`motion` → result unknown, run pauses.
+   - Result unknown (`write`/`motion` only): `read_state`, then user picks rerun or mark done; own icon.
+   - Only the active edge animates.
+6. At breakpoint: Continue, Step, Stop; panel shows input, output, duration; edit input, continue.
+7. Run one node with past-run, manual or pinned input; upstream not rerun. Pins only in single-node/group runs; full runs mark them `src.pinned_unused` "Pin unused this run". Cached input port: hollow circle naming its source run.
+8. Run group: box-select; incoming edges become pinnable entry ports; outside nodes don't run.
+9. Error: red plus icon and text; panel shows I/O and error; rerun from here, upstream not rerun.
+10. Side-effect node (email, file write, external write API): title mark; replay mocked (`模拟`) unless user clicks real run.
+11. Loop: dashed back edge routed below, labeled "round 3" (target's run count); exit via condition node; top bar "steps 37 / limit N"; node shows latest round, panel lists all.
+12. Run locks flow version; editing while paused offers `banner.rerun` "Rerun from the new version" (new run from start; old stays paused).
 
-## 4. 必须有 / 明确不做
+12.1 Human approval: run waits; panel shows input, Approve, Reject, note; chosen branch continues. Every run.
 
-必须有：无限画布；带环的流程（出口条件、总步数上限、按轮次记录）；节点和连线增删改；整条运行；单节点运行；分组运行；人工确认节点（通过、驳回）；断点（执行前、执行后，继续、单步、停止、改值继续）；每个节点每次运行的输入输出记录；固定输入；从任意节点重跑；副作用节点的模拟重放；运行时锁定版本；撤销重做；流程存成文件；深浅两套主题。
+Daily use
 
-第一期不做：行为树（BT）和通用图（graph）视图（数据格式要留余地，见 6）；在画布里写任意 Python；多人协作；节点市场；部署和线上监控；桌面应用；任何构建步骤；从 CDN 加载依赖。
+13. Save flows, open past runs, compare two runs' I/O per node.
 
-## 5. 软件需求
+Disconnects
 
-- 画布库：Vue Flow 1.48.2，6 个文件直接用 npm 包里的原文件，运行时只依赖 vue。React Flow 作备选。LiteGraph 不用。理由：节点要显示中文状态、出错摘要、悬停说明和输入来源，Vue Flow 的节点是普通网页元素，这些浏览器本来就支持；LiteGraph 在 canvas 上画节点，这些都要自己写，而且它的独立仓库已归档，代码并进了需要 Vite 构建的 ComfyUI_frontend，0.17.2 以后拿不到修复。500 个节点下三个库性能分不出高下，所以性能不是理由。（Torvalds 评估：`/workspace/agent-ui/flow-lib-eval-2026-10-31.md`）
-- Vue Flow 的 dist 文件里有 `process.env.NODE_ENV`，页面要在 import map 前加 `globalThis.process ??= {env:{NODE_ENV:"production"}}`，否则报 `process is not defined`。（Torvalds）
-- 节点尺寸不随状态和缩放变：缩放低于 0.6 时只用 `visibility:hidden` 藏内容，不用 `display:none`；选中态用 outline 或 box-shadow，不改边框宽度。改变尺寸会让 500 个节点全部重新测量，实测每次 250–297 ms 卡顿。（Torvalds 实测，Rams 规格第 14 节）
-- 界面：普通 CSS 和 CSS 变量，不用需要编译的样式方案（Tailwind、StyleX）。字体按 Rams `ui-spec-v0.md` 第 17 节：西文和数字用 Inter，要对齐的数值和代码用 JetBrains Mono，两种都放进仓库并记入依赖清单（OFL）；中文用系统字体，不打包。浅色和深色两套（Alex 2026-10-31「light/dark 搞下」）：第一次打开跟系统设置走，顶栏可以手动切，选择存在浏览器本地，刷新后不变；两套都只换 CSS 变量，不另写一份样式。两套颜色取值见 `ui-spec-v0.md` 第 17 节。
-- 界面语言（Alex 2026-10-31「不仅中文还有 en，默认 en」）：两种，English 和简体中文。第一次打开按浏览器语言选：浏览器首选语言是中文（`zh` 开头）就用中文，其他一律英文（Alex「默认 en」「读取浏览器配置」）。顶栏外观按钮旁边放语言切换，切换不用刷新页面，也不打断正在跑的流程。
-  - 做法：界面上所有文字都从两份词表取，`i18n/en.js` 和 `i18n/zh-CN.js`，都是 ES 模块，不需要构建（Torvalds，Steve 定用 JS 模块）。前端代码里不直接写界面文字。某个词中文表里缺了就显示英文，不显示键名。
-  - 状态词两种语言一一对应，英文由 Rams 定，写进 `ui-spec-v0.md`，和中文表同一张。后端只发状态码（比如 `operator_lost`），由前端翻成当前语言。SQLite 运行记录、导出的流程文件、接口里只存代码（`interrupted_unknown`、`waiting_precondition`、`precondition_failed`、`operator_lost`、`adapter_lost` 等），不存任何界面文字；否则重启时判断不了这一步要不要先读回机器人（Thompson）。
-  - 不翻的：adapter 交出的动作名、参数名和说明，按 adapter 写的原样显示（adapter 可以在动作说明里加可选的 `labels`，按语言给，如 `{"en": ..., "zh": ...}`，给了就按当前语言选，没给就显示动作的 `name`，`name` 也没有才显示 `id`，不显示空白；单位如 `rad`、`m/s` 不翻（Tedrake、Thompson））；用户在画布上写的节点名和备注；输入输出的值；日期数字格式跟着语言走。
-  - 仓库 README 用英文，`docs/` 里的 PRD 和规格暂时只有中文。
-- 许可证：MIT（Alex 2026-10-31 20:39「mit是对的」）。仓库根目录放 `LICENSE`，`pyproject.toml` 的 `license` 字段写 MIT；`vendor/licenses/` 里第三方字体等的许可证原文（OFL）保留。
-- 仓库里放什么（Alex 2026-10-31「必要的交流信息以及 design 等信息可以存到 GitHub 上」）：`docs/` 放 PRD、执行模型、系统设计、界面规格、设计图和图的源文件。讨论结果每个决定一份短记录，按 PCR（project-context-records，在仓库里记定了什么、为什么的 Markdown 记录）放 `.agents/docs/`，每个主题一份，`.agents/docs/README.md` 当目录；写定了什么、为什么、谁定的、日期，链到 PRD 或规格对应章节。不再建 `docs/decisions/`。「已认可」标记只由 Alex 加。原始聊天、机器人和控制器的 IP 或主机名、厂商非公开文档、令牌不放（Thompson：公开仓库的提交历史删不掉）。推之前除了 gitleaks，再扫 `git ls-files` 列出的全部文件（含 `.agents/`）里的私网 IP（`10.`、`192.168.`、`172.16–31.`），扫到就不推。
-- 界面设置怎么记（Alex 2026-10-31「所有配置都可以 storage & 读取浏览器配置」，Steve 定）：只管界面偏好。没手动选过就读浏览器自己的设置；手动选过就存进 `localStorage`，之后以存的为准。两个页面同时开着，监听 `storage` 事件，一边改了另一边跟着变（Thompson）。所有键用 `roboact.` 开头；读到坏值就丢掉，按下表「读不到时」处理，不报错。
+14. Refresh or disconnect ≤ 10 s: run unaffected. Page disconnected > 10 s: finish current node (not cancelled), then pause; top bar `run.word.paused_operator_lost` "Paused · page disconnected". Same state on return.
 
-| 设置 | 开始时读浏览器的什么 | 存在哪个键 | 读不到时 |
+## 3. Requirements
+
+Constraints (Alex, 2026-10-31 15:56)
+
+- Python backend and executor. Web page.
+- Zero build: native ES modules / import map; no bundler, npm build, TypeScript compile.
+- Offline, vendored deps, no CDN. Manifest per file: package, version, URL, conversion tool and command ("none"), sha256; change together.
+- Predefined node types only; no user Python.
+- Runs on robot controller; one node type per adapter atomic action; one adapter per controller type; vendor, ROS 2/SDK, real/sim hidden in adapter.
+- Disk: run logs only; images and sensor data in memory (inference).
+- `append_note`/`demo_notes.db`: tests A18, A20 only (exec-model v0.2 §2.4, §11).
+- Cycles allowed; not DAG-only.
+
+Scope
+
+- Must: infinite canvas; loops (exit, step limit, per-round records); node/edge editing; full, single-node, group runs; Human approval; breakpoints (before/after, continue, step, stop, edit and continue); per-run I/O records; pins; rerun from any node; mock replay; version lock; undo/redo; flow files; light/dark.
+- Won't: BT/graph views, user Python, multi-user, marketplace, deployment/monitoring, desktop app, build step, CDN.
+- BT/graph later: node type field, data vs control edges, layout-independent components, file format version.
+
+UI
+
+- Vue Flow 1.48.2 (6 npm files, dep `vue`); React Flow fallback; no LiteGraph (no fixes after 0.17.2). Eval: `/workspace/agent-ui/flow-lib-eval-2026-10-31.md`.
+- `globalThis.process ??= {env:{NODE_ENV:"production"}}` before import map.
+- Fixed node size: zoom < 0.6 → `visibility:hidden`; selection via outline (resize: 250–297 ms at 500 nodes; ui-spec §14).
+- Plain CSS variables; vendored Inter (text) and JetBrains Mono (numbers, code), OFL; system Chinese font; colors ui-spec §17.
+- English and Simplified Chinese; switch beside theme toggle, no reload or run interruption; dates and numbers follow language.
+- Text only from `i18n/en.js`, `i18n/zh-CN.js`; missing zh → English, never key name; status words one table in ui-spec.
+- Storage and API hold codes only (`operator_lost`, `interrupted_unknown`, `waiting_precondition`, `precondition_failed`, `adapter_lost`).
+- Untranslated: adapter text (optional `labels` `{"en": ..., "zh": ...}` → `name` → `id`), user text, values, units (`rad`, `m/s`).
+- Settings: browser value until chosen, then `localStorage`; tabs sync via `storage` event; bad value → fallback.
+
+| Setting | Browser source | Key | Fallback |
 |---|---|---|---|
-| 语言 | `navigator.languages` 第一项，以 `zh` 开头用中文，否则英文 | `roboact.lang`（`en` / `zh-CN`） | 英文 |
-| 主题 | `prefers-color-scheme` | `roboact.theme`（`system` / `light` / `dark`） | 跟随系统；系统也读不到用浅色 |
-| 减少动画 | `prefers-reduced-motion` | `roboact.motion`（`system` / `reduce` / `full`） | 不减少 |
-| 画布缩放和位置（按流程分开） | 无 | `roboact.viewport.<流程 id>` | 适应窗口 |
-| 左右面板宽度、收起 | 无 | `roboact.panels` | 规格默认宽度 |
-| 网格开关 | 无 | `roboact.grid` | 开 |
-| 日志筛选 | 无 | `roboact.logFilter` | 全部 |
+| Language | `navigator.languages`[0] `zh*` | `roboact.lang` (`en`/`zh-CN`) | English |
+| Theme | `prefers-color-scheme` | `roboact.theme` (`system`/`light`/`dark`) | system, else light |
+| Motion | `prefers-reduced-motion` | `roboact.motion` (`system`/`reduce`/`full`) | full |
+| Viewport | none | `roboact.viewport.<flow id>` | fit |
+| Panels | none | `roboact.panels` | defaults |
+| Grid | none | `roboact.grid` | on |
+| Log filter | none | `roboact.logFilter` | all |
 
-- 不放浏览器、留在服务端的（Tedrake、Thompson）：`timeout_s`、`precondition_wait_s`、页面断开 10 s 暂停、adapter 3 s 无回应暂停、`expiry`、连哪个 adapter、总步数上限，还有流程本身。存在 SQLite 或配置文件里，页面只读显示，要改得经服务端校验，改了记进运行记录。原因：页面关了运行还在跑，执行器读不到浏览器的值；两个页面各存一份，同一次运行就有两套超时。
-- 访问令牌：暂不实现（Alex 2026-10-31「等下先不用考虑鉴权」）。方案留在 exec-model v0.2.2 第 0.2 节和 A39，以后做鉴权照它来。
-- 数据：流程定义（节点、端口、连线、参数，带版本号）和运行记录（run id、节点 id、流程版本、输入、输出、状态、耗时、错误）分开存，都在服务端。
-- 接口：执行器要支持「跑整条」「从某节点开始跑」「只跑一个子图」「在节点前/后暂停」「恢复」「单步」「停止」。这些指令走普通 HTTP 请求，带 run id 和流程版本号。节点状态由服务端用 SSE（服务端单向往浏览器推事件，浏览器自带 `EventSource` 就能接）推到页面。页面重连后先拉一次当前状态，再接着收推送。（Thompson 提议，Steve 已定）
-- 状态推送合并：后端每 100 ms 把这段时间的状态变更合成一条 SSE 事件，同一节点只留最后一个状态；前端收到后在下一帧一次改完。运行暂停、碰到断点或单步结束时，后端立刻推出还没发的变更，不等 100 ms。运行记录仍然一步一条，合并只在推送这一层。（Thompson、Torvalds）
-- 运行记录：保留，第一期存 SQLite（Python 自带 `sqlite3`），服务重启后还能查（Alex 2026-10-31「运行日志保留」）。每条记录多存一项「输入来源」：真实上游、缓存、手动固定、手填。
-- 节点类型从哪来：后端启动时由 adapter 交出原子动作清单（控制器能列就从控制器读，列不出就写在 adapter 里，这是 adapter 自己的事），每个动作生成一个节点类型（名字、输入输出、参数、副作用标记）。取不到时节点面板显示「未连上机器人控制器」，已有的流程照常打开但不能跑。控制器更新后动作清单变了，旧流程里找不到的节点标红，写明「动作已不存在」（和界面规格第 16 节同一个词），不自动删。每个动作带一份说明，字段由 Tedrake 合成、Thompson 写进 `exec-model-v0.md`：`id` 和清单 `version`；`params`（名字、类型、单位、范围或可选值、默认值、是否必填）；`outputs`（类型里有「图片」）；`side_effect`（不动、只读传感器、会动，没写的一律当作会动；其他必填字段缺了，这个动作不生成节点，并在节点面板说明缺哪个字段）；`return_mode`（做完才返回，或马上返回再查进度）；`timeout_s` 和可选的 `typical_s`；`cancel`（能不能取消、取消后机器人停在哪，每次取消回报是否被接受）；`preconditions`；可选的 `precondition_wait_s`（见第 5.2 节）；`read_state`（会动的动作必须有）；结果里带结束时实测的状态。名字和字段类型从接口自动读，其余由 adapter 手写。右侧参数表单按这份说明生成（Rams）。
-- 流程版本锁定时，原子动作清单的版本一起锁上。开跑前对一遍，对不上就在开跑前报错，不能跑到一半才失败（Thompson，推断）。
-- 取消可能被控制器拒绝，界面要能显示「取消被拒」。取消以后机器人停在哪由控制器决定，画布只显示 adapter 报上来的结果（Tedrake）。
-- 动作怎么返回因动作而异（Alex 2026-10-31）：有的做完才返回，有的马上返回、之后查进度。adapter 在每个动作的说明里写明是哪种，执行器两种都要支持；节点在两种情况下都显示「运行」，直到拿到最终结果。断点只在节点之间生效，所以马上返回的动作也要等它真正结束才算这个节点完成。
-- 停下时机器人怎么做，每个动作在 adapter 里各写各的，界面只显示 adapter 报上来的结果。
-- 看相机画面做成节点（Alex 2026-10-31）：由 adapter 提供，输出一张图，`side_effect` 是只读传感器。画布上的节点不放缩略图，免得节点尺寸变；完整的图在右侧面板「输出」标签里看，图下写拍摄时间、第几轮、第几步（Rams `ui-spec-v0.md` 第 16 节）。图片只在内存里，不写盘，日志只记尺寸、时间和大小（Thompson、Torvalds）。
-- 运行中怎么显示：会报进度的动作，节点上写「运行中 · 40%」或最近一条反馈；不报进度的写「运行中 · 12 s」按秒计时；都不画进度条（Rams）。
-- 服务崩溃后，会动机器人的节点一律记为「中断 · 结果未知」，不自动重试；恢复前由 adapter 现读机器人当前状态，再交给人确认（Thompson）。
-- 输入快照：快照就是某次运行记录里的输入，不另存。每份快照记下上游节点当时的配置指纹；上游参数或代码改了，快照标成「可能过期」，仍可用，不自动删。手动固定的输入不会自动失效，只能用户取消。
-- 入口端口三种画法：缓存（空心圆，写「缓存」和运行时间）；可能过期（空心圆加斜线，写「缓存 · 上游已改」，悬停列出改过的上游节点，不用红色）；手动固定（实心圆加图钉，写「已固定」）。（Rams）
-- 暂停和恢复：平常暂停是执行器协程停在 `asyncio.Event` 上等；服务端重启后从最后一条完成的记录重建，停在下一个节点前。前提是节点之间只靠记录传数据，不靠进程内存。（Thompson）
-- 节点输入输出：每个节点类型声明输入端口、输出端口、参数，类型用 Pydantic 模型写，导出 JSON Schema 给前端画端口和参数表单。只有类型相同的端口能连线，连线时就拦下。输入输出必须能序列化成 JSON；图像不写盘，只在内存里，记录只存元数据（Thompson v0.2 第 2.2 节）；其他大输出只存路径和内容哈希（推断）。（Thompson）
-- 副作用标记：节点类型声明 `none`（纯计算，重放照常执行）、`read`（读外部或传感器，重放默认用缓存）、`motion`（会让机器人动，没有模拟值，重放必须真执行，执行前要用户确认）、`write`（只给测试节点用：写外部，重放默认返回模拟值；用户点「真执行」才调外部服务，并带幂等键）。adapter 交出的动作只能标 `none`、`read`、`motion` 三种；标了 `write` 的和缺必填字段一样处理，不生成节点，列进 `rejected_actions` 并写明原因（Thompson：否则会动的动作重放时拿到模拟值、不弹确认，记录却写成做完）。标记由节点作者声明，执行器不自动判断。（Thompson）
-- 节点之间只能通过连线传数据，节点不能直接调用下一个节点（否则断点停不住）。
-- 版本和升级：流程文件带格式版本号。以后加 BT 和 graph 时旧文件能打开。
+- Server-only, read-only in page, changes validated and logged: `timeout_s`, `precondition_wait_s`, 10 s page pause, 3 s adapter pause, `expiry`, adapter, step limit.
 
-## 5.1 环的规则（产品层面；执行细节由 Thompson 补）
+Repo
 
-- 怎么停：满足任一条件就停。条件节点判定出环；整次运行的总步数（所有节点执行次数之和）达到上限，状态记为「超出步数上限」，和普通出错分开显示；用户点停止。没有条件节点作为出口的环，保存时警告，运行时拒绝。总步数上限做成每次运行都能改的参数，临时默认 1000（Steve 2026-10-31 定，没有出处，等 Alex 给数再换）。
-- 单个环的轮数上限：第一期不做（Steve 2026-10-31 定）。
-- 断点怎么命中：环里的断点默认每一轮都停。断点可以改成「只在第 N 轮停」或「条件成立时停」（条件写在断点设置里，只能用已有输入字段做比较，不能写 Python）。单步时，如果下一个节点是回到环开头的那一步，单步就进入下一轮，界面显示轮数加一。
-- 运行记录和快照怎么算：记录主键是 run id 加全局步号（本次运行第几步，只增不减），另存节点 id 和轮次。同一个节点每执行一次记一条，第二轮不覆盖第一轮。落盘时还要存已经沿线发出、下游还没读的数据，否则服务重启会丢一轮。（Thompson）
-- 快照过期：上游任何能走到这个节点的节点改了参数或代码，快照标「可能过期」。节点在环里时，这个范围包括它自己，因为它后几轮的输入来自自己前几轮的输出。单跑环里的某个节点时，要选用哪一轮的输入，默认用最后一轮。右侧面板可以按轮次切换查看输入输出。
-- 单跑一组：分组可以包含整个环，也可以只包含环的一部分。只包含一部分时，回边从组外接进来，按入口处理，用选定那一轮的记录或固定的输入，不在组内循环。
-- 重放：从环中间某个节点重跑，从该节点所在的那一轮接着往下跑，之前各轮的记录保留不动。
+- License: MIT (Alex, 2026-10-31); `LICENSE`, `pyproject.toml`; OFL in `vendor/licenses/`.
+- `docs/`: PRD, specs, designs. Decisions: PCR files (what, why, who, date) in `.agents/docs/`, index `.agents/docs/README.md`; no `docs/decisions/`; Alex alone marks "approved".
+- Never commit chats, robot IPs, private vendor docs, tokens. Pre-push: gitleaks, private-IP scan (`10.`, `192.168.`, `172.16–31.`) of `git ls-files`.
 
-## 5.2 手写的控制节点（2026-10-31 v1.4.2）
+Executor
 
-动作节点都由 adapter 生成，用户自己能拿到的只有下面六个控制节点。名字和执行规则跟 `exec-model-v0.md` 第 2.4 节一致，副作用都是 `none`，不发任何东西给机器人。
+- No auth in v1 (tokens: exec-model v0.2.2 §0.2, A39).
+- SQLite, stored separately: flows (nodes, ports, edges, params, version); run records (run id, node, version, I/O, state, duration, error, input source).
+- Input source: real upstream, cache, manual pin, manual entry.
+- HTTP: run all, run from, run subgraph, pause before/after, resume, step, stop.
+- SSE batched per 100 ms, last state per node; pause, breakpoint, step flush immediately; records stay one per step; reconnect fetches state first.
+- Node types from adapter at startup; none → `palette.disconnected` "Robot controller not connected", flows can't run; removed → red `status.action_missing` "Action no longer exists" (ui-spec §16), kept.
+- Action fields: `id`, list `version`, `params`, `outputs` (incl. image), `side_effect` (none/read/motion; default motion), `return_mode` (blocking/poll), `timeout_s`, optional `typical_s`, `cancel`, `preconditions`, optional `precondition_wait_s`, `read_state` (required for motion).
+- `params` entry: name, type, unit, range or options, default, required.
+- `cancel`: cancellable or not; where the robot stops; per-cancel accepted flag.
+- Result carries measured end state.
+- Missing required field → no node; panel names it. Names and types from interface, rest hand-written; param form generated from it.
+- Action-list version locked with flow; mismatch fails before start (inference).
+- Stop and cancel outcome per action; refused cancel keeps node running, shows `status.cancel_rejected` "Cancel rejected"; non-cancellable runs to end.
+- Node stays running until final result.
+- Camera node: `read`, one image in Output tab with time, round, step (ui-spec §16); no thumbnail; memory only; log dimensions, time, size.
+- Running label: "running · 40%" or "running · 12 s"; no progress bars.
+- Snapshot = run-record input plus upstream-config fingerprint; upstream param/code change → maybe stale, still usable, not deleted.
+- Entry ports: cache (hollow, run time); stale (slashed, `src.stale` "Cache · upstream changed", hover lists changed nodes, no red); pinned (filled with pin, `src.pinned` "Pinned", never expires).
+- Pause on `asyncio.Event`; restart resumes before next node; no data via process memory.
+- Pydantic → JSON Schema; same-type ports only; images as metadata (exec-model v0.2 §2.2); large outputs path + hash (inference).
+- Side effects: `none`, `read` (cached replay), `motion` (real, confirm first), `write` (test, mock, idempotency key); adapter `write` → `rejected_actions`.
+- Data only via edges.
 
-| 节点 | 用户拿它做什么 | 去掉它会怎样 |
-|---|---|---|
-| 开始 | 流程的入口，运行时填进去的初始数据从这里出来 | 运行没有起点，单跑一组时也找不到入口数据 |
-| 输出 | 把最终结果记成这次运行的结果，显示在顶栏的运行摘要里 | 跑完只能翻每个节点的记录去找结果 |
-| 常量 | 放一个固定值，比如目标位置、重试次数 | 每个动作节点都得各填一遍同样的参数，改的时候容易漏 |
-| 条件判断 | 按一条简单比较选「是」或「否」一路走，也是环唯一的出口 | 环停不下来，只能靠总步数上限截停（第 5.1 节） |
-| 合并 | 等几路输入都到了再往下走 | 两路并行的动作做完后，下游拿不齐数据 |
-| 人工确认 | 让机器人停在上一个动作结束时的状态，等人点「通过」或「驳回」 | 会动的步骤之前没有人看一眼的机会 |
+Loops (§5.1)
 
-测试用的「文本模板」「模型调用」「工具调用」放在节点面板单独的「测试」组，只用来测执行器，不算产品节点。
+- Stop: condition exit, step limit (`run.word.step_limit` "Step limit reached"), user. No exit: warn on save, refuse run.
+- Step limit default 1000 (Steve, 2026-10-31, temporary). No round limit.
+- Breakpoints every round, or "only round N", or condition comparing existing input fields (no Python); Step over back edge enters next round.
+- Record key run id + global step, plus node and round; no overwrite; unread edge data persisted.
+- Staleness includes the node itself in a loop.
+- Single run in loop: pick round (default last). Partial-loop group: back edge is an entry port (chosen round or pin), no looping inside.
+- Mid-loop rerun continues that round; earlier records kept.
 
-「等到某个状态再往下走」怎么做（Tedrake 2026-10-31 定）：不加第七个控制节点，分两种情况。
-- 等机械臂到位、等走到目标点：用动作的 `return_mode = blocking`，由控制器自己判断到没到位。ROS 2 的 joint_trajectory_controller 要每个关节进了目标容差、并在 `constraints.goal_time` 内，才报成功（[JTC 文档](https://control.ros.org/master/doc/ros2_controllers/joint_trajectory_controller/doc/userdoc.html)）；Nav2 要 goal checker 判定位置和朝向进了容差才结束（[SimpleGoalChecker](https://docs.nav2.org/configuration/packages/nav2_controller-plugins/simple_goal_checker.html)）。
-- 等站稳：动作说明加可选字段 `precondition_wait_s`。发目标前，adapter 在这段时间内反复调 `read_state`，条件一成立马上发；到时间还不成立，记 `precondition_failed`。没写这个字段，就和现在一样只查一次。等的时候节点显示「运行中 · 等待前提条件」；`timeout_s` 从目标发出时才开始算；等的时候按停止记「已停止」，不读回机器人；暂停或断开后再继续，从零重新等；服务重启时如果这一步还在等，回到待执行，不当作「中断 · 结果未知」（Thompson exec-model v0.2.1 第 2.5.5 节，A38）。读的间隔和要看哪些字段由写 adapter 的人定；运行记录只记这一个节点的一条，不是每读一次一条。
-- 等人把东西放好：用「人工确认」节点。等电量回升这类要等几十分钟的，v1 不做。
+Control nodes (§5.2)
 
-为什么不做成节点：暂停和断点在节点之间生效。「等待」节点判定条件成立后，如果用户在下一个动作前停了一会儿，发命令时这个判定已经过期；放进动作发命令前的检查，检查完马上发，中间插不进停顿。另外，现在的控制节点都不调 adapter，加这个节点会破掉这条边界。
+- Start, Output, Constant, Condition (only loop exit), Merge, Human approval (exec-model §2.4); `none`. Test group: "text template", "model call", "tool call".
+- No seventh "wait" node (Tedrake). Reach goal: `return_mode = blocking`; JTC succeeds within goal tolerance and `constraints.goal_time` ([JTC](https://control.ros.org/master/doc/ros2_controllers/joint_trajectory_controller/doc/userdoc.html)); Nav2 goal checker accepts position and heading ([SimpleGoalChecker](https://docs.nav2.org/configuration/packages/nav2_controller-plugins/simple_goal_checker.html)). Wait for person: Human approval. Long or non-robot waits: not v1.
+- `precondition_wait_s`: poll `read_state` until true, else `precondition_failed`; absent → check once; shows `status.running_wait` "Running · waiting for precondition"; `timeout_s` starts at send; Stop → stopped, no read-back; resume restarts wait; restart → pending (exec-model v0.2.1 §2.5.5, A38); one record. Poll interval and fields: adapter author.
+- Blocking returns before stable and no stable field in `read_state` → adapter must add one (pre-real-robot check).
 
-拿掉哪条假设会变：如果控制器在机器人没稳住时就让 blocking 动作返回，`read_state` 里也没有表示「已站稳」的字段，两种做法都不管用，只能要求 adapter 把这个字段做出来（进接真机前的检查）。如果以后要等机器人以外的条件（比如等相机看到某个东西），就要真的等待节点或循环，不在 v1。
+Hardware
 
-## 6. 以后加 BT 和 graph 要留的余地
+- Robot model and interface specs await a source (Alex or Tedrake).
+- Backend shares the controller with control (inference): normal priority, off control-loop cores, memory cap; control threads never wait on it. ros2_control loops are real-time ([controller_manager](https://control.ros.org/rolling/doc/ros2_control/controller_manager/doc/userdoc.html), [RT Linux](https://docs.ros.org/en/jazzy/Tutorials/Miscellaneous/Building-Realtime-rt_preempt-kernel-for-ROS-2.html)).
+- Canvas Stop is not e-stop; e-stop is the robot's hardware path, never web or HTTP; no UI e-stop button. Proposed: IEC 60204-1 category 2 (hold, motors on; Thompson's suggestion, not certified).
+- After cancel: robot state and gripper hold read back and shown.
+- Adapter reports `name`, `version`, `target` (sim/real, a field, not name-guessed), action-list version.
+- No per-run sim/real toggle; adapter name right of flow name; red `real_tag` "REAL" tag when real.
+- v1: fake adapter, invented actions named as fake (sim).
+- Adapter heartbeat; loss cancels active goals (ROS 2 goals outlive clients, [rclcpp #2241](https://github.com/ros2/rclcpp/issues/2241)).
+- `timeout_s` → controller expiry; controller without it: description says "expiry by adapter only", UI flags it.
+- Crash: `motion` → result unknown; poll actions query goal, blocking use `read_state`; human confirms.
+- Adapter silent 3 s → pause, `run.word.paused_adapter_lost` "Paused · robot controller lost"; deadline sent to adapter; 60 s Python timer as backup. Defaults adjustable, no source (Torvalds).
+- Listen 127.0.0.1 only; no `--host`; remote browser via SSH forwarding.
+- Network loss: each action's adapter-defined behavior.
+- LAN access later: `--host` and tokens ship together.
+- A40 (exec-model v0.2.3 §0.2): `Host` `127.0.0.1`/`localhost`/`[::1]`; same `Origin`; `Content-Type: application/json`.
 
-节点有类型字段。底层格式区分数据边和控制边，flow 第一期只用数据边。节点外观和状态组件不绑死在 flow 布局上。
+## 4. Acceptance criteria
 
-## 7. 硬件需求
+1. Offline, Python-only machine runs the app; no build; requests only to 127.0.0.1. Steps: acceptance.md#1
 
-画布本身是软件，不设计硬件。但它驱动一台已有的机器人，下面这些要写清楚：
+1.1 CI fails on any vendored-file sha256 mismatch. Steps: acceptance.md#1.1
 
-- 机器人：四足狗加机械臂，相机在臂末端，算力 Jetson Thor。具体型号和接口规格等 Alex 或 Tedrake 给出处，这里不写数字。
-- 后端跑在哪：跑在机器人控制器上（Alex 2026-10-31，答了问题 4）。控制器是不是就是 Jetson Thor，没有原话，待确认。浏览器在本机还是另一台电脑上待答（见下面「浏览器在哪打开」）；走网络时断网，机器人怎么做按每个动作在 adapter 里写的来。
-- 画布后端和控制程序在同一台控制器上（推断，Tedrake）：后端用普通优先级跑，不占控制循环所在的 CPU 核，内存设上限，控制线程不等它。这样后端卡住或崩了只是流程停下，控制循环照常跑。如果控制程序是 ros2_control 一类，它的控制循环有实时要求（[controller_manager 文档](https://control.ros.org/rolling/doc/ros2_control/controller_manager/doc/userdoc.html)，[ROS 2 实时 Linux 说明](https://docs.ros.org/en/jazzy/Tutorials/Miscellaneous/Building-Realtime-rt_preempt-kernel-for-ROS-2.html)）。Thor 上的 JetPack 7 有没有现成实时内核，没有出处，待 Alex 确认。
-- 停止：画布上的「停止」不是急停。急停走机器人自己的硬件通路，不经过网页和 HTTP。画布上的停止是什么动作（停在原地、回安全位置），待 Alex 定。
-- 仿真和真机：画布不区分，接哪个 adapter 就是哪个（Alex 2026-10-31）。每次运行的「仿真 / 真机」切换去掉。流程名右边写 adapter 的名字，接的是真机时再加红框「真机」标签（Torvalds、Rams）。这要 adapter 自己报一个字段说明接的是仿真还是真机，不靠名字猜（Rams，字段由 Thompson 写进 `exec-model-v0.md`）。v1 用假 adapter，带几个编出来的动作，名字标明是假的，它就是仿真。
-- 后端停了机器人不会自己停：ROS 2 的客户端死后，服务端的目标仍在执行（[rclcpp #2241](https://github.com/ros2/rclcpp/issues/2241)）。所以 adapter 要有心跳，节点超时要变成机器人那边的到期时间，不能只靠 Python 这边计时（Thompson，`/workspace/agent-ui/embodied-exec-v0.md`）。
-- adapter 自己报 `name`、`version`、`target`（仿真或真机）、动作清单版本号，并收流程进程的心跳；心跳断了就取消还在执行的目标（Tedrake）。`timeout_s` 由 adapter 转成控制器自己的到期时间；控制器没有这个参数的，动作说明写明「到期只靠 adapter」，界面上标出来（Tedrake）。
-- 两种返回方式怎么处理（Thompson，`exec-model-v0.md` v0.2）：暂停和断点只在节点之间生效，先返回的动作要等结果回来才算做完。停止就调取消；不支持中途取消的动作等它做完，记录里写明没取消；控制器拒绝取消时节点保持运行中并标「取消被拒」。会动的动作超时记为「中断 · 结果未知」。崩溃后，先返回的动作先向控制器查目标还在不在执行，做完才返回的动作只能调 `read_state`；都不自动重试。
-- 停发指令后狗怎么做、控制器断电后怎么做、夹爪断电后能不能夹住：接真机前按控制器和夹爪的原文补，写进 adapter 验收，不卡 v1（Tedrake）。
-- 画布的「停止」：建议做成停在原地、电机保持供电（IEC 60204-1 的 2 类停止，Thompson 建议，非认证结论）。急停只走硬件，和画布无关。取消后机器人在什么状态、夹爪有没有夹着东西，按动作读回来显示。
-- 接真机前必须用 TCP 代理真切一次页面连接，确认服务端在约 10 s 内暂停（Thompson：半路断网时连接上没有关闭信号，SSE 写入照样成功，服务端会以为页面还在，`motion` 节点会无人看着继续跑）。这一条进真机前检查 R1–R6。
-- 接真机前确认「已站稳」能判断：blocking 动作返回时机器人已稳住，或者 `read_state` 里有表示站稳的字段，二者至少有一个，有原文出处。都没有就不能接真机（Tedrake）。进 R1–R6。
-- 断线（Torvalds 2026-10-31，数字没有出处，是可改的默认值）：运行中连续 10 s 没有页面连着，当前节点做完后暂停，顶栏写「已暂停 · 页面断开」，正在跑的节点不取消；adapter 3 s 无回应就暂停，顶栏写「已暂停 · 机器人控制器断开」。截止时间传给 adapter，Python 这边 60 s 计时留作第二道保险。界面上不放急停按钮。
-- 浏览器在哪打开：v1 没有鉴权（Alex 2026-10-31「先不用考虑鉴权」），后端只听 127.0.0.1，不提供 `--host`（Steve 18:40 定）。浏览器在另一台电脑上，用 SSH 端口转发连过去。以后要开放局域网，`--host` 和令牌一起做。
-- 挡住别的网页（Thompson exec-model v0.2.3 第 0.2 节，A40）：同一浏览器里打开的任何网页都能往 127.0.0.1 发请求。服务端只接受 `Host` 为 `127.0.0.1`、`localhost` 或 `[::1]` 加端口的请求；WebSocket 握手检查 `Origin` 是本页；指令接口只收 `Content-Type: application/json`。
+2. Breakpoint before node 3 stops there; nodes 3 and 4 get no records. Steps: acceptance.md#2
 
-## 8. 验收（每条写怎么测）
+3. Input edited at a breakpoint reaches downstream. Steps: acceptance.md#3
 
-1. 零构建、离线：断网、只装了 Python 的干净机器上，`pip install`（依赖已在本地）后启动、浏览器打开就能用。检查仓库里没有构建脚本、没有 `.ts` 源文件被浏览器之外的工具编译；浏览器开发者工具的网络面板里，所有请求都只发往后端地址（127.0.0.1），没有一条发往外网。
-1.1 依赖可追溯：CI 重新计算每个本地依赖文件的 sha256，和依赖清单不一致就不让合并。手动改动一个依赖文件的一个字节，CI 应该失败。
-2. 断点：在第 3 个节点执行前设断点，跑整条。停在第 3 个节点，它和第 4 个节点都没有新的运行记录。
-3. 改值继续：断点处改掉一个输入后继续。下游节点记录里收到的是改后的值。
-4. 刷新不丢：停在断点时刷新页面。回来仍停在同一节点，输入输出都在。
-5. 单节点：用上次运行的记录跑一个中间节点。只有这一个节点产生新记录。
-6. 分组：框选 2 个中间节点运行。只有这 2 个节点产生新记录，入口数据与所选那次运行的上游输出一致。
-7. 出错重跑：节点报错后从该节点重跑。上游节点不产生新记录。
-8. 副作用：单独重跑一个 `write` 节点。外部服务（用测试桩代替）没有收到第二次请求；`read` 节点重放时用的是缓存值。再单独重跑一个假 adapter 的 `motion` 节点：执行前弹出确认，不确认就不发出动作。
-9. 版本锁定：停在断点时改画布。当前运行仍按旧版本走，界面出现「从新版本重跑」提示。
-10. 色弱可辨：把界面转成灰度截图，出错、断点、完成三种状态仍能分清。
-11. 服务端重启：停在断点时重启服务，再继续跑完。最终输出与不重启的那次一致；结果每次不同的节点（如模型调用）比记录里的缓存值。
-12. 快照过期：两个节点不在同一个环里时，只改下游节点参数后重跑它，上游快照不被标成「可能过期」；改一个上游节点参数，下游快照被标成「可能过期」，界面出现斜线和「上游已改」。
-13. 人工确认：跑一个中间有人工确认节点的流程。运行停在该节点，状态是「等待确认」，下游没有新记录；点「驳回」后只有驳回那一路的下游执行，通过那一路的节点标「跳过」。两个页面同时点，只有先到的生效，后到的提示已被处理。
-14. 环正常退出：一个出口条件在第 3 轮成立的环，跑完后环内每个节点正好有 3 条记录，轮次是 1、2、3。
-15. 步数上限：跑一个出口永远不成立的环，总步数上限设成 10。第 10 步后停止，状态是「超出步数上限」，没有第 11 步的记录。
-16. 环里的断点：默认设置下，断点在每一轮都停；改成「只在第 2 轮停」后，第 1 轮不停、第 2 轮停。
-16.1 断点设在第 2 轮：停下时该节点只有第 1 轮的记录。
-17. 环里单跑：选第 2 轮的输入单跑环里一个节点，新记录的输入和第 2 轮那条记录一致，其他节点没有新记录。
-18. 没有出口的环：建一个没有条件节点作出口的环，点运行被拒绝，并提示缺什么。
-18.1 环中途重启：环跑到一半重启服务，继续跑完，最终结果和不重启的那次一致。
-18.2 环内快照：改环里某节点自己的参数，它后几轮的输入快照被标成「可能过期」。
-19. 画布性能（推断，阈值要在 Alex 的电脑上重测后才定为正式验收）：500 个节点、约 550 条边，每个节点每秒切 10 次状态，同时平移缩放，p95 帧时间不超过 2 帧（判法：每个帧间隔按 `round(dt / 16.67)` 换成帧数，帧数的 p95 ≤ 2；不直接拿毫秒比，Thompson、Steve；浏览器按刷新周期给帧时间，只会是 16.7 ms 的整数倍，原来写的 33 ms 实际等于要求 1 帧，是笔误）。这一条在 GitHub CI 上照跑、把数字打出来，但失败不拦 PR：共享机器加软件渲染的数字会抖（`7d1fc79` 上 p95 33.4 ms，早先同样的测试是 16.7 ms）。正式验收以 Alex 电脑上的实测为准，挂载后没有超过 100 ms 的长任务。参考：Torvalds 2026-10-31 无头 Chrome 加软件渲染实测，Vue Flow 按尺寸规则改完后 p95 16.7 ms，最长一帧 33.4 ms，长任务 0 次（`/workspace/agent-ui/spike/results.json`）。
-19.1 推送合并：用 Python 后端真实的 SSE 推送重跑第 19 条，浏览器每秒收到的状态事件不超过 10 条，帧时间满足第 19 条。等 v1 后端写好后测。
-19.2 停下时不等窗口：断点、单步、用户暂停各测 20 次。服务端写完暂停状态时记时间，浏览器收到暂停事件后的第一帧记时间，两边在同一台机器上。每次的差都不超过 100 ms，p95 不超过 20 ms（20 ms 是 Thompson 的推断，Torvalds 实测后定；见 `exec-model-v0.md` A5）。
-19.5 浅色和深色：系统设成深色后第一次打开，界面是深色；手动切到浅色后刷新，仍是浅色。两套各截一张灰度图，出错、断点、完成、中断 · 结果未知、页面断开、机器人控制器断开六种状态仍能分清（同第 10 条的测法）。断网时两套的字体都正常显示，网络面板里没有字体请求发往外网。
-19.6 界面语言：清掉浏览器本地存储，浏览器语言设成英文打开，界面是英文；设成中文打开，界面是中文；设成法文打开，界面是英文。切到中文，顶栏、节点面板、右侧面板、所有状态词、弹窗按钮都变中文，不用刷新，正在跑的流程不停；刷新后仍是中文。CI 里检查：两份词表的键完全一样，前端源码里没有写死的界面文字（扫出 CJK 字符或不在词表里的英文句子就失败）。从中文表里删一个键，那处显示英文，不显示键名。切语言后打开一条旧运行记录，状态按新语言显示。两种语言每屏各截一张，没有漏翻、没有被截断的字（Steve）。用中文界面跑到「中断 · 结果未知」，`kill -9` 后端，切成英文再启动：这一步仍在等人选 `retry` 或 `mark_done`，显示对应英文；变成待执行或出错就是存了界面文字（Thompson）。
-19.7 界面设置：清空本地存储，系统设深色、浏览器开「减少动画」，打开后是深色且没有状态动画。改主题、语言、面板宽度、网格后刷新，全部保留；主题选「跟随系统」后，回到系统设置。手动往 `localStorage` 写一个坏值，页面正常打开并回到浏览器设置。两个标签页同时开着，一个切主题和语言，另一个跟着变。清空浏览器存储或换一台电脑打开同一个流程：主题和语言回到浏览器设置，断线暂停时间、`timeout_s`、`precondition_wait_s` 都不变，`localStorage` 里没有这几项（Thompson）。
-19.9 挡住别的网页（A40）：用 `curl` 发三种请求：带 `Host: evil.example`；带 `Content-Type: text/plain` 的指令；从别的源握手 WebSocket。三种都被拒，假 adapter 没收到动作。
-19.8 推送前检查：在 `.agents/docs/` 里放一个 192.168 网段的完整私网地址（具体值只写在测试里，PRD 不写，否则 PRD 自己会被拦下），本地跑推送前检查，被拦下；放在 `docs/` 里也被拦下（Thompson：点开头的目录默认会被跳过）。
-19.10 开发工具链（Alex 2026-10-31「uv+ruff+py type check」；Steve、Torvalds、Tedrake、Thompson 18:58 定）：干净克隆跑 `scripts/check.sh`，依次通过 `uv sync --locked`、`ruff check`、`ruff format --check`、pyright（`roboact` 包严格模式，测试代码基础模式，不整文件忽略）、pytest、私网 IP 扫描、gitleaks；GitHub CI 跑同一个脚本，任一失败 PR 不能合（第 19 条画布性能除外，见该条）。CI 另有一个 linux/aarch64 任务（`ubuntu-24.04-arm`）跑 `uv sync --frozen` 和 pytest（Jetson Thor 是 aarch64）。`rclpy` 不写进 `pyproject.toml`，可选依赖组也不写（ROS 2 官方没有发到 PyPI，写进去 `uv lock` 会失败或装错包，Tedrake）；adapter 从 `--system-site-packages` 带进来的系统 Python 里 import 它，只在 adapter 模块里 import，类型检查只对它忽略缺失导入。Python 定 3.12，对应 Jazzy 和 Ubuntu 24.04（REP 2000）。留下的每个 `# type: ignore` 都写一句原因。真机验收：aarch64 Ubuntu 装好 ROS 2，干净 checkout 跑 `uv sync --frozen` 和 pytest 全过，adapter 能 `import rclpy`。前端不加构建步骤。
-19.4 等站稳：假 adapter 的一个动作写 `precondition_wait_s = 2`，让 `read_state` 前 1 s 返回「未站稳」、之后返回「已站稳」。动作在约 1 s 后发出，记录只有一条。改成一直「未站稳」：2 s 后记 `precondition_failed`，动作没有发出。去掉这个字段：第一次读到「未站稳」就记 `precondition_failed`。
-19.3 节点尺寸不变：缩放跨过 0.6、切换选中态，各做 6 次，Vue Flow 的节点尺寸更新次数为 0。（Torvalds 测法，`spike/results_select.json`）
+4. Refresh at a breakpoint keeps node and I/O. Steps: acceptance.md#4
 
-## 9. 要其他人回答的
+5. Single-node run records only that node. Steps: acceptance.md#5
 
-- Torvalds：画布库评估已回答（Vue Flow）。还要回答：v1 后端写好后，在 Alex 的电脑上重测第 19、19.1 条，给出正式阈值。
-- Thompson：执行模型规格已交（`/workspace/agent-ui/exec-model-v0.md`）。总步数上限临时默认 1000（Steve 定），正式值等 Alex。
-- Thompson：`exec-model-v0.md` v0.2，存储和重启后停在暂停照 v0.1 不变，A18、A20 保持原样；写进动作说明字段和 `return_mode` 两种方式下暂停、停止、崩溃各怎么处理，以及「取消被拒」。
-- Alex：浏览器在控制器本机打开，还是在另一台电脑上连过去（决定要不要做登录认证，影响 v1）。
-- Rams：所有状态词和按钮的英文写法，和中文同一张表；英文比中文长，节点宽度和顶栏放不放得下要按英文验。
-- Tedrake：（「等待」节点已答：不加，见第 5.2 节。）知道控制器是哪家以后，补三条原文：停发指令后机器人怎么做、控制器断电后狗怎么做、夹爪断电后能不能夹住。
-- Alex：JetPack 7 上有没有实时内核（Tedrake 没找到出处）；控制器是不是就是 Jetson Thor。不急，不影响 v1。
-- Torvalds：定 Thompson 的四个推断数（单节点超时 60 s、SSE 重连间隔 2 s、第 19.2 条 p95 20 ms）。
-- Rams：界面规格已交（`/workspace/agent-ui/ui-spec-v0.md`）。
+6. 2-node group run records only those 2; entry data matches chosen run. Steps: acceptance.md#6
 
-## 10. 风险和未决问题
+7. Rerun from failed node adds no upstream records. Steps: acceptance.md#7
 
-- 没有鉴权：v1 只靠只听本机和 A40 的三项检查。接真机前要定是做令牌（exec-model 第 0.2 节）开放局域网，还是一直只听本机加 SSH 端口转发。
+8. `write` replay mocked; `read` uses cache; `motion` asks first. Steps: acceptance.md#8
 
-已定（Alex，2026-10-31 15:56）：节点都是预先写好的；支持环；零构建；离线 vendored；网页。
-已定（2026-10-31）：画布库用 Vue Flow 1.48.2，React Flow 备选。
-已定（Steve，2026-10-31，Alex 可改）：节点用 `node-list-v0.md` 的 9 个，含「人工确认」，只留着测执行器；机器人动作由 adapter 生成（第 7 节），v1 接假 adapter；总步数上限临时默认 1000；不做单个环的轮数上限。
+9. Edit at breakpoint: old version continues; rerun prompt shown. Steps: acceptance.md#9
 
-还没定：
-- 总步数上限的正式默认值（现在的 1000 是临时值）。
-- Alex 2026-10-31 已答完：运行日志保留；控制器是哪家、接真机还是仿真都不影响画布；adapter 针对每种控制器单独写；动作怎么返回、停下时怎么做按动作定；看相机画面做成节点。产品问题都答完了，只剩第 9 节两个不影响 v1 的硬件确认。
-- 节点清单不再手写：原子动作节点由 adapter 生成（`node-list-v0.md` 作废，9 个节点只留着测执行器）。手写的只剩控制类节点（见第 5.2 节；没有「循环」节点，环用回边加条件判断节点），和 Tedrake 一起定哪些留下。假 adapter 里的几个动作由 Torvalds 定，只用来测试和演示。
-- 副作用要加一类「物理动作」：不能模拟返回，不能靠幂等键去重，结果未知时恢复前要先读机器人真实状态。规则由 Thompson 写进 `exec-model-v0.md`。
+10. Error, breakpoint, done distinguishable in grayscale. Steps: acceptance.md#10
 
-风险：
-- 节点数上限：只测到 500 个节点。如果以后一张图要放几千个节点，网页元素可能撑不住，那时 canvas 方案（LiteGraph）会占优，要先在那个规模重测再定。
-- 性能数字来自无头浏览器加软件渲染，帧率封顶 60 Hz 左右，只能比较三个库，不代表 Alex 的电脑。
-- 换到 React Flow 的代价：React 19 没有 UMD 构建，react、react-dom 每次升级都要经 esm.sh 重新转成 ES 模块，并更新依赖清单。
-- 节点由我们预先写好，副作用标记和「不靠进程内存传数据」这两条由写节点的人遵守，要在节点代码评审里检查。另外，单节点重跑时外部状态（文件、数据库）可能已经变了，缓存输入不再等于当时的现场。
+11. Restart at breakpoint gives the same output. Steps: acceptance.md#11
+
+12. Only upstream edits stale downstream snapshots. Steps: acceptance.md#12
+
+13. Approval waits; Reject runs one branch, other skipped; first click wins. Steps: acceptance.md#13
+
+14. Exit at round 3: 3 records per loop node. Steps: acceptance.md#14
+
+15. Limit 10: stops after step 10, step limit exceeded. Steps: acceptance.md#15
+
+16. Loop breakpoint stops every round, or only the chosen round. Steps: acceptance.md#16
+
+16.1 Stopped at round 2: node has only its round 1 record. Steps: acceptance.md#16.1
+
+17. Single run with round 2 input matches round 2 record. Steps: acceptance.md#17
+
+18. Loop without exit refused with reason. Steps: acceptance.md#18
+
+18.1 Restart mid-loop gives the same result. Steps: acceptance.md#18.1
+
+18.2 Own param change stales the node's later rounds. Steps: acceptance.md#18.2
+
+19. Perf (inference): 500 nodes, ~550 edges, 10 changes/node/s: p95 ≤ 2 frames; on Alex's computer no long task > 100 ms; CI reports only. Steps: acceptance.md#19
+
+19.1 Real SSE: ≤ 10 events/s; frames meet 19. Steps: acceptance.md#19.1
+
+19.2 Pause to first frame ≤ 100 ms, p95 ≤ 20 ms (A5). Steps: acceptance.md#19.2
+
+19.3 0 node-size updates across zoom 0.6 and selection. Steps: acceptance.md#19.3
+
+19.4 `precondition_wait_s` sends when stable, else `precondition_failed` (A38). Steps: acceptance.md#19.4
+
+19.5 Themes follow system, persist; six states distinguishable; fonts offline. Steps: acceptance.md#19.5
+
+19.6 Language picked from browser, switched live, fully translated; codes survive restart. Steps: acceptance.md#19.6
+
+19.7 UI settings persist, sync, fall back; server values never in `localStorage`. Steps: acceptance.md#19.7
+
+19.8 Private IP in `.agents/docs/` or `docs/` blocks push. Steps: acceptance.md#19.8
+
+19.9 A40 checks reject bad `Host`, `Content-Type`, `Origin`. Steps: acceptance.md#19.9
+
+19.10 `scripts/check.sh` passes on clean clone and aarch64; failures block merge except 19. Steps: acceptance.md#19.10
+
+A6: failing (see 5). A38: 19.4. A40: 19.9. R1–R6 include two checks; Steps: acceptance.md#r1-r6
+
+## 5. Risks and open questions
+
+- A6 failing: 11.251 s measured (PR #1) vs ≤ 10 s; merged by Alex (2026-10-31 21:38); fix before real robot; 10 s is not a real-robot bound until then.
+- A6 (Torvalds): `motion` started in 10 s–11.25 s? Extra 1.25 s from heartbeat interval or waiting for current node (step 14)?
+- No auth; tokens (exec-model §0.2) or SSH before real robot.
+- Only 500 nodes tested; at thousands, LiteGraph (canvas) may win; re-measure first.
+- Perf numbers: headless, software rendering, ~60 Hz cap; compare libraries only.
+- React 19 has no UMD (esm.sh per upgrade).
+- Side-effect marks and no-memory data rely on node authors; check in code review. External state may change before single-node reruns.
+- Alex: step limit (1000 temporary); browser location (decides auth, affects v1); Stop = hold or safe pose; JetPack 7 real-time kernel and controller = Thor (not blocking v1).
+- Torvalds: re-measure 19, 19.1; confirm 60 s timeout, 2 s SSE reconnect, 19.2 20 ms; fake-adapter actions.
+- Thompson: exec-model v0.2 keeps v0.1 storage and restart pause, A18, A20; adds action fields, pause/stop/crash under both `return_mode` values, cancel refused, `motion` rules (no mock, no idempotency dedupe, read state before resume).
+- Rams: English status words and buttons in the zh table; verify English fits nodes and top bar.
+- Tedrake: once vendor known, cite stop, controller power-loss and gripper power-loss behavior (adapter acceptance, not blocking v1).
+- Tedrake: confirm control nodes; `node-list-v0.md` obsolete (9 nodes kept for executor tests).
