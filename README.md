@@ -11,7 +11,7 @@
 
 规格（现行）：[PRD v1.4.3](docs/prd.md)、[exec-model v0.2.1](docs/exec-model.md)、[UI spec](docs/ui-spec.md)、[Rams 设计图](docs/design/)。历史稿：`docs/prd-v1.md`、`docs/exec-model-v0.md`、`docs/ui-spec-v0.md`、`docs/system-design-v0.md`。
 
-本仓库不发布到 PyPI，也不带发布配置。
+本仓库不发布到 PyPI，也不带发布配置。许可是 [MIT](LICENSE)。
 
 ## 离线安装并启动
 
@@ -88,6 +88,7 @@ v1 只用 `FakeAdapter`（`target=sim`）。下面这些在接真机前必须过
 ## 仓库怎么摆
 
 ```
+LICENSE             MIT（Copyright (c) 2026 Alex Zhang (alexzhang1030)）
 roboact/            Python 包（适配器、节点注册表、图、执行器、Store、HTTP+SSE）
 web/                静态前端，由后端直接托管
 web/vendor/         Vue / Vue Flow / JetBrains Mono / 图标（未改动的原文件）
