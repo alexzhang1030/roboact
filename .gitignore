@@ -1,0 +1,15 @@
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+data/*.db
+data/*.db-*
+data/*.db-journal
+*.egg-info/
+.playwright/
+.cache/
+uploads/
+agent-tools/
+.cursor/
+*.log
