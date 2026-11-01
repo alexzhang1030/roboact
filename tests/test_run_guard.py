@@ -500,9 +500,11 @@ def test_resume_refused_while_another_run_is_executing(tmp_path):
         pause_id = paused.pause["pause_id"]
         pause_before = dict(paused.pause)
 
-        running_id = await ex.start_node(fid, ver, "slow", request_id="slow-req")
+        running_id = await ex.start_node(fid, ver, "slow", confirm=True, request_id="slow-req")
         await _until_running(ex, running_id, adapter)
-        assert await ex.start_node(fid, ver, "slow", request_id="slow-req") == running_id
+        assert (
+            await ex.start_node(fid, ver, "slow", confirm=True, request_id="slow-req") == running_id
+        )
         with pytest.raises(ApiError) as fresh:
             await ex.start_full(fid, ver, request_id="other-req")
         assert fresh.value.status == 409
@@ -549,7 +551,7 @@ def test_resume_refused_while_another_run_is_executing(tmp_path):
         approval = await wait_status(ex, approval_id, "paused")
         assert approval.pause["reason"] == "approval"
         approval_pause = approval.pause["pause_id"]
-        other = await ex.start_node(fid2, ver2, "motion")
+        other = await ex.start_node(fid2, ver2, "motion", confirm=True)
         await _until_running(ex, other, adapter)
         with pytest.raises(ApiError) as denied:
             await ex.approve(approval_id, approval_pause, "approve")
