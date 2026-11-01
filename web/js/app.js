@@ -324,7 +324,9 @@ const App = defineComponent({
     const showLostReadback = computed(() => !!(isPaused.value && operatorLost.value && readback.value))
     const selectedCancelRejected = computed(() => {
       const s = selected.value && nodeStatus[selected.value]
-      return !!(s && (s.status === 'cancel_rejected' || s.state === 'cancel_rejected'))
+      if (s && (s.status === 'cancel_rejected' || s.state === 'cancel_rejected')) return true
+      const pause = run.value && run.value.pause
+      return !!(pause && pause.lost_outcome === 'cancel_rejected' && pause.node_id === selected.value)
     })
     watch(waitingApproval, v => { if (v) bannerClock.approval = Date.now() })
     watch(versionWarn, v => { if (v) bannerClock.version = Date.now() })

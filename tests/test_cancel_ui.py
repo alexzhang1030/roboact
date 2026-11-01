@@ -121,7 +121,9 @@ def test_lost_outcome_cancel_rejected(tmp_path) -> None:
         assert pause is not None
         assert pause["lost_outcome"] == "cancel_rejected"
         assert "lost_extra_s" not in pause
-        assert (st.node_state.get("go") or {}).get("state") == "cancel_rejected"
+        go_node = st.node_state.get("go") or {}
+        assert go_node.get("state") == "done", go_node
+        assert go_node.get("duration_ms") is not None
         assert adapter.cancel_calls
         go_recs = [r for r in recs(store, rid) if r["node_id"] == "go"]
         assert go_recs[-1]["status"] == "done"
@@ -421,12 +423,95 @@ def test_lost_line_cancel_rejected(server) -> None:
             "Page disconnected. The robot refused to cancel Go to pose; "
             "it ran to end, then the run paused."
         ), text
-        state = page.locator('.fn[data-node-type="fake_set_pose"]').get_attribute("data-state")
-        assert state == "cancel_rejected", state
+        card = page.locator('.fn[data-node-type="fake_set_pose"]')
+        page.wait_for_function(
+            """() => {
+              const card = document.querySelector('.fn[data-node-type="fake_set_pose"]')
+              const word = card && card.querySelector('.fn-st-word')
+              const took = card && card.querySelector('[data-testid=node-took]')
+              return card && card.getAttribute('data-state') === 'done'
+                && word && word.textContent === 'Done'
+                && took && took.textContent.indexOf('Took ') === 0
+            }""",
+            timeout=5000,
+        )
+        assert card.get_attribute("data-status") == "done"
+        assert page.locator(".cancel-note").inner_text() == "Cancel rejected"
         br.close()
     finally:
         p.stop()
         proxy.close()
+
+
+def test_cancel_rejected_amber_then_done(server) -> None:
+    """Refused cancel is amber while running, then Done plus Took once it ends."""
+    put_flow(server["base"], motion_graph("reject then done"))
+    http_json(
+        server["base"],
+        "/api/test/adapter",
+        "POST",
+        {"async_steps": 1, "async_sleep_s": 2.5, "reject_next_cancel": True},
+    )
+    http_json(server["base"], "/api/test/ui-lost", "POST", {"seconds": 0.4})
+    p, _path = _launch()
+    try:
+        br = _browser(p)
+        page, _blocked, _errs = _open(br, server["base"])
+        _english(page)
+        page.evaluate("() => window.__af.setThemeMode('light')")
+        page.evaluate("() => window.__af.doRun('all')")
+        page.wait_for_function(
+            "() => window.__af.run.value && window.__af.run.value.status === 'running'",
+            timeout=20000,
+        )
+        rid = page.evaluate(
+            "() => { const r = window.__af.run.value; return r && (r.run_id || r.id) }"
+        )
+        from tests.test_a4_a6_browser import _wait_node_running
+
+        _wait_node_running(server["base"], rid, "go")
+        page.evaluate("() => window.__af.stopBeat()")
+        page.wait_for_function(
+            """() => {
+              const card = document.querySelector('.fn[data-node-type="fake_set_pose"]')
+              return card && card.getAttribute('data-state') === 'cancel_rejected'
+            }""",
+            timeout=10000,
+        )
+        amber = page.evaluate(
+            """() => {
+              const card = document.querySelector('.fn[data-node-type="fake_set_pose"]')
+              const word = card.querySelector('.fn-st')
+              const ico = card.querySelector('.ico')
+              return {
+                status: card.getAttribute('data-status'),
+                border: getComputedStyle(card).borderTopColor,
+                word: getComputedStyle(word).color,
+                icon: getComputedStyle(ico).color,
+              }
+            }"""
+        )
+        assert amber["status"] == "cancel_rejected", amber
+        assert amber["border"] == "rgb(143, 96, 0)", amber
+        assert amber["word"] == "rgb(143, 96, 0)", amber
+        assert amber["icon"] == "rgb(143, 96, 0)", amber
+        page.evaluate("() => { window.__af.selected.value = 'go' }")
+        page.wait_for_function(
+            """() => {
+              const card = document.querySelector('.fn[data-node-type="fake_set_pose"]')
+              const word = card && card.querySelector('.fn-st-word')
+              const took = card && card.querySelector('[data-testid=node-took]')
+              return card && card.getAttribute('data-state') === 'done'
+                && card.getAttribute('data-status') === 'done'
+                && word && word.textContent === 'Done'
+                && took && took.textContent.indexOf('Took ') === 0
+            }""",
+            timeout=10000,
+        )
+        assert page.locator(".cancel-note").inner_text() == "Cancel rejected"
+        br.close()
+    finally:
+        p.stop()
 
 
 def test_done_motion_title_has_no_duration(server) -> None:

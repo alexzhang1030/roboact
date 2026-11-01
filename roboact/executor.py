@@ -1296,6 +1296,8 @@ class Executor:
         async def on_progress(p: Progress) -> None:
             nonlocal saw_progress
             saw_progress = True
+            if (ctrl.node_state.get(nid) or {}).get("state") == "cancel_rejected":
+                return
             self._set_node(
                 ctrl,
                 nid,
@@ -1328,6 +1330,8 @@ class Executor:
                         )
                         continue
                     if saw_progress:
+                        continue
+                    if (ctrl.node_state.get(nid) or {}).get("state") == "cancel_rejected":
                         continue
                     secs = int(time.monotonic() - ctrl.current_started)
                     self._set_node(ctrl, nid, "running", rnd, step, elapsed_s=secs)
@@ -1828,14 +1832,16 @@ class Executor:
         ctrl.operator_lost_extra_s = None
         ctrl.operator_lost_keep_node = outcome is not None
         if outcome == "cancel_rejected":
+            # Refusal is shown while the action is still running. Once it
+            # finishes, the node keeps done (ui-spec §16); the pause line
+            # still says the robot refused the cancel.
             self._set_node(
                 ctrl,
                 nid,
-                "cancel_rejected",
+                "done" if status == "done" else "cancel_rejected",
                 rnd,
                 step,
                 duration_ms=dt,
-                error_summary="cancel_rejected",
                 side_effect_mode=mode,
             )
         elif outcome == "cancelled":

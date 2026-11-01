@@ -31,7 +31,7 @@ const KIND = {
   stopped: 'stopped',
   interrupted: 'interrupted',
   interrupted_unknown: 'unknown',
-  cancel_rejected: 'running',
+  cancel_rejected: 'cancel_rejected',
   action_missing: 'missing',
   missing_input: 'missing_input',
 }
