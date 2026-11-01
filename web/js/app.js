@@ -1124,8 +1124,6 @@ const App = defineComponent({
         if (cramped()) top.dataset.collapse = 'adapter-ver'
       }
     }
-    function displayType(spec) { return typeLabel(spec) }
-
     let topRo = null
     watch([locale, actionGoneCount, missingInputCount, runLockedText, adapterLabel, flowNameLabel, () => meta.value && meta.value.version], () => nextTick(fitTopBar))
     onMounted(async () => {
@@ -1239,7 +1237,7 @@ const App = defineComponent({
       nodeTypesList, tools, adapter, meta, nodes, edges, groups, leftOpen, rightW, tab, selected, selectedNode,
       run, records, runs, conn, theme, themeMode, themeOpen, setThemeMode, pickTheme, langOpen, locale, localeMode, pickLang,
       motion, motionMode, motionOpen, pickMotion, savedViewport, defaultViewport, persistViewportNow, logFilter,
-      showMini, showGrid, addMenu, addQ, rejectMsg, overlay, specOf, t, displayType, fieldLabel, groupTitle, slot1Key,
+      showMini, showGrid, addMenu, addQ, rejectMsg, overlay, specOf, t, typeLabel, fieldLabel, groupTitle, slot1Key,
       adapterLabel, flowNameLabel, nameEditing, topEl, runLocked, runLockedText, slot1Title,
       actionGoneCount, missingInputCount, timeoutCapText, timeoutCapIds, jumpToFirst, onNameClick, startNameEdit, finishNameEdit, fitTopBar,
       nodeRecords, logRecords, rounds, shownRec, viewRound, runActive, waitingApproval, confirmNote, versionWarn, stepsClass, stepsText,
@@ -1372,7 +1370,7 @@ const App = defineComponent({
             <h3>{{ groupTitle(g.name) }}</h3>
             <div class="nt" v-for="item in g.items" :key="item.type" draggable="true"
                  @dragstart="onPaletteDrag($event, item.type)" @dblclick="addNode(item.type)">
-              <span class="ic" v-if="item.icon" :style="{ '--ico': 'url(/vendor/icons/' + item.icon + '.svg)' }"></span><span v-else class="ic">▢</span><span>{{ displayType(item) }}</span>
+              <span class="ic" v-if="item.icon" :style="{ '--ico': 'url(/vendor/icons/' + item.icon + '.svg)' }"></span><span v-else class="ic">▢</span><span>{{ typeLabel(item) }}</span>
             </div>
           </div>
           <div v-if="rejectedActions.length" class="pal-group">
@@ -1399,7 +1397,7 @@ const App = defineComponent({
         </div>
         <div class="menu" v-if="addMenu" :style="{left: addMenu.x+'px', top: addMenu.y+'px'}">
           <input v-model="addQ" :placeholder="t('search_nodes')" autofocus>
-          <div class="nt" v-for="item in filteredTypes" :key="item.type" @click="addNode(item.type, addMenu.flow)">{{ displayType(item) }}</div>
+          <div class="nt" v-for="item in filteredTypes" :key="item.type" @click="addNode(item.type, addMenu.flow)">{{ typeLabel(item) }}</div>
         </div>
       </div>
       <aside class="right" :style="{width: rightW+'px'}">
