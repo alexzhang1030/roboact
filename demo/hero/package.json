@@ -1,0 +1,24 @@
+{
+  "name": "roboact-hero-demo",
+  "private": true,
+  "type": "module",
+  "description": "Looping homepage hero for Roboact. React stays in this folder; web/ is build-free.",
+  "scripts": {
+    "dev": "vite --host 127.0.0.1 --port 5179 --strictPort",
+    "film": "node scripts/film.mjs",
+    "jumps": "node scripts/jumps.mjs",
+    "layout": "node scripts/layout.mjs"
+  },
+  "dependencies": {
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@types/react": "^18.3.1",
+    "@types/react-dom": "^18.3.1",
+    "@vitejs/plugin-react": "^4.7.0",
+    "playwright-core": "^1.56.0",
+    "typescript": "^5.6.3",
+    "vite": "^6.4.5"
+  }
+}

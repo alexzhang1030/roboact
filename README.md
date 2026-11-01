@@ -2,6 +2,8 @@
 
 # Roboact
 
+<img src="demo/hero/media/hero.gif" width="1200" height="750" alt="Fake adapter demo. Start. Go to pose. Gripper. Run. Running. Completed.">
+
 Offline robot flow canvas. Wire adapter actions into a loopable flow; debug with breakpoints, step, human confirm, and a run log. v1 ships `FakeAdapter` only (`target=sim`). MIT (`LICENSE`).
 
 - Python 3.12 asyncio backend. Frontend is Vue 3 + Vue Flow 1.48.2, **zero build** (native ES modules). Bind is `127.0.0.1` only — no `--host`, no auth.
