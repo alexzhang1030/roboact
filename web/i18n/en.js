@@ -87,7 +87,7 @@ export default {
   'status.interrupted': 'Interrupted',
   'status.interrupted_unknown': 'Interrupted · result unknown',
   'status.cancel_rejected': 'Cancel rejected',
-  'status.action_missing': 'Action no longer exists',
+  'status.action_missing': 'Action gone',
 
   'error.timeout': 'Timed out',
   'error.timeout_s': 'Timed out ({s} s)',
@@ -277,7 +277,9 @@ export default {
   'flow.format_json': 'JSON',
   'flow.format_yaml': 'YAML',
   'flow.import_failed': 'File not imported. Fix these errors:',
+  'flow.import_close': 'Close',
   'flow.import_error': '{path}: {message}',
+  'flow.import_path_id': '{path} (id {id})',
   'flow.mismatch_adapter': 'Adapter differs: file {file}, connected {current}',
   'flow.mismatch_actions': 'Action list version differs: file {file}, connected {current}',
   'flow.mismatch_robot': 'Robot differs: file {file}, connected {current}. Joint positions were calibrated on another robot.',
@@ -303,5 +305,5 @@ export default {
   'status.summary.extra_end': '{n} Ends. Keep one.',
   'status.summary.end_unreachable': 'Not reachable from Start',
   'status.summary.no_cancel_too_long': 'Can\'t cancel. Runs up to {s} s.',
-  'flow.output_renamed': '{path}: `output` is now `end`.',
+  'flow.output_renamed': '{path}: {old} is now {new}.',
 }
