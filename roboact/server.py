@@ -696,6 +696,9 @@ class App:
                         self.adapter, "goals_cancelled_by_lost_heartbeat", 0
                     ),
                     "cancel_calls": list(getattr(self.adapter, "cancel_calls", [])),
+                    "goals_sent": [
+                        row.get("action") for row in getattr(self.adapter, "goals_sent", [])
+                    ],
                 },
             )
             return
