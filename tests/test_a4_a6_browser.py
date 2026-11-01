@@ -1165,3 +1165,51 @@ def test_confirm_open_while_paused_keeps_ui_beat(server) -> None:
         br.close()
     finally:
         p.stop()
+
+
+def test_af_exposes_groups_and_stop_beat(server) -> None:
+    """window.__af exposes groups and stopBeat, used the same way as the other tests."""
+    put_flow(server["base"], motion_graph("af surface"))
+    http_json(
+        server["base"],
+        "/api/test/adapter",
+        "POST",
+        {"async_steps": 1, "async_sleep_s": 20.0},
+    )
+    p, _path = _launch()
+    try:
+        br = _browser(p)
+        page, _blocked, _errs = _open(br, server["base"])
+        kinds = page.evaluate(
+            """() => ({
+              groups: !!(window.__af.groups && Array.isArray(window.__af.groups.value)),
+              stopBeat: typeof window.__af.stopBeat,
+            })"""
+        )
+        assert kinds == {"groups": True, "stopBeat": "function"}, kinds
+        page.evaluate(
+            """() => {
+              window.__af.selected.value = null
+              window.__af.groups.value = [{ id: 'g1', name: 'Bunch', node_ids: ['go', 'grip'] }]
+            }"""
+        )
+        page.locator(".group-run button").wait_for()
+        assert page.locator(".group-run").inner_text().startswith("Bunch")
+        beats: list[float] = []
+
+        def _on_req(req) -> None:
+            if req.method == "POST" and req.url.endswith("/ui-beat"):
+                beats.append(time.monotonic())
+
+        page.on("request", _on_req)
+        page.evaluate("async () => { await window.__af.doRun('all') }")
+        _wait_run(page, "running")
+        page.wait_for_timeout(2500)
+        assert beats, "ui-beat did not fire before stopBeat"
+        held = len(beats)
+        page.evaluate("() => window.__af.stopBeat()")
+        page.wait_for_timeout(3000)
+        assert len(beats) == held, beats
+        br.close()
+    finally:
+        p.stop()
