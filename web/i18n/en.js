@@ -282,4 +282,10 @@ export default {
   'run.motion_timeout_cap': '{node}: non-cancellable motion timeout must be 10 s or less',
   'run.missing_input_count': '{n} nodes need input',
   'status.missing_input': 'Needs input',
+  'node.no_cancel': 'Can\'t cancel',
+  'lost.cancelled': 'Page disconnected. {node} was cancelled, then the run paused.',
+  'lost.ran_to_end': 'Page disconnected. {node} can\'t be cancelled; it ran {s} s more, then the run paused.',
+  'lost.cancel_rejected': 'Page disconnected. The robot refused to cancel {node}; it ran to end, then the run paused.',
+  'run.no_cancel_too_long': '{node} can\'t be cancelled and may run {s} s. The limit is 10 s.',
+  'run.no_cancel_too_long_count': '{n} nodes can\'t be cancelled and run too long',
 }

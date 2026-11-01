@@ -96,6 +96,7 @@ export function serverLabel(value, keys) {
 const EN_COUNT_ONE = {
   'run.action_missing_count': '1 missing action',
   'run.missing_input_count': '1 node needs input',
+  'run.no_cancel_too_long_count': '1 node can\'t be cancelled and runs too long',
 }
 
 export function countLabel(key, n) {

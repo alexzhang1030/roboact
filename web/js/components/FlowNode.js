@@ -62,6 +62,16 @@ export default markRaw(defineComponent({
       if (custom) return custom
       return actionLabel(spec.value, locale.value) || props.data.nodeType
     })
+    const noCancel = computed(() => {
+      const cancel = spec.value && spec.value.action && spec.value.action.cancel
+      return !!(cancel && cancel.cancellable === false)
+    })
+    function formatSeconds(v) {
+      const n = Number(v)
+      if (!Number.isFinite(n)) return v == null ? '' : String(v)
+      const r = Math.round(n * 10) / 10
+      return Number.isInteger(r) ? String(r) : r.toFixed(1)
+    }
     const isActionMissing = computed(() => kind.value === 'missing')
     const isMissingInput = computed(() => kind.value === 'missing_input')
     const emptyPorts = computed(() => {
@@ -93,6 +103,12 @@ export default markRaw(defineComponent({
     const summary = computed(() => {
       void locale.value
       const s = st.value
+      if (s.no_cancel_too_long) {
+        return t('run.no_cancel_too_long', {
+          node: s.node_label || title.value,
+          s: formatSeconds(s.timeout_s),
+        })
+      }
       if (isActionMissing.value) return t('error.action_missing')
       if (kind.value === 'unknown') {
         const code = s.error_type || s.error
@@ -136,7 +152,7 @@ export default markRaw(defineComponent({
     const bpAfterTitle = computed(() => { void locale.value; return bpAfter.value.enabled ? t('bp.after_on') : t('bp.after_off') })
     return {
       Position, ins, outs, st, word, write, rows, spec, bpBefore, bpAfter, srcOf, toggleBp,
-      kind, icon, typeIcon, iconBase, icoUrl, summary, title, sideTitle, bpBeforeTitle, bpAfterTitle, t, locale, portLabel,
+      kind, icon, typeIcon, iconBase, icoUrl, summary, title, noCancel, sideTitle, bpBeforeTitle, bpAfterTitle, t, locale, portLabel,
       isActionMissing, isMissingInput, portMissing,
     }
   },
@@ -156,6 +172,7 @@ export default markRaw(defineComponent({
       <span v-if="typeIcon" class="fn-type-ico" :style="{ '--ico': icoUrl(typeIcon) }"></span>
       <span v-if="write" class="fn-side" :style="{ '--ico': icoUrl('mark-write') }" :title="sideTitle"></span>
       <span class="fn-name" :class="{ full: isActionMissing }">{{ title }}</span>
+      <span v-if="noCancel" class="fn-no-cancel" data-testid="node-no-cancel">{{ t('node.no_cancel') }}</span>
       <span v-if="isActionMissing" class="fn-gone-x" aria-hidden="true">×</span>
       <span class="fn-st" v-else>
         <span class="ico" :data-kind="kind" :style="{ '--ico': icoUrl(icon) }"></span>

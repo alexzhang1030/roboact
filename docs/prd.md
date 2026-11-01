@@ -238,11 +238,11 @@ Hardware
 
 20. Flow file: export, import, export is byte-identical; YAML converted to JSON equals the JSON export; unquoted `mode: on` stays a string; bad files change nothing; "action gone", "missing input" and mismatched files all lock Run. Steps: acceptance.md#20
 
-A6: failing (see 5). A38: 19.4. A40: 19.9. R1–R6 include two checks; Steps: acceptance.md#r1-r6
+A6: passing (PR #6). A38: 19.4. A40: 19.9. R1–R6 include two checks; Steps: acceptance.md#r1-r6
 
 ## 5. Risks and open questions
 
-- A6 failing: 11.251 s measured (PR #1) vs ≤ 10 s. Cause (Torvalds, 2026-11-01): executor checks disconnect only between nodes (`executor.py:1159`). Rule 14 changed to cancel the current action; until the executor and adapter change merges and acceptance.md#r1-r6 step 1 passes, 10 s is not a real-robot bound. A test-only change does not close A6.
+- A6 passed in PR #6 (main `2cdd0f4`): cancellable 30 s action, TCP cut, paused at 9.631–9.678 s over 5 runs; `timeout_s` = 11 non-cancellable `motion` blocks Run (Torvalds). Fake adapter only; the 10 s cap still needs Tedrake's per-robot check before the real robot.
 - Click to Paused: 35–54 frames under CI load, from queued node updates (Torvalds); same 3–4 frames on main and the A6 branch locally. Outside A5; fix in executor with A6; no limit set (Alex).
 - Cancel stop behavior (hold in place or decelerate) depends on each controller; adapter must state and test it (Tedrake, inference).
 - No auth; tokens (exec-model §0.2) or SSH before real robot.

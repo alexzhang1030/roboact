@@ -122,6 +122,11 @@ label { display: block; color: var(--muted); font-size: 12px; margin: 8px 0 4px;
   display: flex; flex-direction: column; align-items: center;
   position: static; left: auto; transform: none; margin: 0; justify-self: center;
 }
+.lost-line {
+  position: absolute; top: calc(100% + 2px); left: 50%; transform: translateX(-50%);
+  margin: 0; font-size: 12px; line-height: 18px; font-weight: 400; color: var(--text);
+  white-space: nowrap; z-index: 8; pointer-events: none;
+}
 .top .slots { display: flex; align-items: center; gap: 8px; }
 .top .slot-1 { min-width: 10em; }
 .top .slot-2, .top .slot-3 { min-width: 5.5em; }
@@ -197,6 +202,11 @@ label { display: block; color: var(--muted); font-size: 12px; margin: 8px 0 4px;
 .nt {
   display: flex; align-items: center; gap: 8px; height: 32px; padding: 0 8px;
   border-radius: 4px; cursor: grab; user-select: none;
+}
+.nt-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.nt-no-cancel, .fn-no-cancel {
+  flex: none; font-size: 12px; line-height: 18px; font-weight: 400;
+  color: var(--muted); white-space: nowrap;
 }
 .nt:hover { background: var(--bg); }
 .nt .ic {
@@ -281,7 +291,8 @@ label { display: block; color: var(--muted); font-size: 12px; margin: 8px 0 4px;
   padding: 0 12px; font-size: var(--fs-14); line-height: var(--lh-14); font-weight: 600;
   border-bottom: 1px solid var(--border);
 }
-.fn-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fn-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+.fn-no-cancel { font-weight: 400; }
 .fn-name.full { overflow: visible; text-overflow: clip; flex: 1 1 auto; }
 .fn-gone-x { color: var(--red); flex: none; font-weight: 600; font-size: var(--fs-14); line-height: 1; }
 .fn-side { color: var(--muted); font-size: var(--fs-12); flex: none; }

@@ -73,6 +73,8 @@ Rules:
 - Running detail, no progress bar: `status.running_pct`, `status.running_feedback`, `status.running_s`.
 - Precondition wait: `status.running_wait`, blue; log `rec.waited`. Stop gives stopped; limit gives error `error.precondition_failed`; pause or disconnect requeues and restarts the wait at zero.
 - Cancel rejected: still running, `status.cancel_rejected` amber; top bar adds `run.stop_rejected_note`. Retry = Stop again.
+- Page disconnected > 10 s (PRD 14): on return the top bar shows `run.word.paused_operator_lost`, and a 12px line under the controls says what happened to the node that was running: `lost.cancelled` (cancelled), `lost.ran_to_end` (non-cancellable, ran to end, with seconds moved after the cut), or `lost.cancel_rejected` (refused, ran to end). That node keeps its own status (`status.stopped` or `status.done_*`); the robot state read back after cancel shows in its panel. The line stays until Continue or Stop.
+- Non-cancellable action (`cancel` says not cancellable): 12px `--muted` word `node.no_cancel` after the title, on the node and its palette row. Text only, no icon, no colour. If the title row is short of room, the title truncates with an ellipsis; the word stays.
 - Action missing: panel `error.action_missing`. Run is blocked while any exists; `run.action_missing_count` next to Run jumps to the first. Cleared only by replacing the action or deleting the node.
 - Missing input: a required value is empty (e.g. a secret param imported as `null`). Run is blocked until filled; `run.missing_input_count` sits next to Run beside the action-missing count.
 
@@ -204,6 +206,7 @@ Measured with HarfBuzz, `InterVariable.woff2`, weight 400, current `en.js`.
 - Robot, adapter, action-list version or unit mismatch: an amber banner at the top lists each one (`flow.mismatch_robot`, `flow.mismatch_adapter`, `flow.mismatch_actions`, `flow.mismatch_units`) with one button `flow.review_enable`. Run is disabled (`flow.run_locked`) until it is pressed.
 - Param types are not checked at import. Before each run every param is checked against its action's JSON Schema type (e.g. unquoted `1.10` in a string param reads as 1.1); a mismatch blocks Run and marks the node and param (`run.param_type_mismatch`).
 - `motion` param limits are checked before each run against the connected robot, not at import. The failing node and param are marked (`run.param_out_of_limit`).
+- A non-cancellable `motion` action with `timeout_s` > 10 s blocks Run, checked before every run (PRD, Run blocked rule). The node gets the red treatment of `status.error` and the line `run.no_cancel_too_long`; the count sits next to Run with the other counts and jumps to the first node.
 - File format and versioning are defined elsewhere.
 
 ## 18. Forbidden
@@ -261,4 +264,10 @@ run.param_out_of_limit: "{node}: {param} is outside this robot's limits"
 run.param_type_mismatch: "{node}: {param} must be {type}"
 run.missing_input_count: "{n} nodes need input"
 status.missing_input: "Needs input"
+node.no_cancel: "Can't cancel"
+lost.cancelled: "Page disconnected. {node} was cancelled, then the run paused."
+lost.ran_to_end: "Page disconnected. {node} can't be cancelled; it ran {s} s more, then the run paused."
+lost.cancel_rejected: "Page disconnected. The robot refused to cancel {node}; it ran to end, then the run paused."
+run.no_cancel_too_long: "{node} can't be cancelled and may run {s} s. The limit is 10 s."
+run.no_cancel_too_long_count: "{n} nodes can't be cancelled and run too long"
 ```

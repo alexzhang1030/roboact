@@ -658,6 +658,11 @@ class App:
             self.ex.hooks["crash_before_t2"] = True
             await self._json(writer, 200, {"ok": True})
             return
+        if self.test_mode and route == "/api/test/ui-lost" and method == "POST":
+            raw = (data or {}).get("seconds")
+            self.ex.ui_lost_s = None if raw is None else float(raw)
+            await self._json(writer, 200, {"ui_lost_s": self.ex.ui_lost_s})
+            return
         if self.test_mode and route == "/api/test/step-delay" and method == "POST":
             self.ex.step_delay_s = float((data or {}).get("seconds") or 0)
             await self._json(writer, 200, {"ok": True, "seconds": self.ex.step_delay_s})

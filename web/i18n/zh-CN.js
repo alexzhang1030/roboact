@@ -282,4 +282,10 @@ export default {
   'run.motion_timeout_cap': '{node}：不可取消的运动超时必须不超过 10 秒',
   'run.missing_input_count': '{n} 个节点需要输入',
   'status.missing_input': '需要输入',
+  'node.no_cancel': '不可取消',
+  'lost.cancelled': '页面断开。{node} 已取消，随后运行暂停。',
+  'lost.ran_to_end': '页面断开。{node} 无法取消，又运行了 {s} 秒，随后运行暂停。',
+  'lost.cancel_rejected': '页面断开。机器人拒绝取消 {node}，它一直运行到结束，随后运行暂停。',
+  'run.no_cancel_too_long': '{node} 无法取消，可能要运行 {s} 秒。上限是 10 秒。',
+  'run.no_cancel_too_long_count': '{n} 个节点无法取消，而且运行时间过长',
 }
