@@ -154,6 +154,11 @@ label { display: block; color: var(--muted); font-size: 12px; margin: 8px 0 4px;
   height: 36px; flex: none; display: flex; align-items: center; gap: 8px; padding: 0 12px;
   background: var(--bg); border-bottom: 1px solid var(--border); color: var(--text);
 }
+.banner.banner-busy {
+  height: auto; align-items: flex-start; padding-top: 6px; padding-bottom: 6px;
+}
+.banner-rerun { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; max-width: 420px; }
+.banner-rerun .in-busy { margin: 0; }
 .banner .spacer { flex: 1; }
 .banner.amber { box-shadow: inset 3px 0 0 var(--amber); }
 .banner.danger { box-shadow: inset 3px 0 0 var(--red); }
@@ -501,6 +506,58 @@ label { display: block; color: var(--muted); font-size: 12px; margin: 8px 0 4px;
   font-size: var(--fs-12); line-height: var(--lh-12); color: var(--muted); margin-bottom: 8px;
 }
 .log-filter select { font: inherit; color: var(--text); background: var(--surface); border: 1px solid var(--control); border-radius: 4px; height: 28px; }
+
+dialog.confirm-dialog {
+  width: 400px;
+  max-height: calc(100vh - 48px);
+  padding: 20px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: var(--shadow);
+  font: inherit;
+}
+dialog.confirm-dialog[open] {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+dialog.confirm-dialog::backdrop {
+  background: color-mix(in srgb, var(--bg) 40%, transparent);
+}
+dialog.confirm-dialog h2 {
+  flex: none;
+  margin: 0 0 8px;
+  font-size: var(--fs-14);
+  line-height: var(--lh-14);
+  font-weight: 600;
+}
+dialog.confirm-dialog p {
+  flex: 1 1 auto;
+  min-height: 0;
+  margin: 0;
+  font-size: var(--fs-13);
+  line-height: var(--lh-13);
+  font-weight: 400;
+  overflow-y: auto;
+}
+dialog.confirm-dialog .confirm-actions {
+  flex: none;
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 16px;
+}
+.in-busy {
+  margin: 8px 0 0;
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--muted);
+  text-align: left;
+}
+.group-run { margin-bottom: 8px; }
+.group-run-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 
 @media (max-width: 800px) {
   .left { display: none; }

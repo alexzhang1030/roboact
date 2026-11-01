@@ -14,6 +14,7 @@ import {
   serverLabel, countLabel,
 } from './i18n.js'
 import { KEYS, writeRaw, readRaw, readPanels, writePanels, readViewport, writeViewport, readLogFilter } from './prefs.js'
+import { openConfirm } from './confirm-dialog.js'
 
 const q = new URLSearchParams(location.search)
 const PERF_N = +(q.get('n') || 0)
@@ -180,6 +181,7 @@ const App = defineComponent({
     const versionWarn = computed(() => runActive.value && run.value.flow_version != null && meta.value.version !== run.value.flow_version)
     const controlsOff = computed(() => conn.value !== 'ok')
     const isRunning = computed(() => !!(run.value && run.value.status === 'running'))
+    const nodeBusy = computed(() => isRunning.value)
     const isPaused = computed(() => !!(run.value && run.value.status === 'paused'))
     const adapterLost = computed(() => !!(isPaused.value && run.value && run.value.pause && run.value.pause.reason === 'adapter_lost'))
     const operatorLost = computed(() => !!(isPaused.value && run.value && run.value.pause && run.value.pause.reason === 'operator_lost'))
@@ -992,6 +994,7 @@ const App = defineComponent({
     }
 
     async function rerunNew() {
+      if (nodeBusy.value) return
       await doRun('all')
     }
 
@@ -1097,23 +1100,62 @@ const App = defineComponent({
       rebuildSources()
     }
 
-    function runSingle() {
-      if (!selected.value) return
+    function adapterConfirmText(spec) {
+      if (!spec) return ''
+      const labels = spec.confirm_labels || (spec.action && spec.action.confirm_labels)
+      if (labels && typeof labels === 'object') {
+        const hit = labels[locale.value] || labels.en
+        if (hit) return hit
+      }
+      return spec.confirm_text || ''
+    }
+    function nodeFullTitle(n) {
+      if (n && n.data && n.data.title) return n.data.title
+      const spec = specOf(n)
+      return actionLabel(spec, locale.value) || (n && n.data && n.data.nodeType) || t('node.fallback')
+    }
+    async function runSingle(ev) {
+      if (nodeBusy.value || !selected.value) return
+      const opener = (ev && ev.currentTarget) || document.activeElement
+      const spec = specOf(selectedNode.value)
       const rec = shownRec.value
-      doRun('single', { node_id: selected.value, source_run_id: rec && rec.run_id, step: rec && rec.step, source_round: singleRound.value })
+      const extra = {
+        node_id: selected.value,
+        source_run_id: rec && rec.run_id,
+        step: rec && rec.step,
+        source_round: singleRound.value,
+      }
+      if (spec && spec.side_effect === 'motion') {
+        const text = adapterConfirmText(spec) || t('confirm.default')
+        const ok = await openConfirm({
+          title: t('confirm.title', { name: nodeFullTitle(selectedNode.value) }),
+          body: text,
+          returnTo: opener,
+        })
+        if (!ok) return
+        extra.confirm = true
+      }
+      doRun('single', extra)
     }
     function runFrom() {
-      if (!selected.value || !shownRec.value) return
+      if (nodeBusy.value || !selected.value || !shownRec.value) return
       doRun('from', { node_id: selected.value, source_run_id: shownRec.value.run_id || (run.value && run.value.id), step: shownRec.value.step })
     }
     function runGroup(g) {
+      if (nodeBusy.value) return
       doRun('group', { node_ids: g.node_ids, source_run_id: run.value && run.value.id })
     }
-    async function really() {
-      if (!selected.value) return
+    async function really(ev) {
+      if (nodeBusy.value || !selected.value) return
+      const opener = (ev && ev.currentTarget) || document.activeElement
       const spec = specOf(selectedNode.value)
       const text = (spec && spec.confirm_text) || t('confirm.external')
-      if (!window.confirm(text)) return
+      const ok = await openConfirm({
+        title: t('confirm.external_title'),
+        body: text,
+        returnTo: opener,
+      })
+      if (!ok) return
       doRun('single', { node_id: selected.value, side_effects: 'real', confirm: text, source_run_id: run.value && run.value.id })
     }
     async function decide(decision) {
@@ -1362,7 +1404,7 @@ const App = defineComponent({
       jumpToFirst, runLocked, runLockedText, actionGoneCount, missingInputCount, timeoutCapText,
       adapterLost, uiLost, operatorLost, rejectedActions, resolveMotion, theme, themeMode, setThemeMode,
       applyTheme, selected, tab, toggleTheme, locale, localeMode, setLocaleMode, motion, motionMode,
-      setMotionMode, t, leftOpen, rightW, showMini, meta, logFilter, stopBeat,
+      setMotionMode, t, leftOpen, rightW, showMini, meta, groups, logFilter, stopBeat,
     }
 
     return {
@@ -1376,7 +1418,7 @@ const App = defineComponent({
       filteredTypes, paletteTypes, paletteGroups, paletteStatus, groupBoxes, portSources, stepLimit, overrides, singleRound, compareA, compareB, compareOut,
       deadlineAdapterOnly, outputImages, isReal, crashRecovery, selectedSpec,
       lodLow, nodeTypes: { agent: FlowNode }, edgeTypes: { loop: LoopEdge },
-      slot1Label, slot1Disabled, slot2Disabled, slot3Disabled, slot1Action, pauseRun,
+      slot1Label, slot1Disabled, slot2Disabled, slot3Disabled, slot1Action, pauseRun, nodeBusy,
       runWord, runWordKind, banners, mismatch, mismatchFade, selectedUnknown, selectedWait, writeTimeoutHint, selectedCancelRejected,
       adapterLost, uiLost, operatorLost, runCheck, importErrors, exportOpen, paramMark, mismatchLines,
       rejectedActions, needsReadback, readback, readingState, showLostReadback, resolveMotion,
@@ -1466,10 +1508,15 @@ const App = defineComponent({
       </span>
     </div>
     <div class="banners">
-      <div class="banner" v-for="b in banners" :key="b.id" :class="b.kind">
+      <div class="banner" v-for="b in banners" :key="b.id" :class="[b.kind, nodeBusy && b.actions==='version' ? 'banner-busy' : '']">
         <span>{{ b.text }}</span>
         <span class="spacer"></span>
-        <template v-if="b.actions==='version'"><button @click="rerunNew">{{ t('banner.rerun') }}</button></template>
+        <template v-if="b.actions==='version'">
+          <div class="banner-rerun">
+            <button :disabled="nodeBusy" :aria-describedby="nodeBusy ? 'in-busy-banner' : null" @click="rerunNew">{{ t('banner.rerun') }}</button>
+            <p v-if="nodeBusy" id="in-busy-banner" class="in-busy">{{ t('in.busy') }}</p>
+          </div>
+        </template>
         <template v-if="b.actions==='approval'">
           <button @click="decide('reject')">{{ t('banner.reject') }}</button>
           <button class="primary" @click="decide('approve')">{{ t('banner.approve') }}</button>
@@ -1585,11 +1632,12 @@ const App = defineComponent({
               <label>{{ t('in.override') }}</label>
               <textarea v-model="overrides" placeholder='{"value": 1}'></textarea>
               <div style="display:flex;gap:8px;margin-top:8px">
-                <button class="primary" style="height:32px" @click="runSingle">{{ t('in.run_this') }}</button>
+                <button class="primary" style="height:32px" :disabled="nodeBusy" :aria-describedby="nodeBusy ? 'in-busy' : null" @click="runSingle">{{ t('in.run_this') }}</button>
                 <button style="height:32px" @click="pinShown">{{ t('in.pin') }}</button>
               </div>
-              <button style="margin-top:8px" @click="runFrom">{{ t('in.rerun_from') }}</button>
-              <button v-if="selectedNode.data.nodeType==='tool_call' || selectedNode.data.nodeType==='model_call'" style="margin-top:8px" @click="really">{{ t('in.really') }}</button>
+              <button style="margin-top:8px" :disabled="nodeBusy" :aria-describedby="nodeBusy ? 'in-busy' : null" @click="runFrom">{{ t('in.rerun_from') }}</button>
+              <button v-if="selectedNode.data.nodeType==='tool_call' || selectedNode.data.nodeType==='model_call'" style="margin-top:8px" :disabled="nodeBusy" :aria-describedby="nodeBusy ? 'in-busy' : null" @click="really">{{ t('in.really') }}</button>
+              <p v-if="nodeBusy" id="in-busy" class="in-busy">{{ t('in.busy') }}</p>
               <h3 style="margin-top:16px">{{ t('in.current') }}</h3>
               <div class="kv">{{ JSON.stringify(shownRec && shownRec.inputs || {}, null, 2) }}</div>
             </template>
@@ -1672,9 +1720,12 @@ const App = defineComponent({
               <div v-if="compareOut" class="kv">{{ compareOut.map(x => x.key + (JSON.stringify((x.a||{}).outputs)===JSON.stringify((x.b||{}).outputs) ? (' ' + t('run.same')) : (' ' + t('run.diff')))).join('\\n') }}</div>
             </template>
             <h3 style="margin-top:16px">{{ t('groups.title') }}</h3>
-            <div v-for="g in groups" :key="g.id" style="margin-bottom:8px">
-              {{ g.name }} ({{ g.node_ids.length }})
-              <button @click="runGroup(g)">{{ t('groups.run') }}</button>
+            <div v-for="g in groups" :key="g.id" class="group-run">
+              <div class="group-run-head">
+                <span>{{ g.name }} ({{ g.node_ids.length }})</span>
+                <button :disabled="nodeBusy" :aria-describedby="nodeBusy ? ('in-busy-group-' + g.id) : null" @click="runGroup(g)">{{ t('groups.run') }}</button>
+              </div>
+              <p v-if="nodeBusy" :id="'in-busy-group-' + g.id" class="in-busy">{{ t('in.busy') }}</p>
             </div>
             <p v-if="!groups.length" style="color:var(--muted)">{{ t('groups.empty') }}</p>
           </div>
