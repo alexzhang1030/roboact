@@ -1946,8 +1946,6 @@ class Executor:
     ) -> None:
         ctrl.status = "paused"
         ctrl.pause = self._make_pause(ctrl, reason, node_id, when, inputs, rnd, message)
-        ctrl.last_paused_at_mono = time.monotonic()
-        ctrl.last_paused_at_ms = time.time() * 1000.0
         state = {
             "approval": "awaiting_approval",
             "confirm_after_crash": "awaiting_approval",
@@ -1973,16 +1971,15 @@ class Executor:
             if cur != "cancel_rejected":
                 self._set_node(ctrl, node_id, state, rnd, ctrl.steps_used)
         self.store.update_run(ctrl.run_id, status="paused", pause=ctrl.pause)
-        self.hub.emit(
-            ctrl.run_id,
-            "paused",
-            {
-                **ctrl.pause,
-                "at": now_iso(),
-                "paused_at_mono": ctrl.last_paused_at_mono,
-                "paused_at_ms": ctrl.last_paused_at_ms,
-            },
-        )
+        payload = {
+            **ctrl.pause,
+            "at": now_iso(),
+            "paused_at_mono": 0.0,
+            "paused_at_ms": 0.0,
+        }
+        self.hub.emit(ctrl.run_id, "paused", payload)
+        ctrl.last_paused_at_mono = float(payload["paused_at_mono"])
+        ctrl.last_paused_at_ms = float(payload["paused_at_ms"])
         self.hub.flush_now(ctrl.run_id)
         if reason == "storage_error":
             self.hub.emit(ctrl.run_id, "storage_error", {"message": message or "", "at": now_iso()})

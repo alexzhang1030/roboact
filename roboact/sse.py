@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import json
+import time
 from typing import Any
 
 from .store import StoreLike
@@ -93,6 +94,8 @@ class SseHub:
         return self._emit(run_id, "nodes", body, seq_to)
 
     def emit(self, run_id: str, event: str, data: dict[str, Any], seq: int | None = None) -> str:
+        if event == "paused":
+            self._stamp_pause(data)
         resolved: int
         if seq is not None:
             resolved = seq
@@ -101,7 +104,15 @@ class SseHub:
         else:
             self._local_seq = int(getattr(self, "_local_seq", 0)) + 1
             resolved = self._local_seq
+        # Disk commits sit between the two stamps. The frame uses the later one.
+        if event == "paused":
+            self._stamp_pause(data)
         return self._emit(run_id, event, data, resolved)
+
+    @staticmethod
+    def _stamp_pause(data: dict[str, Any]) -> None:
+        data["paused_at_mono"] = time.monotonic()
+        data["paused_at_ms"] = time.time() * 1000.0
 
     def flush_now(self, run_id: str) -> None:
         self.flush_nodes(run_id)

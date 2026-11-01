@@ -690,7 +690,15 @@ const App = defineComponent({
         paused: (ev) => {
           conn.value = 'ok'
           pausePending.value = false
-          if (run.value) run.value = { ...run.value, status: 'paused', pause: ev, paused_node: ev.node_id, paused_phase: ev.when }
+          if (run.value) run.value = {
+            ...run.value,
+            status: 'paused',
+            pause: ev,
+            paused_node: ev.node_id,
+            paused_phase: ev.when,
+            paused_at_ms: ev.paused_at_ms,
+            paused_at_mono: ev.paused_at_mono,
+          }
           applyPauseReason(ev)
           if (window.__afPauseTimes) window.__afPauseTimes.push({ at: performance.now(), server_mono: ev.paused_at_mono, paused_at_ms: ev.paused_at_ms })
           refreshRecords(runId)
