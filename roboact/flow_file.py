@@ -25,7 +25,7 @@ from ruamel.yaml.parser import ParserError
 from ruamel.yaml.scalarstring import DoubleQuotedScalarString
 from ruamel.yaml.scanner import ScannerError
 
-from . import DEFAULT_STEP_LIMIT
+from . import DEFAULT_STEP_LIMIT, MOTION_NONCANCEL_TIMEOUT_CAP_S
 from .adapter import Adapter, ParamSpec
 from .graph import connected_types, cycle_exit_details, types_compatible
 from .nodes import SideEffect, get_instance, get_type, known_type
@@ -132,9 +132,16 @@ class RunBlockers:
     type_errors: list[dict[str, str]] = field(default_factory=list)
     limit_errors: list[dict[str, str]] = field(default_factory=list)
     mismatches: list[dict[str, str]] = field(default_factory=list)
+    timeout_errors: list[dict[str, str]] = field(default_factory=list)
 
     def blocks_run(self, unlocked: bool) -> bool:
-        if self.action_gone or self.missing_input or self.type_errors or self.limit_errors:
+        if (
+            self.action_gone
+            or self.missing_input
+            or self.type_errors
+            or self.limit_errors
+            or self.timeout_errors
+        ):
             return True
         return bool(self.mismatches) and not unlocked
 
@@ -375,10 +382,12 @@ def inspect_run(graph: dict[str, Any], adapter: Adapter) -> RunBlockers:
     for node in graph.get("nodes") or []:
         nid = str(node.get("id") or "")
         typ = str(node.get("type") or "")
-        title = str(node.get("title") or nid)
+        title = str(node.get("title") or "")
         if not known_type(typ):
             out.action_gone.append(nid)
             continue
+        cls = get_type(typ)
+        display = title or str(getattr(cls, "name", None) or getattr(cls, "title", None) or nid)
         params = node.get("params") or {}
         if not isinstance(params, dict):
             params = {}
@@ -387,7 +396,21 @@ def inspect_run(graph: dict[str, Any], adapter: Adapter) -> RunBlockers:
             if spec.secret and params.get(spec.name) is None:
                 out.missing_input.append(nid)
                 break
-        inspect_values(typ, params, adapter, title or nid, out)
+        inspect_values(typ, params, adapter, display, out)
+        desc = getattr(cls, "action_desc", None)
+        if (
+            desc is not None
+            and cls.side_effect == SideEffect.motion
+            and not bool(desc.cancel.cancellable)
+            and float(getattr(desc, "timeout_s", 0) or 0) > MOTION_NONCANCEL_TIMEOUT_CAP_S
+        ):
+            out.timeout_errors.append(
+                {
+                    "node": display,
+                    "node_id": nid,
+                    "timeout_s": str(desc.timeout_s),
+                }
+            )
     out.mismatches = _mismatches(graph, adapter)
     return out
 

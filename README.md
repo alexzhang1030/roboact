@@ -30,7 +30,7 @@ python3 -m venv .venv
 
 ## Connection drop
 
-- Page gone ~10 s → pause `operator_lost` after the current node. That node is not cancelled.
+- Page gone ~10 s → cancel the current action if cancellable, then pause `operator_lost`. A non-cancellable or refused cancel runs to end, then pause.
 - Adapter silent ~3 s → pause `adapter_lost`. Continue stays off until the adapter is back.
 - Stop is hold-position, motors on. Not e-stop. No e-stop on the canvas.
 - After a crash, the run stays paused. In-flight `motion` is `interrupted_unknown`; read back, then redo or mark done.

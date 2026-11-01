@@ -8,7 +8,13 @@ import time
 from dataclasses import dataclass, field
 from typing import Any
 
-from . import ADAPTER_HEARTBEAT_S, DEFAULT_STEP_LIMIT, NODE_TIMEOUT_S, UI_LOST_TIMEOUT_S
+from . import (
+    ADAPTER_HEARTBEAT_S,
+    DEFAULT_STEP_LIMIT,
+    NODE_TIMEOUT_S,
+    UI_LOST_POLL_S,
+    UI_LOST_TIMEOUT_S,
+)
 from .adapter import (
     Adapter,
     CrashBetweenWriteAndKey,
@@ -107,6 +113,9 @@ class RunCtrl:
     step_phase: str | None = None
     wait_started: float = 0.0
     wait_max_s: float | None = None
+    pending_operator_lost: bool = False
+    operator_lost_cancel_rejected: bool = False
+    last_paused_at_ms: float = 0.0
 
     @property
     def paused_node(self) -> str | None:
@@ -484,6 +493,18 @@ class Executor:
                 "param_out_of_limit",
                 f"{err['node']}: {err['param']} is outside this robot's limits",
                 {"errors": blockers.limit_errors},
+            )
+        if blockers.timeout_errors:
+            err = blockers.timeout_errors[0]
+            raise ApiError(
+                409,
+                "motion_timeout_cap",
+                f"{err['node']}: non-cancellable motion timeout_s must be ≤ 10 s",
+                {
+                    "errors": blockers.timeout_errors,
+                    "node": err["node"],
+                    "node_id": err.get("node_id"),
+                },
             )
         if is_imported(graph) and blockers.mismatches and not unlock_valid(graph, self.adapter):
             raise ApiError(
@@ -1254,6 +1275,8 @@ class Executor:
         ctrl.current_inst = inst
         ctrl.current_nid = nid
         ctrl.current_started = time.monotonic()
+        ctrl.pending_operator_lost = False
+        ctrl.operator_lost_cancel_rejected = False
         ctrl.step_phase = start_phase
         ctrl.wait_started = time.monotonic()
         ctrl.wait_max_s = (
@@ -1297,6 +1320,7 @@ class Executor:
             )
 
         elapsed_task: asyncio.Task | None = None
+        watch_task: asyncio.Task | None = None
 
         async def _elapsed() -> None:
             try:
@@ -1324,6 +1348,7 @@ class Executor:
 
         try:
             elapsed_task = asyncio.create_task(_elapsed())
+            watch_task = asyncio.create_task(self._watch_disconnect(ctrl))
             if mode == "mock":
                 out_m = inst.mock(
                     _coerce_inputs(inst, inputs), parse_params(node["type"], node.get("params"))
@@ -1436,10 +1461,19 @@ class Executor:
                 if state:
                     err["state"] = state
         finally:
+            if watch_task:
+                watch_task.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await watch_task
             if elapsed_task:
                 elapsed_task.cancel()
             ctrl.current_inst = None
         if ctrl.abandoned or ctrl.run_id not in self.runs:
+            return
+        if ctrl.pending_operator_lost and not ctrl.stop_flag:
+            await self._finish_operator_lost(
+                ctrl, nid, inputs, rnd, step, side, mode, status, err, outputs, t0
+            )
             return
         dt = (time.perf_counter() - t0) * 1000
         if side == "write" and (self.crash_before_t2 or self.hooks.get("crash_before_t2")):
@@ -1697,6 +1731,119 @@ class Executor:
             return False
         return (time.monotonic() - ctrl.last_ui_at) >= self.ui_lost_s
 
+    async def _watch_disconnect(self, ctrl: RunCtrl) -> None:
+        """PRD 14: check page loss while a node is executing, not only between nodes."""
+        try:
+            while ctrl.status == "running" and not ctrl.abandoned:
+                await asyncio.sleep(UI_LOST_POLL_S)
+                if ctrl.pending_operator_lost or ctrl.stop_flag:
+                    continue
+                if ctrl.step_phase == "waiting_precondition":
+                    continue
+                if ctrl.current_inst is None:
+                    continue
+                if not self._ui_lost(ctrl):
+                    continue
+                await self._cancel_for_operator_lost(ctrl)
+        except asyncio.CancelledError:
+            return
+
+    async def _cancel_for_operator_lost(self, ctrl: RunCtrl) -> None:
+        inst = ctrl.current_inst
+        if inst is None or ctrl.pending_operator_lost:
+            return
+        desc = getattr(type(inst), "action_desc", None)
+        cancellable = True if desc is None else bool(desc.cancel.cancellable)
+        ctrl.pending_operator_lost = True
+        if not cancellable:
+            return
+        result = await inst.cancel()
+        ctrl.cancel_called[ctrl.current_nid or ""] = True
+        if result and not result.accepted:
+            nid = ctrl.current_nid
+            if nid:
+                rnd = (ctrl.node_state.get(nid) or {}).get("round") or 0
+                self._set_node(
+                    ctrl,
+                    nid,
+                    "cancel_rejected",
+                    rnd,
+                    ctrl.steps_used,
+                    error_summary="cancel_rejected",
+                )
+            ctrl.operator_lost_cancel_rejected = True
+
+    def _operator_lost_from_cancel(self, status: str, err: dict[str, Any] | None) -> bool:
+        if status == "interrupted_unknown":
+            return True
+        if status != "error" or not err:
+            return False
+        return str(err.get("message") or "") in ("cancelled", "canceled", "timeout")
+
+    async def _finish_operator_lost(
+        self,
+        ctrl: RunCtrl,
+        nid: str,
+        inputs: dict[str, Any],
+        rnd: int,
+        step: int,
+        side: str,
+        mode: str,
+        status: str,
+        err: dict[str, Any] | None,
+        outputs: dict[str, Any],
+        t0: float,
+    ) -> None:
+        if self._operator_lost_from_cancel(status, err):
+            status = "stopped"
+            err = None
+        dt = (time.perf_counter() - t0) * 1000
+        stored = image_summary(outputs)
+        if outputs:
+            bucket = self.images.setdefault(ctrl.run_id, {})
+            for port, val in outputs.items():
+                if isinstance(val, dict) and (
+                    val.get("type") == "image" or str(val.get("mime") or "").startswith("image/")
+                ):
+                    bucket[(step, port)] = val
+        t2 = dict(
+            status=status,
+            output=stored,
+            live_output=outputs,
+            error=err,
+            ended_at=now_iso(),
+            duration_ms=dt,
+            node_id=nid,
+            round=rnd,
+            step=step,
+            side=side,
+            mode=mode,
+        )
+        try:
+            self._commit_t2(ctrl, **t2)
+        except Exception as e:
+            await self._pause(ctrl, "storage_error", nid, "after", inputs, rnd, message=str(e))
+            return
+        if ctrl.operator_lost_cancel_rejected:
+            self._set_node(
+                ctrl,
+                nid,
+                "cancel_rejected",
+                rnd,
+                step,
+                duration_ms=dt,
+                error_summary="cancel_rejected",
+                side_effect_mode=mode,
+            )
+        await self._pause(
+            ctrl,
+            "operator_lost",
+            nid,
+            "after" if status == "done" else "before",
+            inputs,
+            rnd,
+        )
+
     def _next_round(self, ctrl: RunCtrl, nid: str | None) -> int:
         if not nid:
             return 0
@@ -1821,6 +1968,7 @@ class Executor:
         ctrl.status = "paused"
         ctrl.pause = self._make_pause(ctrl, reason, node_id, when, inputs, rnd, message)
         ctrl.last_paused_at_mono = time.monotonic()
+        ctrl.last_paused_at_ms = time.time() * 1000.0
         state = {
             "approval": "awaiting_approval",
             "confirm_after_crash": "awaiting_approval",
@@ -1835,17 +1983,28 @@ class Executor:
         }.get(reason)
         if reason in ("write_timeout", "motion_timeout"):
             state = None
-        if not skip_readback and reason in ("motion_timeout", "adapter_lost") and node_id:
+        if (
+            not skip_readback
+            and reason in ("motion_timeout", "adapter_lost", "operator_lost")
+            and node_id
+        ):
             ctrl.pause["readback"] = await self._read_robot(ctrl, node_id)
         if node_id and state:
-            self._set_node(ctrl, node_id, state, rnd, ctrl.steps_used)
+            cur = (ctrl.node_state.get(node_id) or {}).get("state")
+            if cur != "cancel_rejected":
+                self._set_node(ctrl, node_id, state, rnd, ctrl.steps_used)
         self.store.update_run(ctrl.run_id, status="paused", pause=ctrl.pause)
-        self.hub.flush_now(ctrl.run_id)
         self.hub.emit(
             ctrl.run_id,
             "paused",
-            {**ctrl.pause, "at": now_iso(), "paused_at_mono": ctrl.last_paused_at_mono},
+            {
+                **ctrl.pause,
+                "at": now_iso(),
+                "paused_at_mono": ctrl.last_paused_at_mono,
+                "paused_at_ms": ctrl.last_paused_at_ms,
+            },
         )
+        self.hub.flush_now(ctrl.run_id)
         if reason == "storage_error":
             self.hub.emit(ctrl.run_id, "storage_error", {"message": message or "", "at": now_iso()})
         ctrl.resume.clear()
@@ -1967,6 +2126,7 @@ class Executor:
             "error": (ctrl.error if ctrl else row.get("error")),
             "last_event_id": self.store.last_seq(run_id),
             "paused_at_mono": ctrl.last_paused_at_mono if ctrl else 0,
+            "paused_at_ms": ctrl.last_paused_at_ms if ctrl else 0,
             "unused_pins": ctrl.unused_pins if ctrl else [],
             "recovery": (pause or {}).get("recovery")
             if pause

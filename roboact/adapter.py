@@ -191,6 +191,7 @@ class Adapter:
             type(self)._DEFAULT_VELOCITY_LIMITS
         )
         self.heartbeat_times: list[float] = []
+        self.cancel_calls: list[dict[str, Any]] = []
 
     def info(self) -> AdapterInfo:
         return AdapterInfo(
@@ -465,6 +466,12 @@ class Adapter:
         raise NotImplementedError
 
     async def cancel(self, handle: ExecuteHandle | None) -> CancelResult:
+        self.cancel_calls.append(
+            {
+                "action_id": handle.action_id if handle else None,
+                "at": time.monotonic(),
+            }
+        )
         if self.reject_next_cancel:
             self.reject_next_cancel = False
             return CancelResult(accepted=False, reason="cancel rejected")
@@ -791,10 +798,6 @@ class FakeAdapter(Adapter):
             if a.id in self.drop_action_ids:
                 continue
             updates = dict(self.action_updates.get(a.id) or {})
-            if self.force_uncancellable and a.id == "fake_gripper":
-                updates["cancel"] = CancelSpec(
-                    cancellable=False, post_cancel=a.cancel.post_cancel, after=a.cancel.after
-                )
             out.append(a.model_copy(update=updates) if updates else a)
         out.extend(self.extra_raw_actions)
         return out
@@ -868,6 +871,7 @@ class FakeAdapter(Adapter):
 
         async def job() -> None:
             try:
+                step_s = float(getattr(self, "async_sleep_s", 0.04) or 0.04)
                 for i in range(self.async_steps):
                     if handle.cancelled:
                         handle.result = ActionResult(success=False, message="cancelled")
@@ -882,7 +886,19 @@ class FakeAdapter(Adapter):
                         text="adapter.pose_progress",
                         params={"i": i + 1, "n": self.async_steps},
                     )
-                    await asyncio.sleep(float(getattr(self, "async_sleep_s", 0.04) or 0.04))
+                    slept = 0.0
+                    while slept < step_s:
+                        if handle.cancelled:
+                            handle.result = ActionResult(success=False, message="cancelled")
+                            handle.done = True
+                            return
+                        if handle.deadline is not None and time.time() >= handle.deadline:
+                            handle.result = ActionResult(success=False, message="timeout")
+                            handle.done = True
+                            return
+                        chunk = min(0.05, step_s - slept)
+                        await asyncio.sleep(chunk)
+                        slept += chunk
                 handle.result = self._commit_write(
                     handle.idem_key, {"kind": "pose", **pose}, {"pose": pose}
                 )

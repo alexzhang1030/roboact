@@ -137,7 +137,7 @@ Version 1.5 (2026-10-31). Companion to `prd-en-v1.5.md` section 4. exec-model = 
 <a id="19.2"></a>
 ## 19.2 No batching delay on stop
 1. Trigger breakpoint, step and user pause 20 times each.
-2. Server and browser on the same machine. Log the time the server writes the paused state, and the time of the first browser frame after the pause event.
+2. Server and browser on the same machine. Log the time the server writes the paused state, and the time of the first browser frame after the pause event. Do not start from the click or from the browser receiving the event.
 3. Pass: every difference ≤ 100 ms; p95 ≤ 20 ms (20 ms is Thompson's inference, set by Torvalds after measuring; exec-model A5).
 
 <a id="19.3"></a>
@@ -200,8 +200,11 @@ Version 1.5 (2026-10-31). Companion to `prd-en-v1.5.md` section 4. exec-model = 
 
 <a id="r1-r6"></a>
 ## Pre-real-robot checks (part of R1–R6)
-1. Cut the page connection for real through a TCP proxy. Pass: server pauses within about 10 s.
-2. Confirm "stable" is detectable: blocking actions return only once stable, or `read_state` has a stable field; at least one, with a cited source. Neither: do not connect a real robot.
+1. Start a cancellable fake `motion` action that runs 30 s. Cut the page connection for real through a TCP proxy. Pass: cancel reaches the adapter and the server pauses within 10 s of the cut; robot state is read back and shown. Run 5 times; report each time.
+2. Repeat with a non-cancellable action with `timeout_s` ≤ 10 s. Pass: it runs to end, then the server pauses.
+3. Set a non-cancellable `motion` action's `timeout_s` to 11. Pass: Run is blocked and names the node.
+4. Make the adapter refuse the cancel. Pass: node shows `status.cancel_rejected`, runs to end, then pauses.
+5. Confirm "stable" is detectable: blocking actions return only once stable, or `read_state` has a stable field; at least one, with a cited source. Neither: do not connect a real robot.
 
 <a id="20"></a>
 ## 20 Flow file import / export

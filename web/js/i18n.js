@@ -150,6 +150,7 @@ export function mapError(code, params) {
     run_locked: 'flow.run_locked',
     param_type_mismatch: 'run.param_type_mismatch',
     param_out_of_limit: 'run.param_out_of_limit',
+    motion_timeout_cap: 'run.motion_timeout_cap',
     missing_input: 'status.missing_input',
   }
   const key = aliases[code] || ('error.' + code)

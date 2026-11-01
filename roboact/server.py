@@ -13,7 +13,7 @@ from typing import Any
 from urllib.parse import parse_qs, unquote, urlparse
 
 from . import DEFAULT_STEP_LIMIT, SSE_RETRY_MS
-from .adapter import FAKE_NOTE_ACTION, FakeAdapter
+from .adapter import FAKE_NOTE_ACTION, CancelSpec, FakeAdapter
 from .catalog import en
 from .errors import ApiError
 from .executor import Executor
@@ -670,6 +670,7 @@ class App:
                     "goals_cancelled_by_lost_heartbeat": getattr(
                         self.adapter, "goals_cancelled_by_lost_heartbeat", 0
                     ),
+                    "cancel_calls": list(getattr(self.adapter, "cancel_calls", [])),
                 },
             )
             return
@@ -704,6 +705,26 @@ class App:
                 self.adapter.action_list_version = str(data["action_list_version"])
             if "name" in data:
                 self.adapter.name = str(data["name"])
+            if "reject_next_cancel" in data:
+                self.adapter.reject_next_cancel = bool(data["reject_next_cancel"])
+            if "force_uncancellable" in data:
+                self.adapter.force_uncancellable = bool(data["force_uncancellable"])
+            if data.get("clear_cancel_calls"):
+                self.adapter.cancel_calls = []
+            rebind = bool(data.get("rebind"))
+            if "action_updates" in data:
+                parsed: dict[str, dict[str, Any]] = {}
+                for aid, upd in (data["action_updates"] or {}).items():
+                    u = dict(upd or {})
+                    if "cancel" in u and isinstance(u["cancel"], dict):
+                        u["cancel"] = CancelSpec(**u["cancel"])
+                    parsed[str(aid)] = u
+                self.adapter.action_updates = parsed
+                rebind = True
+            if data.get("force_uncancellable") is not None:
+                rebind = True
+            if rebind:
+                bind_adapter(self.adapter)
             await self._json(
                 writer,
                 200,
@@ -715,6 +736,9 @@ class App:
                     "robot": self.adapter.robot(),
                     "units": self.adapter.units(),
                     "action_list_version": self.adapter.action_list_version,
+                    "reject_next_cancel": bool(self.adapter.reject_next_cancel),
+                    "force_uncancellable": bool(self.adapter.force_uncancellable),
+                    "cancel_calls": list(getattr(self.adapter, "cancel_calls", [])),
                 },
             )
             return
@@ -772,6 +796,7 @@ class App:
                 "mismatches": blockers.mismatches,
                 "type_errors": blockers.type_errors,
                 "limit_errors": blockers.limit_errors,
+                "timeout_errors": blockers.timeout_errors,
             },
         )
 
@@ -791,6 +816,7 @@ class App:
                 "mismatch_unlocked": unlocked,
                 "type_errors": blockers.type_errors,
                 "limit_errors": blockers.limit_errors,
+                "timeout_errors": blockers.timeout_errors,
                 "can_run": not blockers.blocks_run(unlocked),
             },
         )
@@ -814,6 +840,7 @@ class App:
                 "missing_input": blockers.missing_input,
                 "mismatches": blockers.mismatches,
                 "mismatch_unlocked": unlocked,
+                "timeout_errors": blockers.timeout_errors,
                 "can_run": not blockers.blocks_run(unlocked),
             },
         )
