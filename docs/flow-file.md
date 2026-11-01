@@ -23,8 +23,8 @@ flow:
   step_limit: 200             # loop limit N
   action_list_version: "…"    # from adapter at export time
   adapter: { name: "…", version: "…", target: "sim" }   # informational; not checked on import
-nodes: [ … ]                  # file order; not sorted (§8)
-edges: [ … ]                  # file order; not sorted (§8)
+nodes: [ … ]                  # sorted by id (§8)
+edges: [ … ]                  # sorted by (from.node, from.port, to.node, to.port) (§8)
 ```
 `format_version` and `flow.revision` are different things: the first changes when the file layout changes, the second changes every time the user edits the flow.
 
@@ -81,32 +81,18 @@ Secret params: written as `null`; import marks the node "missing input"; Run dis
 
 ## 8. Canonical bytes
 
-An exported file is for git. Open a file that is already in this spelling, export it again with no edits, and the bytes are the same. One edit changes only the lines of that edit. JSON and YAML are two spellings of one document; each spelling has one byte sequence. Examples that already follow this spelling: `tests/fixtures/flows/`.
+An exported file is for git. Open a file that is already in this spelling, export it again with no edits, and the bytes are the same. One edit changes only the lines of that edit. JSON and YAML are two spellings of one document; each spelling has one byte sequence. `export_flow` is the only writer. The browser posts `{flow_id, format}` to `POST /api/flows/export` and saves the returned `text`.
 
-`export_flow` in `roboact/flow_file.py` is the only writer. The browser posts `{flow_id, format}` to `POST /api/flows/export` and saves the returned `text`. It does not run `JSON.stringify` on the flow document.
-
-1. Key order. Every object is written in one fixed order: the order the fields are listed in §2, §3, and §7, repeated here, not alphabetical order, and not the order the keys had in the browser or in the imported file. Absent keys are omitted. They are not written as null.
-   - Top level: `format`, `format_version`, `flow`, `nodes`, `edges`.
-   - `flow`: `id`, `name`, `revision`, `step_limit`, `action_list_version`, `adapter`, `robot`, `units`.
-   - `adapter`: `name`, `version`, `target`.
-   - `robot`: `id`, `model`.
-   - `units`: `angle`, `length`.
-   - Node: `id`, `kind`, `action`, `title`, `params`, `position`. `action` is omitted when the node has none.
-   - `position`: `x`, `y`.
-   - Edge: `from`, `to`.
-   - Edge end (`from` and `to`): `node`, `port`.
-   - A key this list does not name is still refused on import (§5). The serializer keeps it, so a dump stays deterministic: known keys first, in the order above, then the extra keys in Unicode code point order (`ord`, case-sensitive: `A` before `a` before `b`). Extras `zzz` and `aaa` come out `aaa`, then `zzz`.
-   - `params`, and every object nested under `params`, have no field list. Their keys are written in that same Unicode code point order.
-2. Numbers.
+1. Key order. Every object's keys are written in Unicode code point order (`sorted`, case-sensitive: `A` before `a` before `b`), not in the order they arrived from the browser or from the file. Absent keys are omitted. A key the schema does not name is still refused on import (§5). If a dump is asked to write one anyway, it is included in that same alphabetical order.
+2. `nodes` are sorted by `id`. `edges` are sorted by `(from.node, from.port, to.node, to.port)`. Any other array, including arrays inside `params`, keeps its order.
+3. Numbers.
    - An integer is written as an integer. `1` stays `1`.
-   - A float is written with Python's shortest round-trip spelling (`repr`). `0.1` is `0.1`, never `0.10000000000000001`. When that spelling uses an exponent it has two exponent digits: `1e-7` is `1e-07`. `1.0` stays `1.0`, so it does not become the integer `1`. Signed zero stays `-0.0`.
-   - `NaN` and `Infinity` (either sign) are refused on export and on import.
-   - Booleans are `true` and `false`.
-3. Layout. Both encodings:
+   - A float is written with Python's shortest round-trip spelling (`repr`, the spelling `json.dumps` uses). `0.1` is `0.1`, never `0.10000000000000001`. When that spelling uses an exponent it has two exponent digits: `1e-7` is `1e-07`. `1.0` stays `1.0`, so it does not become the integer `1`. Signed zero stays `-0.0`.
+   - `NaN` and `Infinity` (either sign) are refused on export and on import. They are not JSON.
+   - Booleans are `true` and `false`. JSON null is `null`. YAML null is an empty scalar (`key:` with nothing after it), which parses back as null.
+4. Layout. Both encodings:
    - Indent is two spaces. JSON nests two spaces per level, `{` and `}` on their own lines, one space after `:`. YAML is block style: a nested key is two spaces in from its parent; a sequence dash is two spaces in from its parent key; the keys of that element are two spaces in from the dash.
    - Line breaks are `\n` only. Lines are not folded or wrapped.
    - UTF-8, no BOM. Non-ASCII characters are written as themselves, not as `\u` escapes.
    - The file ends with exactly one `\n`. No leading `---` and no `%YAML` directive.
-   - JSON strings use ordinary JSON escapes. YAML double-quotes every string value (§1). YAML null is the word `null`.
-4. Lists keep the order they were given. `nodes`, `edges`, and arrays inside `params` are not sorted.
-5. One writer. Server `export_flow` produces both the JSON and the YAML. The page does not serialize the file a second time.
+   - JSON strings use ordinary JSON escapes. YAML double-quotes every string value (§1).
