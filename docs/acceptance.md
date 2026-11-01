@@ -8,7 +8,7 @@ Version 1.5 (2026-10-31). Companion to `prd-en-v1.5.md` section 4. exec-model = 
 2. `pip install`, start the server, open the browser.
 3. Pass: the app works.
 4. Check the repo: no build script; no `.ts` source compiled by any tool outside the browser.
-5. Browser network panel: every request goes to the backend (127.0.0.1); none go to the internet.
+5. Browser network panel: every request goes to the backend address; none go to the internet.
 
 <a id="1.1"></a>
 ## 1.1 Traceable dependencies
@@ -187,6 +187,9 @@ Version 1.5 (2026-10-31). Companion to `prd-en-v1.5.md` section 4. exec-model = 
 ## 19.9 Block other pages (A40)
 1. With `curl`, send: a request with `Host: evil.example`; a command with `Content-Type: text/plain`; a WebSocket handshake from another origin.
 2. Pass: all three rejected; the fake adapter receives no action.
+3. Start the server on its LAN address. From a second computer on the LAN, open the page without the token. Pass: the token screen shows; Run, import and every write return 401; a WebSocket handshake without the token is refused; the fake adapter receives no action.
+4. Enter the token. Pass: the page works as on the server machine.
+5. Send a write and a WebSocket handshake with a wrong or old token. Pass: both refused. Token issue, storage, rotation and TLS checks follow Thompson's LAN auth spec once it is written.
 
 <a id="19.10"></a>
 ## 19.10 Dev toolchain
@@ -205,6 +208,7 @@ Version 1.5 (2026-10-31). Companion to `prd-en-v1.5.md` section 4. exec-model = 
 3. Set a non-cancellable `motion` action's `timeout_s` to 11. Pass: Run is blocked and names the node.
 4. Make the adapter refuse the cancel. Pass: node shows `status.cancel_rejected`, runs to end, then pauses.
 5. Confirm "stable" is detectable: blocking actions return only once stable, or `read_state` has a stable field; at least one, with a cited source. Neither: do not connect a real robot.
+6. Press Stop while a cancellable fake `motion` action and a fake gripper action are running. Pass: the adapter is asked to hold, the robot state read back is unchanged from the moment of Stop, the gripper keeps its grip, and nothing moves to a safe pose. Load an adapter with an action that declares `safe_pose`: it is refused and the action is named.
 
 <a id="20"></a>
 ## 20 Flow file import / export
@@ -225,4 +229,4 @@ Version 1.5 (2026-10-31). Companion to `prd-en-v1.5.md` section 4. exec-model = 
 14. Set an enum param to a value outside its enum, and a nested `motion` param over its limit: Run is blocked and each is named.
 15. Fill in the secret param on a "missing input" node: the mark clears without a reload.
 16. Follow the README offline install on a clean machine: YAML import works.
-17. Build the same flow twice, adding nodes, edges and params in a different order each time; export both as JSON and as YAML. Pass: every object's keys come out in the same fixed order in both files, and `git diff` between them shows only lines whose values differ.
+17. Export a flow as JSON and as YAML and commit both. Change one param and move one node; export again. Pass: `git diff` shows only the changed param value and the moved node's position lines; both files end with one newline; a float such as `0.1` is written as `0.1`.

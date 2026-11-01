@@ -138,7 +138,7 @@ Hardware
 
 - Robot model and interface specs await a source (Alex or Tedrake).
 - Backend shares the controller with control (inference): normal priority, off control-loop cores, memory cap; control threads never wait on it. ros2_control loops are real-time ([controller_manager](https://control.ros.org/rolling/doc/ros2_control/controller_manager/doc/userdoc.html), [RT Linux](https://docs.ros.org/en/jazzy/Tutorials/Miscellaneous/Building-Realtime-rt_preempt-kernel-for-ROS-2.html)).
-- Canvas Stop is not e-stop; e-stop is the robot's hardware path, never web or HTTP; no UI e-stop button. After Stop the robot holds in place, no move to a safe pose (Alex, 2026-11-01). Proposed: IEC 60204-1 category 2 (hold, motors on; Thompson's suggestion, not certified).
+- Canvas Stop is not e-stop; e-stop is the robot's hardware path, never web or HTTP; no UI e-stop button. After Stop the controller stays powered and holds the current position; never cut power or torque, since an arm falls under gravity when torque is cut (Tedrake). No move to a safe pose (Alex, 2026-11-01). Every action must hold after Stop or cancel, the gripper included (it keeps its grip). The only exception is a non-cancellable action, which runs to its end and then holds. An action that declares `safe_pose` is refused when the adapter loads; actions with `finish_step` count as non-cancellable. JTC (ros2_controllers' joint trajectory controller) holds position by default after a trajectory is cancelled ([JTC docs](https://control.ros.org/master/doc/ros2_controllers/joint_trajectory_controller/doc/userdoc.html)); check the first robot's controller once chosen (Tedrake). Proposed: IEC 60204-1 category 2 (hold, motors on; Thompson's suggestion, not certified).
 - After cancel: robot state and gripper hold read back and shown.
 - Adapter reports `name`, `version`, `target` (sim/real, a field, not name-guessed), action-list version.
 - No per-run sim/real toggle; adapter name right of flow name; red `real_tag` tag when real.
@@ -148,10 +148,10 @@ Hardware
 - `timeout_s` → controller expiry; controller without it: description says "expiry by adapter only", UI flags it.
 - Crash: `motion` → result unknown; poll actions query goal, blocking use `read_state`; human confirms.
 - Adapter silent 3 s → pause, `run.word.paused_adapter_lost`; deadline sent to adapter; 60 s Python timer as backup. Defaults adjustable, no source (Torvalds).
-- Listen 127.0.0.1 only; no `--host`; remote browser via SSH forwarding.
+- The browser runs on another computer on the LAN (Alex, 2026-11-01), so the server listens on a LAN address and login is in v0.1 (Steve, 2026-11-01).
+- Login: a token made at startup; the server checks it on the WebSocket handshake and on every write. Without a valid token the page shows the token screen (`r-token`, Rams) and nothing runs. How the token is issued, stored and rotated, the listen address, and whether to use TLS: Thompson's LAN auth spec (pending).
 - Network loss: each action's adapter-defined behavior.
-- LAN access later: `--host` and tokens ship together.
-- A40 (exec-model v0.2.3 §0.2): `Host` `127.0.0.1`/`localhost`/`[::1]`; same `Origin`; `Content-Type: application/json`.
+- A40 (exec-model v0.2.3 §0.2): `Host` must be `127.0.0.1`/`localhost`/`[::1]` or the configured LAN address; same `Origin`; `Content-Type: application/json`.
 
 ### Flow file (import / export) — added 2026-10-31 at Alex's request
 
@@ -170,7 +170,7 @@ Hardware
 
 ## 4. Acceptance criteria
 
-1. Offline, Python-only machine runs the app; no build; requests only to 127.0.0.1. Steps: acceptance.md#1
+1. Offline, Python-only machine runs the app; no build; requests only to the backend. Steps: acceptance.md#1
 
 1.1 CI fails on any vendored-file sha256 mismatch. Steps: acceptance.md#1.1
 
@@ -232,7 +232,7 @@ Hardware
 
 19.8 Private IP in `.agents/docs/` or `docs/` blocks push. Steps: acceptance.md#19.8
 
-19.9 A40 checks reject bad `Host`, `Content-Type`, `Origin`. Steps: acceptance.md#19.9
+19.9 A40 checks reject bad `Host`, `Content-Type`, `Origin`; LAN requests without a valid token are refused. Steps: acceptance.md#19.9
 
 19.10 `scripts/check.sh` passes on clean clone and aarch64; failures block merge except 19. Steps: acceptance.md#19.10
 
@@ -245,15 +245,14 @@ A6: passing (PR #6). A38: 19.4. A40: 19.9. R1–R6 include two checks; Steps: ac
 - A6 passed in PR #6 (main `2cdd0f4`): cancellable 30 s action, TCP cut, paused at 9.631–9.678 s over 5 runs; `timeout_s` = 11 non-cancellable `motion` blocks Run (Torvalds). Fake adapter only; the 10 s cap still needs Tedrake's per-robot check before the real robot.
 - Click to Paused: 35–54 frames under CI load, from queued node updates (Torvalds); same 3–4 frames on main and the A6 branch locally. Outside A5; fix in executor with A6; no limit set (Alex).
 - Cancel stop behavior (hold in place or decelerate) depends on each controller; adapter must state and test it (Tedrake, inference).
-- No auth; tokens (exec-model §0.2) or SSH before real robot.
 - Only 500 nodes tested; at thousands, LiteGraph (canvas) may win; re-measure first.
 - Perf numbers: headless, software rendering, ~60 Hz cap; compare libraries only.
 - React 19 has no UMD (esm.sh per upgrade).
 - Side-effect marks and no-memory data rely on node authors; check in code review. External state may change before single-node reruns.
-- Alex (2026-11-01): v0.1 runs on simulation only; first robot, controller and version not chosen, so heartbeat timing and the 10 s cap stay open. Browser runs on another LAN computer: v0.1 reaches it through SSH forwarding (above); direct LAN access needs `--host`, tokens and a wider A40 `Host` list, not in v0.1 unless Alex asks. JetPack 7 real-time kernel and controller = Thor (not blocking v1).
+- Alex (2026-11-01): v0.1 runs on simulation only; first robot, controller and version not chosen, so heartbeat timing and the 10 s cap stay open. Target robot is a quadruped with an arm and a wrist camera (Steve); simulator and whether the fake adapter is enough: Tedrake (pending). JetPack 7 real-time kernel and controller = Thor (not blocking v1).
 - Torvalds: re-measure 19, 19.1; confirm 60 s timeout, 2 s SSE reconnect, 19.2 20 ms; fake-adapter actions.
 - Thompson: exec-model v0.2 keeps v0.1 storage and restart pause, A18, A20; adds action fields, pause/stop/crash under both `return_mode` values, cancel refused, `motion` rules (no mock, no idempotency dedupe, read state before resume).
 - Rams: English status words and buttons in the zh table; verify English fits nodes and top bar.
 - Tedrake: once vendor known, cite stop, controller power-loss and gripper power-loss behavior (adapter acceptance, not blocking v1).
 - Tedrake: confirm control nodes; `node-list-v0.md` obsolete (9 nodes kept for executor tests).
-- Flow file: export writes keys in a fixed order so git diffs stay small; positions stay in the file (Alex, 2026-11-01).
+- Flow file: export writes keys in a fixed order so git diffs stay small; positions stay in the file (Alex, 2026-11-01). Keys sorted, nodes by id, edges by their endpoints, 2-space indent, one final newline (already on main, `flow_file.py`, Torvalds); floats in the shortest form that reads back the same. Load then save with no edits gives the same bytes; a one-field edit changes only that line.
