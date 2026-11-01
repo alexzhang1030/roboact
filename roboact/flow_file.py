@@ -61,11 +61,13 @@ KNOWN_JSON_TYPES = frozenset(
 )
 
 BUILTIN_KINDS = frozenset(
-    {"start", "output", "constant", "condition", "merge", "human_approval", "action"}
+    {"start", "end", "constant", "condition", "merge", "human_approval", "action"}
 )
+# File kind `end` is the Output node. The graph type is still `output`.
+# `kind: output` is refused in _validate_node, not mapped.
 KIND_TO_TYPE = {
     "start": "start",
-    "output": "output",
+    "end": "output",
     "constant": "constant",
     "condition": "condition",
     "merge": "merge",
@@ -738,7 +740,28 @@ def _validate_document(tree: Any, issues: list[FileIssue]) -> None:
         _validate_edge_shape(edge, i, issues)
     if issues:
         return
+    _require_one_start_and_end(nodes, issues)
+    if issues:
+        return
     _validate_graph(tree, issues)
+
+
+def _require_one_start_and_end(nodes: list[Any], issues: list[FileIssue]) -> None:
+    """Exactly one start and one end. Runs only after kind checks have passed."""
+    starts = 0
+    ends = 0
+    for node in nodes:
+        if not isinstance(node, dict):
+            continue
+        kind = node.get("kind")
+        if kind == "start":
+            starts += 1
+        elif kind == "end":
+            ends += 1
+    if starts != 1:
+        issues.append(FileIssue("nodes", f"{starts} start nodes"))
+    if ends != 1:
+        issues.append(FileIssue("nodes", f"{ends} end nodes"))
 
 
 def _validate_flow(flow: dict[str, Any], issues: list[FileIssue]) -> None:
@@ -793,7 +816,16 @@ def _validate_node(node: Any, index: int, seen: dict[str, int], issues: list[Fil
     else:
         seen[nid] = index
     kind = node.get("kind")
-    if kind not in BUILTIN_KINDS:
+    if kind == "output":
+        # Before the start/end count, so an old file is not reported as "0 end nodes".
+        label = nid if isinstance(nid, str) else ""
+        issues.append(
+            FileIssue(
+                f"{path} (id {label})",
+                'kind "output" was renamed to "end"',
+            )
+        )
+    elif kind not in BUILTIN_KINDS:
         issues.append(FileIssue(f"{path}.kind", "unknown kind"))
     if "title" in node and not isinstance(node["title"], str):
         issues.append(FileIssue(f"{path}.title", "must be a string"))

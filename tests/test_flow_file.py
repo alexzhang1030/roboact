@@ -124,7 +124,7 @@ def sample_doc(**flow_over: Any) -> dict[str, Any]:
             },
             {
                 "id": "out",
-                "kind": "output",
+                "kind": "end",
                 "params": {},
                 "position": {"x": 600, "y": 160},
                 "title": "Out",
@@ -179,7 +179,7 @@ def run_doc(**param_over: Any) -> dict[str, Any]:
             },
             {
                 "id": "out",
-                "kind": "output",
+                "kind": "end",
                 "params": {},
                 "position": {"x": 600, "y": 160},
                 "title": "Out",
@@ -423,7 +423,7 @@ nodes:
     params: {x: 0.1, y: 0.1, z: 0.1}
     position: {x: 200, y: 0}
   - id: "out"
-    kind: output
+    kind: end
     title: Out
     params: {}
     position: {x: 400, y: 0}
@@ -561,6 +561,97 @@ def test_20_6(server):
         errs = body.get("detail", {}).get("errors") or []
         assert errs, (fmt, body)
         assert any(str(e.get("path") or e.get("message") or "") for e in errs), (fmt, body)
+        ids1, graph1, runs1 = _snapshot(base)
+        assert ids1 == ids0
+        assert graph1["id"] == graph0["id"]
+        assert graph1["nodes"] == graph0["nodes"]
+        assert runs1 == runs0
+
+
+def _file_node(nid: str, kind: str, **params: Any) -> dict[str, Any]:
+    return {
+        "id": nid,
+        "kind": kind,
+        "params": params,
+        "position": {"x": 0, "y": 0},
+        "title": nid,
+    }
+
+
+def _count_doc(nodes: list[dict[str, Any]]) -> dict[str, Any]:
+    return {
+        "edges": [],
+        "flow": {"id": "flow-count", "name": "count", "revision": 1, "step_limit": 20},
+        "format": "roboact-flow",
+        "format_version": 1,
+        "nodes": nodes,
+    }
+
+
+def _joined_errors(body: dict[str, Any]) -> list[str]:
+    errs = (body.get("detail") or {}).get("errors") or []
+    return [f"{e.get('path')}: {e.get('message')}" for e in errs]
+
+
+def test_output_kind_and_terminal_counts_refuse(server):
+    """Old kind output, and zero or two start/end nodes, refuse without changing the flow."""
+    base = server["base"]
+    ids0, graph0, runs0 = _snapshot(base)
+    renamed = 'nodes[2] (id n_out): kind "output" was renamed to "end"'
+    cases = [
+        (
+            _count_doc(
+                [
+                    _file_node("n_start", "start"),
+                    _file_node("n_const", "constant", value="a", value_type="string"),
+                    _file_node("n_out", "output"),
+                ]
+            ),
+            renamed,
+        ),
+        (
+            _count_doc(
+                [
+                    _file_node("n_start", "start"),
+                    _file_node("n_const", "constant", value="a", value_type="string"),
+                ]
+            ),
+            "nodes: 0 end nodes",
+        ),
+        (
+            _count_doc(
+                [
+                    _file_node("n_start", "start"),
+                    _file_node("n_end_a", "end"),
+                    _file_node("n_end_b", "end"),
+                ]
+            ),
+            "nodes: 2 end nodes",
+        ),
+        (
+            _count_doc([_file_node("n_end", "end")]),
+            "nodes: 0 start nodes",
+        ),
+        (
+            _count_doc(
+                [
+                    _file_node("s1", "start"),
+                    _file_node("s2", "start"),
+                    _file_node("n_end", "end"),
+                ]
+            ),
+            "nodes: 2 start nodes",
+        ),
+    ]
+    for doc, expect in cases:
+        code, body = _import(base, dump_json(doc), "json")
+        assert 400 <= code < 500, (expect, body)
+        assert code != 500
+        assert body["error"] == "import_failed"
+        joined = _joined_errors(body)
+        assert expect in joined, (expect, joined)
+        if expect == renamed:
+            assert all("end nodes" not in line for line in joined), joined
         ids1, graph1, runs1 = _snapshot(base)
         assert ids1 == ids0
         assert graph1["id"] == graph0["id"]

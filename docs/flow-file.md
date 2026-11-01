@@ -32,7 +32,7 @@ edges: [ … ]                  # sorted by (from.node, from.port, to.node, to.p
 ```yaml
 nodes:
   - id: "n7"
-    kind: action              # start | output | constant | condition | merge | human_approval | action
+    kind: action              # start | end | constant | condition | merge | human_approval | action
     action: "arm.move_to"     # only when kind=action
     title: "Move to bin"
     params: { speed: 0.3, frame: "base" }
@@ -56,7 +56,7 @@ Secret params: written as `null`; import marks the node "missing input"; Run dis
 3. `format_version` > supported -> refuse: "file is from a newer RoboAct (v2), this build reads v1". Lower -> migrate step by step, then continue.
 4. Structure: required fields, types, unknown fields -> refuse with path, e.g. `nodes[3].params.speed`. Unknown fields are refused, not dropped, so nothing disappears silently.
 5. Graph: duplicate node id, edge to missing node/port, port type mismatch, loop without exit -> refuse with path.
-6. Built-in `kind` unknown -> refuse.
+6. Built-in `kind` unknown -> refuse. `kind: output` (renamed to `end`) is refused here with the node id, e.g. `nodes[2] (id n_out): kind "output" was renamed to "end"`; never converted on import. After the kind check: exactly one `start` and exactly one `end` node, else refuse naming the count found (checked after `output`, so an old file gets the rename message, not "0 end nodes"). `format_version` stays 1.
 7. `action` not offered by current adapter -> import anyway, node shows "action gone" (ui-spec).
 8. `action_list_version` differs from adapter -> import anyway; run fails before start, as the PRD already says.
 9. Only now create and open a new flow. Any refusal in 1–6 leaves the canvas exactly as it was.
@@ -64,7 +64,7 @@ Secret params: written as `null`; import marks the node "missing input"; Run dis
 ## 6. Acceptance (for Fadell to phrase)
 - Round trip: export JSON -> import -> export JSON gives byte-identical output (canonical bytes: §8). Same for YAML. Export YAML -> import -> export JSON equals the direct JSON export.
 - Test flow must include: a loop with back edge, a Constant with string params `"on"`, `"0123"`, `"1.10"`, a float `0.1`, an empty string, a node whose action the adapter lacks.
-- Bad files, each must refuse with the path shown and leave the canvas unchanged: truncated JSON, YAML with `!!python/object` tag, YAML alias, `format_version: 2`, edge to missing node, duplicate id, unknown field.
+- Bad files, each must refuse with the path shown and leave the canvas unchanged: truncated JSON, YAML with `!!python/object` tag, YAML alias, `format_version: 2`, edge to missing node, duplicate id, unknown field, a node with `kind: output`, zero or two `end` nodes.
 - Hand-written YAML: a string param written unquoted as `ver: 1.10` imports, but Run is refused with node and param named; `ver: "1.10"` runs.
 - Hand-written YAML import: a string param written unquoted as `mode: on` must import as the string `"on"`. Switching the parser to YAML 1.1 rules turns it into `true`, so this case is how to check the test covers the parser setting.
 
