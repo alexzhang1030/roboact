@@ -24,7 +24,7 @@ def guard_graph() -> dict:
         [
             n("start", "start", data={"x": 0.2, "y": 0.1, "z": 0.2}),
             go,
-            n("out", "output", x=560, y=80),
+            n("out", "end", x=560, y=80),
             n("echo", "echo", x=280, y=260),
             n(
                 "tool",
@@ -48,7 +48,7 @@ def confirm_flow() -> dict:
             n("start", "start", data={"v": 1}),
             n("ask", "human_confirm", x=280),
             n("echo", "echo", x=280, y=200),
-            n("out", "output", x=560),
+            n("out", "end", x=560),
         ],
         [
             e("e0", "start", "data", "ask", "value"),
@@ -377,7 +377,10 @@ def test_refuse_does_not_touch_adapter_and_two_starts_race(tmp_path):
         assert list(adapter.writes) == writes
         assert [row["run_id"] for row in store.list_runs(fid)] == ids
 
-        other = make_flow([n("s", "echo")], [])
+        other = make_flow(
+            [n("start", "start", data={"v": 1}), n("s", "echo"), n("out", "end", x=280)],
+            [e("e0", "start", "data", "s", "value"), e("e1", "s", "value", "out", "value")],
+        )
         fid2, ver2 = boot(store, other)
         rid2 = await ex.start_full(fid2, ver2)
         assert rid2 != rid
@@ -441,7 +444,7 @@ def test_paused_and_finished_allow_single_node(tmp_path):
         assert ex.get(rid).status == "paused"
 
         plain = make_flow(
-            [n("start", "start", data={"v": 1}), n("echo", "echo"), n("out", "output")],
+            [n("start", "start", data={"v": 1}), n("echo", "echo"), n("out", "end")],
             [e("e0", "start", "data", "echo", "value"), e("e1", "echo", "value", "out", "value")],
         )
         fid3, ver3 = boot(store, plain)
@@ -489,9 +492,13 @@ def test_resume_refused_while_another_run_is_executing(tmp_path):
             [
                 n("start", "start", data={"v": 1}),
                 gate,
+                n("out", "end", x=560),
                 _slow_pose("slow"),
             ],
-            [e("e0", "start", "data", "gate", "value")],
+            [
+                e("e0", "start", "data", "gate", "value"),
+                e("e1", "gate", "value", "out", "value"),
+            ],
         )
         fid, ver = boot(store, graph)
         paused_id = await ex.start_full(fid, ver)
@@ -538,7 +545,7 @@ def test_resume_refused_while_another_run_is_executing(tmp_path):
             [
                 n("start", "start", data={"v": 1}),
                 n("ask", "human_confirm", x=280),
-                n("out", "output", x=560),
+                n("out", "end", x=560),
                 _slow_pose("motion", y=240),
             ],
             [

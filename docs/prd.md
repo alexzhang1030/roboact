@@ -24,8 +24,8 @@ First run
    - Result unknown (`write`/`motion` only): `read_state`, then user picks rerun or mark done; own icon.
    - Only the active edge animates.
 6. At breakpoint: Continue, Step, Stop; panel shows input, output, duration; edit input, continue.
-7. Run one node with past-run, manual or pinned input; upstream not rerun. Pins only in single-node/group runs; full runs mark them `src.pinned_unused`. Cached input port: hollow circle naming its source run. While a flow is running, single-node runs ("Run this only" and "Run for real") are disabled in the UI and refused by the server with the reason; allowed when the flow is paused or finished. Reason: another action would move the robot while the flow does; also an open browser dialog over 10 s triggers the disconnect pause (Steve, 2026-11-01; Torvalds, `app.js:985`, `1009`, `1482`, `1486`).
-8. Run group: box-select; incoming edges become pinnable entry ports; outside nodes don't run. Same rule as step 7: while a flow is running, group run is disabled in the UI and refused by the server with the reason; allowed when paused or finished (Steve, 2026-11-01).
+7. Run one node with past-run, manual or pinned input; upstream not rerun. Pins only in single-node/group runs; full runs mark them `src.pinned_unused`. Cached input port: hollow circle naming its source run. While a node of the flow is executing, single-node runs ("Run this only" and "Run for real") are disabled in the UI and refused by the server with the reason; allowed when the flow is paused (including at a breakpoint), waiting for a confirmation, or ended. Reason: another action would move the robot while the flow does (Steve, 2026-11-01; UI: `confirm-dialog-v1.md`).
+8. Run group: box-select; incoming edges become pinnable entry ports; outside nodes don't run. Same rule as step 7: while a node is executing, group run is disabled in the UI and refused by the server with the reason (Steve, 2026-11-01).
 9. Error: red plus icon and text; panel shows I/O and error; rerun from here, upstream not rerun.
 10. Side-effect node (email, file write, external write API): title mark; replay mocked (`run.target_sim`) unless user clicks real run.
 11. Loop: dashed back edge routed below, labeled "round 3" (target's run count); exit via condition node; top bar "steps 37 / limit N"; node shows latest round, panel lists all.
@@ -186,7 +186,7 @@ Hardware
 
 4. Refresh at a breakpoint keeps node and I/O. Steps: acceptance.md#4
 
-5. Single-node run records only that node; single-node and group runs refused while a flow is running, in UI and server. Steps: acceptance.md#5
+5. Single-node run records only that node; single-node and group runs refused while a node is executing, in UI and server. Steps: acceptance.md#5
 
 6. 2-node group run records only those 2; entry data matches chosen run. Steps: acceptance.md#6
 

@@ -34,8 +34,8 @@ Version 1.5 (2026-10-31). Companion to `prd-en-v1.5.md` section 4. exec-model = 
 ## 5. Single node
 1. Run a middle node using the last run's record.
 2. Pass: only that node gets a new record.
-3. Start a full run with a fake `motion` action and, while it is running, open a node's menu, then box-select two nodes. Pass: "Run this only", "Run for real" and the group run button are disabled and show the reason. Pause the flow: all three are enabled. Let it finish: all three are enabled.
-4. While a full run is running, call the single-node run endpoint and the group run endpoint directly (not through the UI). Pass: the server refuses each with the reason; no new record; the robot state does not change from either call.
+3. Start a full run with a fake `motion` action and, while it is running, open a node's menu, then box-select two nodes. Pass: "Run this only", "Run for real" and the group run button are disabled and show the reason. Pause the flow: all three are enabled. Resume until a `motion` node waits for its confirmation: all three are enabled. Confirm, then let it finish: all three are enabled.
+4. While a node of a full run is executing, call the single-node run endpoint and the group run endpoint directly (not through the UI). Pass: the server refuses each with the reason; no new record; the robot state does not change from either call.
 
 <a id="6"></a>
 ## 6. Group
