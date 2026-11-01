@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 
+from roboact.adapter import FakeAdapter
 from roboact.errors import ApiError
 
 from tests.helpers import adapter_ctx, boot, ctx, e, make_flow, n, run_until, wait_status
@@ -31,6 +32,19 @@ def test_full_run_refuses_missing_extra_and_unreachable_end(tmp_path):
             (_start_end(drop_end=True), "end_count", "0"),
             (_start_end(extra_ends=1), "end_count", "2"),
             (_start_end(linked=False), "end_unreachable", "end"),
+            (
+                make_flow([n("end", "end")], []),
+                "start_count",
+                "0",
+            ),
+            (
+                make_flow(
+                    [n("s1", "start", data={}), n("s2", "start", data={}), n("end", "end")],
+                    [e("e0", "s1", "data", "end", "value")],
+                ),
+                "start_count",
+                "2",
+            ),
         ]
         try:
             for flow, code, needle in cases:
@@ -42,7 +56,7 @@ def test_full_run_refuses_missing_extra_and_unreachable_end(tmp_path):
                     assert err.status == 409
                     assert err.error == code
                     assert needle in err.message
-                    assert "End" in err.message or "end" in err.message
+                    assert "End" in err.message or "Start" in err.message
             fid, ver = boot(store, _start_end())
             rid = await ex.start_full(fid, ver)
             st = await wait_status(ex, rid, "completed", timeout=4)
@@ -97,7 +111,7 @@ def test_put_type_output_is_rejected(server):
         },
     )
     assert code == 422, body
-    assert body["message"] == 'nodes[1] (id out): type "output" was renamed to "end"'
+    assert body["message"] == 'nodes[1] (id out): type "output" is now "end"'
     after = http_json(base, f"/api/flows/{fid}")["flow"]
     assert after["version"] == before["version"]
     assert [n["id"] for n in after["nodes"]] == [n["id"] for n in before["nodes"]]
@@ -141,6 +155,65 @@ def test_run_check_names_missing_end(server):
     assert code == 409
     assert body["error"] == "end_count"
     assert "0" in body["message"]
+
+
+def test_selected_node_run_skips_end_check(tmp_path):
+    async def go():
+        ex, store, _, hub = ctx(tmp_path)
+        flow = make_flow([n("c", "constant", value="1", value_type="string")], [])
+        fid, ver = boot(store, flow)
+        try:
+            rid = await ex.start_node(fid, ver, "c")
+            st = await wait_status(ex, rid, "completed", "error", timeout=4)
+            assert st.status == "completed"
+        finally:
+            await hub.stop()
+
+    asyncio.run(go())
+
+
+def test_parallel_motion_keeps_running_after_end(tmp_path):
+    """End stores its input, but a motion branch still running keeps the run open."""
+
+    async def go():
+        adapter = FakeAdapter()
+        adapter.async_steps = 8
+        adapter.async_sleep_s = 0.05
+        ex, store, _, hub = adapter_ctx(tmp_path, adapter)
+        flow = make_flow(
+            [
+                n("start", "start", data={"v": 7}),
+                n("end", "end"),
+                n("go", "fake_set_pose"),
+            ],
+            [
+                e("e0", "start", "data", "end", "value"),
+                e("e1", "start", "data", "go", "target"),
+            ],
+        )
+        fid, ver = boot(store, flow)
+        try:
+            rid = await ex.start_full(fid, ver)
+            saw_running = False
+            for _ in range(400):
+                st = ex.get(rid)
+                assert st is not None
+                end_done = (st.node_state.get("end") or {}).get("state") == "done"
+                go_done = (st.node_state.get("go") or {}).get("state") == "done"
+                if end_done and not go_done:
+                    assert st.status == "running"
+                    assert st.result == {"v": 7}
+                    saw_running = True
+                    break
+                await asyncio.sleep(0.01)
+            assert saw_running, "End finished while the motion branch was still running"
+            st = await wait_status(ex, rid, "completed", timeout=4)
+            assert st.result == {"v": 7}
+            assert (st.node_state.get("go") or {}).get("state") == "done"
+        finally:
+            await hub.stop()
+
+    asyncio.run(go())
 
 
 def test_demo_chain_result_is_end_input(tmp_path):

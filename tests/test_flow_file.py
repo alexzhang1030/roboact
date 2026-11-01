@@ -593,70 +593,53 @@ def _joined_errors(body: dict[str, Any]) -> list[str]:
     return [f"{e.get('path')}: {e.get('message')}" for e in errs]
 
 
-def test_output_kind_and_terminal_counts_refuse(server):
-    """Old kind output, and zero or two start/end nodes, refuse without changing the flow."""
+def test_import_rejects_kind_output_and_accepts_end_counts(server):
+    """kind output is refused. Zero or two End nodes import; counts are a run check."""
     base = server["base"]
     ids0, graph0, runs0 = _snapshot(base)
-    renamed = 'nodes[2] (id n_out): kind "output" was renamed to "end"'
-    cases = [
-        (
+    renamed = 'nodes[2] (id n_out): kind "output" is now "end"'
+    code, body = _import(
+        base,
+        dump_json(
             _count_doc(
                 [
                     _file_node("n_start", "start"),
                     _file_node("n_const", "constant", value="a", value_type="string"),
                     _file_node("n_out", "output"),
                 ]
-            ),
-            renamed,
+            )
         ),
-        (
-            _count_doc(
-                [
-                    _file_node("n_start", "start"),
-                    _file_node("n_const", "constant", value="a", value_type="string"),
-                ]
-            ),
-            "nodes: 0 end nodes",
+        "json",
+    )
+    assert 400 <= code < 500, body
+    assert body["error"] == "import_failed"
+    assert renamed in _joined_errors(body)
+    ids1, graph1, runs1 = _snapshot(base)
+    assert ids1 == ids0
+    assert graph1["id"] == graph0["id"]
+    assert graph1["nodes"] == graph0["nodes"]
+    assert runs1 == runs0
+
+    accepted = [
+        _count_doc(
+            [
+                _file_node("n_start", "start"),
+                _file_node("n_const", "constant", value="a", value_type="string"),
+            ]
         ),
-        (
-            _count_doc(
-                [
-                    _file_node("n_start", "start"),
-                    _file_node("n_end_a", "end"),
-                    _file_node("n_end_b", "end"),
-                ]
-            ),
-            "nodes: 2 end nodes",
-        ),
-        (
-            _count_doc([_file_node("n_end", "end")]),
-            "nodes: 0 start nodes",
-        ),
-        (
-            _count_doc(
-                [
-                    _file_node("s1", "start"),
-                    _file_node("s2", "start"),
-                    _file_node("n_end", "end"),
-                ]
-            ),
-            "nodes: 2 start nodes",
+        _count_doc(
+            [
+                _file_node("n_start", "start"),
+                _file_node("n_end_a", "end"),
+                _file_node("n_end_b", "end"),
+            ]
         ),
     ]
-    for doc, expect in cases:
-        code, body = _import(base, dump_json(doc), "json")
-        assert 400 <= code < 500, (expect, body)
-        assert code != 500
-        assert body["error"] == "import_failed"
-        joined = _joined_errors(body)
-        assert expect in joined, (expect, joined)
-        if expect == renamed:
-            assert all("end nodes" not in line for line in joined), joined
-        ids1, graph1, runs1 = _snapshot(base)
-        assert ids1 == ids0
-        assert graph1["id"] == graph0["id"]
-        assert graph1["nodes"] == graph0["nodes"]
-        assert runs1 == runs0
+    for doc in accepted:
+        code, imported = _import(base, dump_json(doc), "json")
+        assert code == 200, imported
+        kinds = [n["type"] for n in imported["flow"]["nodes"]]
+        assert kinds.count("end") == sum(1 for n in doc["nodes"] if n["kind"] == "end")
 
 
 def test_20_7(server):

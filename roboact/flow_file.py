@@ -81,7 +81,7 @@ def output_type_message(nodes: list[Any] | None) -> str | None:
             continue
         raw_id = node.get("id")
         label = raw_id if isinstance(raw_id, str) else ""
-        return f'nodes[{index}] (id {label}): type "output" was renamed to "end"'
+        return f'nodes[{index}] (id {label}): type "output" is now "end"'
     return None
 
 
@@ -811,28 +811,7 @@ def _validate_document(tree: Any, issues: list[FileIssue]) -> None:
         _validate_edge_shape(edge, i, issues)
     if issues:
         return
-    _require_one_start_and_end(nodes, issues)
-    if issues:
-        return
     _validate_graph(tree, issues)
-
-
-def _require_one_start_and_end(nodes: list[Any], issues: list[FileIssue]) -> None:
-    """Exactly one start and one end. Runs only after kind checks have passed."""
-    starts = 0
-    ends = 0
-    for node in nodes:
-        if not isinstance(node, dict):
-            continue
-        kind = node.get("kind")
-        if kind == "start":
-            starts += 1
-        elif kind == "end":
-            ends += 1
-    if starts != 1:
-        issues.append(FileIssue("nodes", f"{starts} start nodes"))
-    if ends != 1:
-        issues.append(FileIssue("nodes", f"{ends} end nodes"))
 
 
 def _validate_flow(flow: dict[str, Any], issues: list[FileIssue]) -> None:
@@ -888,12 +867,11 @@ def _validate_node(node: Any, index: int, seen: dict[str, int], issues: list[Fil
         seen[nid] = index
     kind = node.get("kind")
     if kind == "output":
-        # Before the start/end count, so an old file is not reported as "0 end nodes".
         label = nid if isinstance(nid, str) else ""
         issues.append(
             FileIssue(
                 f"{path} (id {label})",
-                'kind "output" was renamed to "end"',
+                'kind "output" is now "end"',
             )
         )
     elif kind not in BUILTIN_KINDS:
