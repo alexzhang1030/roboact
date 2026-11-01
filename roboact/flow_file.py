@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import math
 import multiprocessing
 import re
 from dataclasses import dataclass, field
@@ -72,28 +73,50 @@ KIND_TO_TYPE = {
 }
 TYPE_TO_KIND = {v: k for k, v in KIND_TO_TYPE.items()}
 
-TOP_KEYS = frozenset({"format", "format_version", "flow", "nodes", "edges"})
-FLOW_KEYS = frozenset(
-    {
-        "id",
-        "name",
-        "revision",
-        "step_limit",
-        "action_list_version",
-        "adapter",
-        "robot",
-        "units",
-    }
+# Schema order is the order these fields are listed in docs/flow-file.md (§2, §3, §7).
+TOP_KEY_ORDER = ("format", "format_version", "flow", "nodes", "edges")
+FLOW_KEY_ORDER = (
+    "id",
+    "name",
+    "revision",
+    "step_limit",
+    "action_list_version",
+    "adapter",
+    "robot",
+    "units",
 )
+ADAPTER_KEY_ORDER = ("name", "version", "target")
+ROBOT_KEY_ORDER = ("id", "model")
+UNITS_KEY_ORDER = ("angle", "length")
+NODE_KEY_ORDER = ("id", "kind", "action", "title", "params", "position")
+POS_KEY_ORDER = ("x", "y")
+EDGE_KEY_ORDER = ("from", "to")
+END_KEY_ORDER = ("node", "port")
+TOP_KEYS = frozenset(TOP_KEY_ORDER)
+FLOW_KEYS = frozenset(FLOW_KEY_ORDER)
 FLOW_REQUIRED = ("id", "name", "revision", "step_limit")
-ADAPTER_KEYS = frozenset({"name", "version", "target"})
-ROBOT_KEYS = frozenset({"id", "model"})
-UNITS_KEYS = frozenset({"angle", "length"})
-NODE_KEYS = frozenset({"id", "kind", "action", "title", "params", "position"})
+ADAPTER_KEYS = frozenset(ADAPTER_KEY_ORDER)
+ROBOT_KEYS = frozenset(ROBOT_KEY_ORDER)
+UNITS_KEYS = frozenset(UNITS_KEY_ORDER)
+NODE_KEYS = frozenset(NODE_KEY_ORDER)
 NODE_REQUIRED = ("id", "kind", "title", "params", "position")
-POS_KEYS = frozenset({"x", "y"})
-EDGE_KEYS = frozenset({"from", "to"})
-END_KEYS = frozenset({"node", "port"})
+POS_KEYS = frozenset(POS_KEY_ORDER)
+EDGE_KEYS = frozenset(EDGE_KEY_ORDER)
+END_KEYS = frozenset(END_KEY_ORDER)
+_SCHEMA_KEY_ORDER: dict[tuple[str, ...], tuple[str, ...]] = {
+    (): TOP_KEY_ORDER,
+    ("flow",): FLOW_KEY_ORDER,
+    ("flow", "adapter"): ADAPTER_KEY_ORDER,
+    ("flow", "robot"): ROBOT_KEY_ORDER,
+    ("flow", "units"): UNITS_KEY_ORDER,
+    ("nodes", "*"): NODE_KEY_ORDER,
+    ("nodes", "*", "position"): POS_KEY_ORDER,
+    ("edges", "*"): EDGE_KEY_ORDER,
+    ("edges", "*", "from"): END_KEY_ORDER,
+    ("edges", "*", "to"): END_KEY_ORDER,
+}
+# "key" is an object field, "idx" is a list index. Shape uses "*" for indexes.
+_Seg = tuple[Literal["key", "idx"], str]
 CORE_TAGS = frozenset(
     {
         None,
@@ -147,7 +170,17 @@ class RunBlockers:
 
 
 def dump_json(obj: Any) -> str:
-    return json.dumps(obj, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
+    """Canonical JSON for a flow document. Rules: docs/flow-file.md §8."""
+    try:
+        text = json.dumps(
+            _canonical_tree(obj, ()),
+            ensure_ascii=False,
+            indent=2,
+            allow_nan=False,
+        )
+    except ValueError as e:
+        raise FlowFileRejected([FileIssue("", str(e))]) from e
+    return _one_trailing_newline(text)
 
 
 def canonical_filename(name: str, fmt: str) -> str:
@@ -255,15 +288,88 @@ def is_imported(graph: dict[str, Any]) -> bool:
 
 
 def dump_yaml(doc: dict[str, Any]) -> str:
+    """Canonical YAML for a flow document. Same tree as dump_json. docs/flow-file.md §8."""
     yaml = YAML(typ="rt", pure=True)
     yaml.default_flow_style = False
     yaml.allow_unicode = True
     yaml.width = 4096
+    yaml.explicit_start = False
+    yaml.explicit_end = False
     yaml.indent(mapping=2, sequence=4, offset=2)
+    yaml.representer.add_representer(float, _represent_float)
+    yaml.representer.add_representer(type(None), _represent_none)
     buf = StringIO()
-    yaml.dump(_yaml_tree(doc), buf)
-    text = buf.getvalue()
-    return text if text.endswith("\n") else text + "\n"
+    yaml.dump(_yaml_tree(_canonical_tree(doc, ())), buf)
+    return _one_trailing_newline(buf.getvalue())
+
+
+def _one_trailing_newline(text: str) -> str:
+    return text.replace("\r\n", "\n").replace("\r", "\n").rstrip("\n") + "\n"
+
+
+def _represent_float(representer: Any, data: float) -> Any:
+    return representer.represent_scalar("tag:yaml.org,2002:float", repr(float(data)))
+
+
+def _represent_none(representer: Any, data: None) -> Any:
+    del data
+    return representer.represent_scalar("tag:yaml.org,2002:null", "null")
+
+
+def _canonical_tree(obj: Any, path: tuple[_Seg, ...]) -> Any:
+    """Plain JSON tree: schema key order, lists in given order, plain numbers."""
+    if isinstance(obj, dict):
+        keys = _ordered_keys(obj, path)
+        return {key: _canonical_tree(obj[key], (*path, ("key", key))) for key in keys}
+    if isinstance(obj, list):
+        return [
+            _canonical_tree(item, (*path, ("idx", str(index)))) for index, item in enumerate(obj)
+        ]
+    if isinstance(obj, bool):
+        return bool(obj)
+    if isinstance(obj, int):
+        return int(obj)
+    if isinstance(obj, float):
+        if not math.isfinite(obj):
+            label = "NaN" if math.isnan(obj) else "Infinity"
+            raise FlowFileRejected([FileIssue(_fmt_path(path), f"{label} is not allowed")])
+        return float(obj)
+    if isinstance(obj, str):
+        return str(obj)
+    if obj is None:
+        return None
+    raise FlowFileRejected([FileIssue(_fmt_path(path), f"cannot serialize {type(obj).__name__}")])
+
+
+def _ordered_keys(obj: dict[Any, Any], path: tuple[_Seg, ...]) -> list[str]:
+    """Known schema keys in document order, then extra keys by Unicode code point."""
+    names: list[str] = []
+    for key in obj:
+        if not isinstance(key, str):
+            raise FlowFileRejected([FileIssue(_fmt_path(path), "object keys must be strings")])
+        names.append(key)
+    schema = _SCHEMA_KEY_ORDER.get(_shape(path))
+    if schema is None:
+        return sorted(names)
+    known = [key for key in schema if key in obj]
+    extra = sorted(key for key in names if key not in schema)
+    return known + extra
+
+
+def _shape(path: tuple[_Seg, ...]) -> tuple[str, ...]:
+    return tuple("*" if kind == "idx" else name for kind, name in path)
+
+
+def _fmt_path(path: tuple[_Seg, ...]) -> str:
+    out = ""
+    for kind, val in path:
+        if kind == "idx":
+            out += f"[{val}]"
+        elif out:
+            out += f".{val}"
+        else:
+            out = val
+    return out
 
 
 def graph_to_doc(graph: dict[str, Any], adapter: Adapter) -> dict[str, Any]:
@@ -285,7 +391,7 @@ def graph_to_doc(graph: dict[str, Any], adapter: Adapter) -> dict[str, Any]:
         if kind == "action":
             item["action"] = typ
         nodes_out.append(item)
-    nodes_out.sort(key=lambda n: str(n["id"]))
+    # List order is the graph order. docs/flow-file.md §8: do not sort.
     edges_out: list[dict[str, Any]] = []
     for edge in graph.get("edges") or []:
         edges_out.append(
@@ -300,9 +406,6 @@ def graph_to_doc(graph: dict[str, Any], adapter: Adapter) -> dict[str, Any]:
                 },
             }
         )
-    edges_out.sort(
-        key=lambda e: (e["from"]["node"], e["from"]["port"], e["to"]["node"], e["to"]["port"])
-    )
     adapter_info = graph.get("file_adapter") or {
         "name": adapter.name,
         "target": adapter.target,
@@ -617,8 +720,8 @@ def _plain(obj: Any) -> Any:
 def _yaml_tree(obj: Any) -> Any:
     if isinstance(obj, dict):
         out = CommentedMap()
-        for key in sorted(obj):
-            out[key] = _yaml_tree(obj[key])
+        for key, val in obj.items():
+            out[key] = _yaml_tree(val)
         return out
     if isinstance(obj, list):
         out_s = CommentedSeq()
@@ -638,6 +741,9 @@ def _check_limits(obj: Any, path: str, depth: int, issues: list[FileIssue]) -> N
         issues.append(FileIssue(path or "", f"string exceeds {MAX_STRING_CHARS} characters"))
     if isinstance(obj, int) and not isinstance(obj, bool) and abs(obj) > JS_MAX_SAFE:
         issues.append(FileIssue(path or "", "integer exceeds ±2^53"))
+    if isinstance(obj, float) and not math.isfinite(obj):
+        label = "NaN" if math.isnan(obj) else "Infinity"
+        issues.append(FileIssue(path or "", f"{label} is not allowed"))
     if isinstance(obj, dict):
         for key, val in obj.items():
             if not isinstance(key, str):

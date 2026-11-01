@@ -23,8 +23,8 @@ flow:
   step_limit: 200             # loop limit N
   action_list_version: "…"    # from adapter at export time
   adapter: { name: "…", version: "…", target: "sim" }   # informational; not checked on import
-nodes: [ … ]                  # sorted by id
-edges: [ … ]                  # sorted by (from.node, from.port, to.node, to.port)
+nodes: [ … ]                  # file order; not sorted (§8)
+edges: [ … ]                  # file order; not sorted (§8)
 ```
 `format_version` and `flow.revision` are different things: the first changes when the file layout changes, the second changes every time the user edits the flow.
 
@@ -62,7 +62,7 @@ Secret params: written as `null`; import marks the node "missing input"; Run dis
 9. Only now create and open a new flow. Any refusal in 1–6 leaves the canvas exactly as it was.
 
 ## 6. Acceptance (for Fadell to phrase)
-- Round trip: export JSON -> import -> export JSON gives byte-identical output (canonical: fixed key order, sorted arrays, 2-space indent, trailing newline). Same for YAML. Export YAML -> import -> export JSON equals the direct JSON export.
+- Round trip: export JSON -> import -> export JSON gives byte-identical output (canonical bytes: §8). Same for YAML. Export YAML -> import -> export JSON equals the direct JSON export.
 - Test flow must include: a loop with back edge, a Constant with string params `"on"`, `"0123"`, `"1.10"`, a float `0.1`, an empty string, a node whose action the adapter lacks.
 - Bad files, each must refuse with the path shown and leave the canvas unchanged: truncated JSON, YAML with `!!python/object` tag, YAML alias, `format_version: 2`, edge to missing node, duplicate id, unknown field.
 - Hand-written YAML: a string param written unquoted as `ver: 1.10` imports, but Run is refused with node and param named; `ver: "1.10"` runs.
@@ -78,3 +78,35 @@ Secret params: written as `null`; import marks the node "missing input"; Run dis
 - New fields (Tedrake): `flow.robot: { id, model }` as reported by the adapter; `flow.units: { angle: "rad"|"deg", length: "m"|"mm" }`. Adapter must report a robot id; PRD adapter fields today are name, version, target, action-list version only.
 - Limits (constants, inference, no source): MAX_FILE_BYTES = 5 MiB checked before parsing; MAX_DEPTH = 64; MAX_STRING_CHARS = 65536. PRD perf target 500 nodes / ~550 edges is far below 5 MiB.
 - Motion params (per Tedrake, 22:20): NOT checked at import. Before every run, compare each `side_effect: motion` node's params with the connected robot's joint limits and velocity limits; any out of range -> run refused, node and param named. Import-time checks are structure only (section 5 steps 1-6); param types and limits are checked before run, because the robot may not be connected at import and may change afterwards.
+
+## 8. Canonical bytes
+
+An exported file is for git. Open a file that is already in this spelling, export it again with no edits, and the bytes are the same. One edit changes only the lines of that edit. JSON and YAML are two spellings of one document; each spelling has one byte sequence. Examples that already follow this spelling: `tests/fixtures/flows/`.
+
+`export_flow` in `roboact/flow_file.py` is the only writer. The browser posts `{flow_id, format}` to `POST /api/flows/export` and saves the returned `text`. It does not run `JSON.stringify` on the flow document.
+
+1. Key order. Every object is written in one fixed order: the order the fields are listed in §2, §3, and §7, repeated here, not alphabetical order, and not the order the keys had in the browser or in the imported file. Absent keys are omitted. They are not written as null.
+   - Top level: `format`, `format_version`, `flow`, `nodes`, `edges`.
+   - `flow`: `id`, `name`, `revision`, `step_limit`, `action_list_version`, `adapter`, `robot`, `units`.
+   - `adapter`: `name`, `version`, `target`.
+   - `robot`: `id`, `model`.
+   - `units`: `angle`, `length`.
+   - Node: `id`, `kind`, `action`, `title`, `params`, `position`. `action` is omitted when the node has none.
+   - `position`: `x`, `y`.
+   - Edge: `from`, `to`.
+   - Edge end (`from` and `to`): `node`, `port`.
+   - A key this list does not name is still refused on import (§5). The serializer keeps it, so a dump stays deterministic: known keys first, in the order above, then the extra keys in Unicode code point order (`ord`, case-sensitive: `A` before `a` before `b`). Extras `zzz` and `aaa` come out `aaa`, then `zzz`.
+   - `params`, and every object nested under `params`, have no field list. Their keys are written in that same Unicode code point order.
+2. Numbers.
+   - An integer is written as an integer. `1` stays `1`.
+   - A float is written with Python's shortest round-trip spelling (`repr`). `0.1` is `0.1`, never `0.10000000000000001`. When that spelling uses an exponent it has two exponent digits: `1e-7` is `1e-07`. `1.0` stays `1.0`, so it does not become the integer `1`. Signed zero stays `-0.0`.
+   - `NaN` and `Infinity` (either sign) are refused on export and on import.
+   - Booleans are `true` and `false`.
+3. Layout. Both encodings:
+   - Indent is two spaces. JSON nests two spaces per level, `{` and `}` on their own lines, one space after `:`. YAML is block style: a nested key is two spaces in from its parent; a sequence dash is two spaces in from its parent key; the keys of that element are two spaces in from the dash.
+   - Line breaks are `\n` only. Lines are not folded or wrapped.
+   - UTF-8, no BOM. Non-ASCII characters are written as themselves, not as `\u` escapes.
+   - The file ends with exactly one `\n`. No leading `---` and no `%YAML` directive.
+   - JSON strings use ordinary JSON escapes. YAML double-quotes every string value (§1). YAML null is the word `null`.
+4. Lists keep the order they were given. `nodes`, `edges`, and arrays inside `params` are not sorted.
+5. One writer. Server `export_flow` produces both the JSON and the YAML. The page does not serialize the file a second time.
