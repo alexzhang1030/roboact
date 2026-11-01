@@ -3,17 +3,23 @@
 from __future__ import annotations
 
 import asyncio
+import itertools
+import time
 
 import pytest
-from roboact.adapter import FAKE_NOTE_ACTION, CancelSpec, FakeAdapter
+from roboact.adapter import FAKE_ACTIONS, FAKE_NOTE_ACTION, CancelSpec, FakeAdapter
 from roboact.errors import ApiError
 from roboact.nodes import bind_adapter, get_type, list_specs, rejected_actions
 
 from tests.helpers import adapter_ctx, boot, run_until, wait_status
 from tests.test_a23_a37 import pose_flow
 
-PARK = {"x": 0.0, "y": 0.0, "z": 0.0}
 TARGET = {"x": 0.4, "y": 0.1, "z": 0.2}
+# r1–r6 step 6: a finish_step action never runs past 10 s.
+FINISH_STEP_MAX_S = 10.0
+# Fixed interval for the post-stop reads. The limit is the adapter's goal tolerance.
+HOLD_READS = 4
+HOLD_INTERVAL_S = 0.05
 
 
 def _motion_row(action_id: str, *, cancel: dict) -> dict:
@@ -88,8 +94,34 @@ async def _wait_call(adapter: FakeAdapter, action: str, timeout: float = 2.0) ->
     raise TimeoutError(adapter.calls)
 
 
+def _pose_delta(a: dict[str, float], b: dict[str, float]) -> float:
+    return max(abs(float(a[k]) - float(b[k])) for k in ("x", "y", "z"))
+
+
+async def _held_samples(adapter: FakeAdapter) -> list[tuple[dict[str, float], bool]]:
+    """Read pose and grip several times at one fixed interval, after the stop."""
+    samples: list[tuple[dict[str, float], bool]] = []
+    for i in range(HOLD_READS):
+        if i:
+            await asyncio.sleep(HOLD_INTERVAL_S)
+        pose = (await adapter.read_state("fake_set_pose"))["pose"]
+        open_ = bool((await adapter.read_state("fake_gripper"))["open"])
+        samples.append((pose, open_))
+    return samples
+
+
+def _assert_held(adapter: FakeAdapter, samples: list[tuple[dict[str, float], bool]]) -> None:
+    tol = float(adapter.goal_tolerance)
+    assert len(samples) >= 3
+    for (pose_a, open_a), (pose_b, open_b) in itertools.pairwise(samples):
+        assert _pose_delta(pose_a, pose_b) <= tol
+        assert open_a is open_b
+    assert all(open_ is False for _, open_ in samples)
+    assert samples[-1][0] != adapter.safe_pose_target
+
+
 def test_stop_holds_motion_and_gripper(tmp_path) -> None:
-    """r1–r6 step 6: Stop asks for hold; read-back matches that instant."""
+    """r1–r6 step 6: hold, then settled reads stay inside the goal tolerance."""
 
     async def go() -> None:
         adapter = FakeAdapter()
@@ -110,23 +142,58 @@ def test_stop_holds_motion_and_gripper(tmp_path) -> None:
             grip_task = asyncio.create_task(adapter.execute("fake_gripper", {"open": True}))
             await _wait_call(adapter, "fake_gripper")
             out = await ex.stop_run(rid)
-            held = adapter.state_at_hold
-            assert held is not None
             assert out["status"] == "stopping"
-            assert out["readback"]["state"]["pose"] == held["pose"]
             asked = [row for row in adapter.cancel_calls if row.get("post_cancel") == "hold"]
             assert {row["action_id"] for row in asked} >= {"fake_set_pose", "fake_gripper"}
             st = await wait_status(ex, rid, "stopped", timeout=3)
             assert st.status == "stopped"
             grip_result = await grip_task
             assert grip_result.success is False
-            await asyncio.sleep(1.5)
-            later_pose = (await adapter.read_state("fake_set_pose"))["pose"]
-            later_open = (await adapter.read_state("fake_gripper"))["open"]
-            assert later_pose == held["pose"]
-            assert later_open is held["open"] is False
-            assert later_pose != TARGET
-            assert later_pose != PARK
+            samples = await _held_samples(adapter)
+            _assert_held(adapter, samples)
+            assert samples[-1][0] != TARGET
+        finally:
+            await hub.stop()
+
+    asyncio.run(go())
+
+
+def test_finish_step_stop_runs_to_end_then_holds_within_10s(tmp_path) -> None:
+    """r1–r6 step 6: a finish_step action runs to its end, then holds, within 10 s."""
+
+    async def go() -> None:
+        adapter = FakeAdapter()
+        adapter.pose = {"x": 0.2, "y": -0.3, "z": 0.5}
+        adapter.gripper_open = False
+        adapter.async_steps = 4
+        adapter.async_sleep_s = 0.08
+        raw = next(a.model_dump() for a in FAKE_ACTIONS if a.id == "fake_set_pose")
+        raw["timeout_s"] = 4
+        raw["cancel"] = {
+            "cancellable": True,
+            "post_cancel": "finish_step",
+            "after": "finish_step",
+        }
+        adapter.drop_action_ids.add("fake_set_pose")
+        adapter.extra_raw_actions.append(raw)
+        ex, store, adapter, hub = adapter_ctx(tmp_path, adapter)
+        try:
+            desc = get_type("fake_set_pose").action_desc
+            assert desc is not None
+            assert desc.cancel.cancellable is False
+            assert desc.cancel.post_cancel == "hold"
+            assert float(desc.timeout_s) <= FINISH_STEP_MAX_S
+            rid, _ = await run_until(ex, store, pose_flow(), "running", timeout=2)
+            await _wait_call(adapter, "fake_set_pose")
+            started = float(adapter.goal_sent_at or time.monotonic())
+            out = await ex.stop_run(rid)
+            assert out["status"] == "stopping"
+            assert adapter.cancel_calls == []
+            st = await wait_status(ex, rid, "stopped", timeout=FINISH_STEP_MAX_S)
+            assert st.status == "stopped"
+            assert time.monotonic() - started <= FINISH_STEP_MAX_S
+            assert adapter.pose == TARGET
+            _assert_held(adapter, await _held_samples(adapter))
         finally:
             await hub.stop()
 
@@ -155,7 +222,7 @@ def test_noncancellable_runs_to_end_then_holds(tmp_path) -> None:
             assert adapter.pose == TARGET
             await asyncio.sleep(0.3)
             assert (await adapter.read_state("fake_set_pose"))["pose"] == TARGET
-            assert adapter.pose != PARK
+            assert adapter.pose != adapter.safe_pose_target
         finally:
             await hub.stop()
 
