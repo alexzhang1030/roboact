@@ -290,14 +290,17 @@ def _configure_motion(base: str, **body: object) -> None:
 
 
 def _cut_to_operator_lost(
-    page, proxy: TcpProxy, base: str, *, wait_s: float = 20.0
+    page, proxy: TcpProxy, base: str, *, wait_s: float = 20.0, already_cut: bool = False
 ) -> tuple[float, dict]:
     """Cut the page mid-`go`. Return (seconds from cut to pause, snap)."""
-    _click_run(page)
-    _wait_run(page, "running", timeout=20000)
-    rid = _run_id(page)
-    _wait_node_running(base, rid, "go")
-    time.sleep(0.4)
+    if not already_cut:
+        _click_run(page)
+        _wait_run(page, "running", timeout=20000)
+        rid = _run_id(page)
+        _wait_node_running(base, rid, "go")
+        time.sleep(0.4)
+    else:
+        rid = _run_id(page)
     recs_at_cut = list(http_json(base, f"/api/runs/{rid}").get("records") or [])
     assert not any(r.get("node_id") == "grip" for r in recs_at_cut), recs_at_cut
     http_json(base, "/api/test/adapter", "POST", {"clear_cancel_calls": True})
@@ -480,12 +483,18 @@ def test_r16_cancellable_cut_pauses_within_10s(server):
 
 
 def test_r16_noncancellable_runs_to_end(server):
-    """r1–r6 step 2: non-cancellable timeout_s ≤ 10, runs to end, then pause."""
+    """r1–r6 step 2: non-cancellable timeout_s ≤ 10, runs to end, then pause.
+
+    The action's own 10 s deadline and the 10 s page-loss clock start together.
+    A fresh UI beat makes loss detection land after that deadline, so the run
+    errors instead of pausing. Age the last beat by 4 s first: loss is then
+    detected while the 8 s action is still inside its 10 s timeout.
+    """
     put_flow(server["base"], motion_graph("r16 noncancellable"))
     _configure_motion(
         server["base"],
         async_steps=1,
-        async_sleep_s=10.3,
+        async_sleep_s=8.0,
         action_updates={
             "fake_set_pose": {
                 "timeout_s": 10,
@@ -498,7 +507,19 @@ def test_r16_noncancellable_runs_to_end(server):
     try:
         br = _browser(p)
         page, _blocked, _errs = _open(br, proxy.base)
-        dt, snap = _cut_to_operator_lost(page, proxy, server["base"], wait_s=20)
+        _click_run(page)
+        _wait_run(page, "running", timeout=20000)
+        rid = _run_id(page)
+        _wait_node_running(server["base"], rid, "go")
+        page.evaluate("() => window.__af.stopBeat()")
+        time.sleep(0.3)
+        http_json(
+            server["base"],
+            "/api/test/ui-seen",
+            "POST",
+            {"run_id": rid, "ago_s": 4},
+        )
+        dt, snap = _cut_to_operator_lost(page, proxy, server["base"], wait_s=20, already_cut=True)
         calls = http_json(server["base"], "/api/test/adapter").get("cancel_calls") or []
         recs = list(snap.get("records") or [])
         go = [r for r in recs if r.get("node_id") == "go"]
