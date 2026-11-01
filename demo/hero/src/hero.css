@@ -1,0 +1,563 @@
+/* Tokens copied from web/css/app.css. Names match that file.
+   Light values are :root. Dark values are [data-theme="dark"]. */
+
+@font-face {
+  font-family: "Inter";
+  src: url("../../../fonts/InterVariable.woff2") format("woff2");
+  font-weight: 100 900;
+  font-display: block;
+}
+@font-face {
+  font-family: "JetBrains Mono";
+  src: url("../../../fonts/JetBrainsMono-Regular.woff2") format("woff2");
+  font-weight: 400;
+  font-display: block;
+}
+@font-face {
+  font-family: "JetBrains Mono";
+  src: url("../../../fonts/JetBrainsMono-Medium.woff2") format("woff2");
+  font-weight: 500 700;
+  font-display: block;
+}
+
+html,
+body,
+#root {
+  margin: 0;
+  background: #f6f6f4; /* --bg */
+}
+
+.hero .ss-stage {
+  /* app.css :root */
+  --bg: #f6f6f4;
+  --grid: #e2e2dd;
+  --surface: #ffffff;
+  --text: #1a1a18;
+  --muted: #5c5c57;
+  --border: #c9c9c3;
+  --edge: #8a8a84;
+  --blue: #1f6feb;
+  --green: #1a7f37;
+  --hair: #e6e6e1;
+  /* Primary label. Not in the brief's map list; app.css --onblue. Run is unreadable without it. */
+  --onblue: #ffffff;
+  --shadow: 0 1px 2px rgb(0 0 0 / 0.06); /* app.css --shadow */
+  --font: "Inter", "PingFang SC", "Microsoft YaHei", "Noto Sans CJK SC", "Noto Sans SC", sans-serif;
+  --mono: "JetBrains Mono", ui-monospace, monospace;
+  --top: 44px; /* app.css --top */
+  --left: 220px; /* app.css --left */
+
+  --ss-canvas: var(--bg);
+  --ss-surface: var(--surface);
+  --ss-chrome: var(--surface);
+  --ss-line: var(--border);
+  --ss-line-faint: var(--hair);
+  --ss-text-strong: var(--text);
+  --ss-text: var(--muted);
+  --ss-text-faint: var(--muted);
+  --ss-icon: var(--muted);
+  --ss-icon-faint: var(--muted);
+  --ss-accent: var(--blue);
+  --ss-success: var(--green);
+  --ss-font: var(--font);
+  --ss-mono: var(--mono);
+  --ss-radius-sm: 4px;
+  --ss-radius-md: 4px;
+  --ss-radius-lg: 4px;
+  --ss-radius-window: 0px;
+  --ss-ground-radius: 0px;
+  --ss-ink-1: var(--hair);
+  --ss-ink-2: var(--hair);
+  --ss-ink-3: var(--hair);
+  --ss-ink-4: var(--hair);
+  --ss-ink-5: var(--hair);
+  --ss-shadow-hero: none;
+  --ss-shadow-window: none;
+  --ss-shadow-satellite: none;
+  --ss-shadow-ground: none;
+  --ss-shadow-float: none;
+  --ss-shadow-card: none;
+  --ss-shadow-lift: none;
+
+  overflow: hidden;
+  border-radius: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font);
+  font-size: 13px; /* --fs-13 */
+  line-height: 20px; /* --lh-13 */
+  font-weight: 400;
+  font-feature-settings: "cv05" 1;
+}
+
+.hero .ss-stage[data-theme="dark"] {
+  /* app.css [data-theme="dark"] */
+  --bg: #141413;
+  --grid: #2a2a27;
+  --surface: #1e1e1c;
+  --text: #ecece8;
+  --muted: #a3a39c;
+  --border: #3d3d39;
+  --edge: #77776f;
+  --blue: #4c8df6;
+  --green: #3fb950;
+  --hair: #2e2e2b;
+  --onblue: #0b1220;
+  --shadow: none;
+  background: var(--bg);
+  color: var(--text);
+}
+
+.app {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 1680px;
+  height: 980px;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font);
+}
+
+.top {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 1680px;
+  height: var(--top);
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  z-index: 4;
+}
+
+.top-vis {
+  width: 1200px;
+  height: var(--top);
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) max-content minmax(max-content, 1fr);
+  align-items: center;
+  column-gap: 12px;
+  padding: 0 12px;
+  white-space: nowrap;
+}
+
+.top-left,
+.top-mid,
+.top-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.top-left {
+  gap: 12px;
+}
+
+.top-mid {
+  justify-content: center;
+}
+
+.top-right {
+  justify-content: flex-end;
+  gap: 12px;
+  font-family: var(--mono);
+  font-size: 12px;
+  line-height: 18px;
+  font-variant-numeric: tabular-nums;
+}
+
+.flow-name {
+  font-size: 14px; /* --fs-14 */
+  line-height: 20px;
+  font-weight: 600;
+  color: var(--text);
+  background: transparent;
+  border: 0;
+  padding: 0 4px;
+  height: 28px;
+}
+
+.sim {
+  color: var(--muted);
+  font-family: var(--font);
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.steps {
+  color: var(--text);
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.conn {
+  color: var(--text);
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.run-word {
+  min-width: 6.6em;
+  font-size: 12px;
+  line-height: 18px;
+  font-weight: 400;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.btn {
+  height: 28px;
+  border-radius: 4px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text);
+  padding: 0 12px;
+  font-family: var(--font);
+  font-size: 13px;
+  line-height: 20px;
+  font-weight: 400;
+  white-space: nowrap;
+  cursor: default;
+}
+
+.btn.primary {
+  position: relative;
+  background: var(--blue);
+  border-color: var(--blue);
+  color: var(--onblue);
+}
+
+.btn:disabled {
+  color: var(--muted);
+  background: var(--bg);
+  border-color: var(--border);
+}
+
+.aim {
+  position: absolute;
+  right: 3px;
+  bottom: 3px;
+  width: 8px;
+  height: 8px;
+}
+
+.palette {
+  position: absolute;
+  left: 0;
+  top: var(--top);
+  width: var(--left);
+  bottom: 0;
+  background: var(--surface);
+  border-right: 1px solid var(--border);
+  padding: 8px;
+  z-index: 3;
+}
+
+.group {
+  margin: 12px 8px 4px;
+  font-size: 12px;
+  line-height: 18px;
+  font-weight: 500;
+  color: var(--muted);
+}
+
+.group:first-child {
+  margin-top: 4px;
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 32px;
+  padding: 0 8px;
+  border-radius: 4px;
+  color: var(--text);
+  font-size: 13px;
+  line-height: 20px;
+}
+
+.canvas {
+  position: absolute;
+  left: var(--left);
+  top: var(--top);
+  right: 0;
+  bottom: 0;
+  background: var(--bg);
+  z-index: 0;
+}
+
+.canvas::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: var(--grid);
+  pointer-events: none;
+  /* 1px dots on the 20px lattice. Mask, not a painted gradient. */
+  -webkit-mask-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='20' height='20'><circle cx='1' cy='1' r='1' fill='black'/></svg>");
+  mask-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='20' height='20'><circle cx='1' cy='1' r='1' fill='black'/></svg>");
+  -webkit-mask-size: 20px 20px;
+  mask-size: 20px 20px;
+  -webkit-mask-position: -1px 15px;
+  mask-position: -1px 15px;
+  -webkit-mask-repeat: repeat;
+  mask-repeat: repeat;
+}
+
+.right-panel {
+  position: absolute;
+  left: 1280px;
+  top: var(--top);
+  width: 360px; /* app.css --right */
+  bottom: 0;
+  background: var(--surface);
+  border-left: 1px solid var(--border);
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  z-index: 3;
+}
+
+.fn {
+  position: absolute;
+  box-sizing: border-box;
+  width: var(--node-w);
+  border: 1px solid var(--border);
+  border-radius: 6px; /* web/css/app.css .fn */
+  background: var(--surface);
+  box-shadow: var(--shadow);
+  z-index: 2;
+  color: var(--text);
+}
+
+.fn[data-status="running"] {
+  border-color: var(--blue);
+}
+
+.fn-title {
+  height: var(--title-h);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 12px;
+  border-bottom: 1px solid var(--border);
+  font-size: 14px;
+  line-height: 20px;
+  font-weight: 600;
+}
+
+.fn-name {
+  flex: none;
+  white-space: nowrap;
+  overflow: visible;
+}
+
+.fn-st {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 4px;
+  flex: none;
+  /* Longest title-row status is "Running". A fixed slot keeps the word's x still. */
+  width: auto;
+  font-size: 12px;
+  line-height: 18px;
+  font-weight: 400;
+  color: var(--muted);
+}
+
+.fn[data-status="running"] .fn-st {
+  color: var(--blue);
+}
+
+.fn-st-word {
+  display: block;
+  width: 7ch;
+  flex: none;
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  overflow: visible;
+  transition: color 0.35s linear;
+}
+
+.fn-sum {
+  height: 18px;
+  padding: 0 12px;
+  display: flex;
+  align-items: center;
+  font-family: var(--mono);
+  font-size: 12px;
+  line-height: 18px;
+  font-variant-numeric: tabular-nums;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.fn-port {
+  position: relative;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  padding: 0 12px;
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--muted);
+}
+
+.fn-port.out {
+  justify-content: flex-end;
+}
+
+.fn-param {
+  height: 22px;
+  display: flex;
+  align-items: center;
+  padding: 0 12px 6px;
+}
+
+.handle {
+  position: absolute;
+  top: 50%;
+  width: 16px;
+  height: 16px;
+  margin-top: -8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.handle.in {
+  left: -9px;
+}
+
+.handle.out {
+  right: -9px;
+}
+
+.dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--edge);
+  border: 1px solid var(--surface);
+  box-sizing: border-box;
+}
+
+.ico-slot {
+  width: 16px;
+  height: 16px;
+  flex: none;
+  overflow: hidden;
+  display: block;
+}
+
+.ico {
+  width: 16px;
+  height: 16px;
+  display: block;
+  background-color: currentColor;
+  color: var(--muted);
+  -webkit-mask: var(--ico) center / contain no-repeat;
+  mask: var(--ico) center / contain no-repeat;
+}
+
+.ico[data-kind="running"] {
+  color: var(--blue);
+  animation: spin 1s linear infinite;
+}
+
+.ico[data-kind="done"] {
+  color: var(--green);
+}
+
+.fn-grip {
+  left: 0;
+  top: 0;
+  will-change: transform;
+  transition: opacity 0.28s linear;
+}
+
+.fn-grip[data-leaving] {
+  opacity: 0;
+}
+
+.wires {
+  position: absolute;
+  left: 0;
+  top: 0;
+  z-index: 1;
+  pointer-events: none;
+  overflow: visible;
+}
+
+.wire {
+  fill: none;
+  stroke: var(--edge);
+  stroke-width: 1.5;
+  stroke-linecap: round;
+}
+
+.wire-new {
+  animation: edge-in 0.4s linear both;
+}
+
+.wire-new[data-leaving] {
+  animation: none;
+  opacity: 0;
+  transition: opacity 0.28s linear;
+}
+
+@keyframes edge-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(1turn);
+  }
+}
+
+.marker {
+  position: absolute;
+  width: 8px;
+  height: 8px;
+  opacity: 0;
+  pointer-events: none;
+  z-index: 0;
+}
+
+.hold {
+  left: calc(var(--node-w) / 2 - 5px);
+  top: calc(var(--title-h) + 36px);
+}
+
+.pick {
+  position: absolute;
+  width: 140px;
+  height: 32px;
+  opacity: 0;
+  pointer-events: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ico[data-kind="running"] {
+    animation: none;
+  }
+  .wire-new,
+  .fn-st-word,
+  .fn-grip,
+  .wire-new[data-leaving] {
+    animation: none;
+    transition: none;
+  }
+}

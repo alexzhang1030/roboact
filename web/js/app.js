@@ -232,6 +232,11 @@ const App = defineComponent({
       return t('run.motion_timeout_cap', { node: errs[0].node })
     })
     const timeoutCapIds = computed(() => ((runCheck.value && runCheck.value.timeout_errors) || []).map(e => e.node_id).filter(Boolean))
+    const noCancelTooLongCount = computed(() => {
+      void locale.value
+      const n = ((runCheck.value && runCheck.value.timeout_errors) || []).length
+      return n ? countLabel('run.no_cancel_too_long_count', n) : ''
+    })
     const adapterLabel = computed(() => { void locale.value; return serverLabel(adapter.value && adapter.value.name) })
     const flowNameLabel = computed(() => { void locale.value; return serverLabel(meta.value && meta.value.name) || t('flow.untitled') })
     const slot2Disabled = computed(() => controlsOff.value || !isPaused.value || waitingApproval.value || needsReadback.value || (adapterLost.value && adapterDown.value))
@@ -321,7 +326,9 @@ const App = defineComponent({
     const showLostReadback = computed(() => !!(isPaused.value && operatorLost.value && readback.value))
     const selectedCancelRejected = computed(() => {
       const s = selected.value && nodeStatus[selected.value]
-      return !!(s && (s.status === 'cancel_rejected' || s.state === 'cancel_rejected'))
+      if (s && (s.status === 'cancel_rejected' || s.state === 'cancel_rejected')) return true
+      const pause = run.value && run.value.pause
+      return !!(pause && pause.lost_outcome === 'cancel_rejected' && pause.node_id === selected.value)
     })
     watch(waitingApproval, v => { if (v) bannerClock.approval = Date.now() })
     watch(versionWarn, v => { if (v) bannerClock.version = Date.now() })
@@ -354,6 +361,33 @@ const App = defineComponent({
       return { kind: 'ok', text: (serverLabel(a.name) || a.name || '') + (a.target ? ' · ' + a.target : '') + when }
     })
     const typeLabel = (spec) => actionLabel(spec, locale.value)
+    function formatSeconds(v) {
+      const n = Number(v)
+      if (!Number.isFinite(n)) return v == null ? '' : String(v)
+      const r = Math.round(n * 10) / 10
+      return Number.isInteger(r) ? String(r) : r.toFixed(1)
+    }
+    function uncancellable(spec) {
+      const cancel = spec && spec.action && spec.action.cancel
+      return !!(cancel && cancel.cancellable === false)
+    }
+    function nodeTitle(nid) {
+      const n = nodes.value.find(x => x.id === nid)
+      if (!n) return nid || ''
+      if (n.data && n.data.title) return n.data.title
+      return typeLabel(specOf(n)) || nid || ''
+    }
+    const lostLine = computed(() => {
+      void locale.value
+      if (!operatorLost.value || !run.value || !run.value.pause) return ''
+      const pause = run.value.pause
+      const outcome = pause.lost_outcome
+      const name = nodeTitle(pause.node_id)
+      if (outcome === 'cancelled') return t('lost.cancelled', { node: name })
+      if (outcome === 'ran_to_end') return t('lost.ran_to_end', { node: name, s: formatSeconds(pause.lost_extra_s) })
+      if (outcome === 'cancel_rejected') return t('lost.cancel_rejected', { node: name })
+      return ''
+    })
     const filteredTypes = computed(() => {
       void locale.value
       const qv = addQ.value.trim()
@@ -559,11 +593,23 @@ const App = defineComponent({
     function applyImportMarks() {
       const gone = new Set((runCheck.value && runCheck.value.action_gone) || [])
       const missing = new Set((runCheck.value && runCheck.value.missing_input) || [])
+      const tooLong = new Map()
+      for (const e of ((runCheck.value && runCheck.value.timeout_errors) || [])) {
+        if (e && e.node_id) tooLong.set(e.node_id, e)
+      }
+      const live = !!(run.value && (run.value.status === 'running' || run.value.status === 'paused'))
       for (const n of nodes.value) {
         const cur = nodeStatus[n.id] || {}
         if (gone.has(n.id)) nodeStatus[n.id] = { status: 'action_missing', state: 'action_missing' }
         else if (missing.has(n.id)) nodeStatus[n.id] = { status: 'missing_input', state: 'missing_input' }
-        else if (cur.status === 'action_missing' || cur.status === 'missing_input') {
+        else if (!live && tooLong.has(n.id)) {
+          const e = tooLong.get(n.id)
+          nodeStatus[n.id] = {
+            status: 'error', state: 'error', no_cancel_too_long: true,
+            timeout_s: e.timeout_s, node_label: e.node,
+          }
+        }
+        else if (cur.status === 'action_missing' || cur.status === 'missing_input' || cur.no_cancel_too_long) {
           nodeStatus[n.id] = { status: 'idle', state: 'idle' }
         }
       }
@@ -1280,7 +1326,7 @@ const App = defineComponent({
       jumpToFirst, runLocked, runLockedText, actionGoneCount, missingInputCount, timeoutCapText,
       adapterLost, uiLost, operatorLost, rejectedActions, resolveMotion, theme, themeMode, setThemeMode,
       applyTheme, selected, tab, toggleTheme, locale, localeMode, setLocaleMode, motion, motionMode,
-      setMotionMode, t, leftOpen, rightW, showMini, meta, groups, logFilter,
+      setMotionMode, t, leftOpen, rightW, showMini, meta, groups, logFilter, stopBeat,
     }
 
     return {
@@ -1289,7 +1335,7 @@ const App = defineComponent({
       motion, motionMode, motionOpen, pickMotion, savedViewport, defaultViewport, persistViewportNow, logFilter,
       showMini, showGrid, addMenu, addQ, rejectMsg, overlay, specOf, t, typeLabel, fieldLabel, groupTitle, slot1Key,
       adapterLabel, flowNameLabel, nameEditing, topEl, runLocked, runLockedText, slot1Title,
-      actionGoneCount, missingInputCount, timeoutCapText, timeoutCapIds, jumpToFirst, onNameClick, startNameEdit, finishNameEdit, fitTopBar,
+      actionGoneCount, missingInputCount, timeoutCapText, timeoutCapIds, noCancelTooLongCount, lostLine, uncancellable, jumpToFirst, onNameClick, startNameEdit, finishNameEdit, fitTopBar,
       nodeRecords, logRecords, rounds, shownRec, viewRound, runActive, waitingApproval, confirmNote, versionWarn, stepsClass, stepsText,
       filteredTypes, paletteTypes, paletteGroups, paletteStatus, groupBoxes, portSources, stepLimit, overrides, singleRound, compareA, compareB, compareOut,
       deadlineAdapterOnly, outputImages, isReal, crashRecovery, selectedSpec,
@@ -1333,8 +1379,9 @@ const App = defineComponent({
           <span class="run-locked" v-if="runLockedText" data-testid="run-locked">{{ runLockedText }}</span>
           <span class="run-counts" data-testid="count-action-gone" v-if="actionGoneCount" @click="jumpToFirst(runCheck.action_gone)">{{ actionGoneCount }}</span>
           <span class="run-counts missing" data-testid="count-missing-input" v-if="missingInputCount" @click="jumpToFirst(runCheck.missing_input)">{{ missingInputCount }}</span>
-          <span class="run-counts" data-testid="motion-timeout-cap" v-if="timeoutCapText" @click="jumpToFirst(timeoutCapIds)">{{ timeoutCapText }}</span>
+          <span class="run-counts" data-testid="motion-timeout-cap" v-if="noCancelTooLongCount" @click="jumpToFirst(timeoutCapIds)">{{ noCancelTooLongCount }}</span>
         </div>
+        <p class="lost-line" data-testid="lost-line" v-if="lostLine">{{ lostLine }}</p>
         <div class="mismatch" :class="{ out: mismatchFade }" v-if="mismatch">{{ mismatch }}</div>
       </div>
       <div class="right">
@@ -1425,7 +1472,7 @@ const App = defineComponent({
             <h3>{{ groupTitle(g.name) }}</h3>
             <div class="nt" v-for="item in g.items" :key="item.type" draggable="true"
                  @dragstart="onPaletteDrag($event, item.type)" @dblclick="addNode(item.type)">
-              <span class="ic" v-if="item.icon" :style="{ '--ico': 'url(/vendor/icons/' + item.icon + '.svg)' }"></span><span v-else class="ic">▢</span><span>{{ typeLabel(item) }}</span>
+              <span class="ic" v-if="item.icon" :style="{ '--ico': 'url(/vendor/icons/' + item.icon + '.svg)' }"></span><span v-else class="ic">▢</span><span class="nt-name">{{ typeLabel(item) }}</span><span v-if="uncancellable(item)" class="nt-no-cancel" data-testid="palette-no-cancel">{{ t('node.no_cancel') }}</span>
             </div>
           </div>
           <div v-if="rejectedActions.length" class="pal-group">

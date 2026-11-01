@@ -96,6 +96,7 @@ export function serverLabel(value, keys) {
 const EN_COUNT_ONE = {
   'run.action_missing_count': '1 missing action',
   'run.missing_input_count': '1 node needs input',
+  'run.no_cancel_too_long_count': '1 node can\'t be cancelled and runs too long',
 }
 
 export function countLabel(key, n) {
@@ -190,10 +191,6 @@ export function statusWord(st) {
   if (status === 'awaiting_approval') return t('status.awaiting')
   if (status === 'done') {
     if (st.side_effect_mode === 'mock' || st.mocked) return t('status.done_mock')
-    if (st.duration_ms != null) {
-      const ms = st.duration_ms
-      return ms < 10 ? t('status.done_ms', { ms: Math.round(ms) }) : t('status.done_s', { s: (ms / 1000).toFixed(1) })
-    }
     return t('status.done')
   }
   const key = 'status.' + status

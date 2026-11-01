@@ -114,6 +114,10 @@ class RunCtrl:
     wait_max_s: float | None = None
     pending_operator_lost: bool = False
     operator_lost_cancel_rejected: bool = False
+    operator_lost_at: float = 0.0
+    operator_lost_outcome: str | None = None
+    operator_lost_extra_s: int | float | None = None
+    operator_lost_keep_node: bool = False
     last_paused_at_ms: float = 0.0
 
 
@@ -1265,6 +1269,10 @@ class Executor:
         ctrl.current_started = time.monotonic()
         ctrl.pending_operator_lost = False
         ctrl.operator_lost_cancel_rejected = False
+        ctrl.operator_lost_at = 0.0
+        ctrl.operator_lost_outcome = None
+        ctrl.operator_lost_extra_s = None
+        ctrl.operator_lost_keep_node = False
         ctrl.step_phase = start_phase
         ctrl.wait_started = time.monotonic()
         ctrl.wait_max_s = (
@@ -1296,6 +1304,8 @@ class Executor:
         async def on_progress(p: Progress) -> None:
             nonlocal saw_progress
             saw_progress = True
+            if (ctrl.node_state.get(nid) or {}).get("state") == "cancel_rejected":
+                return
             self._set_node(
                 ctrl,
                 nid,
@@ -1328,6 +1338,8 @@ class Executor:
                         )
                         continue
                     if saw_progress:
+                        continue
+                    if (ctrl.node_state.get(nid) or {}).get("state") == "cancel_rejected":
                         continue
                     secs = int(time.monotonic() - ctrl.current_started)
                     self._set_node(ctrl, nid, "running", rnd, step, elapsed_s=secs)
@@ -1742,10 +1754,13 @@ class Executor:
         desc = getattr(type(inst), "action_desc", None)
         cancellable = True if desc is None else bool(desc.cancel.cancellable)
         ctrl.pending_operator_lost = True
+        ctrl.operator_lost_at = time.monotonic()
         if not cancellable:
+            ctrl.operator_lost_outcome = "ran_to_end"
             return
         result = await inst.cancel()
         ctrl.cancel_called[ctrl.current_nid or ""] = True
+        ctrl.operator_lost_outcome = "cancelled"
         if result and not result.accepted:
             nid = ctrl.current_nid
             if nid:
@@ -1759,6 +1774,7 @@ class Executor:
                     error_summary="cancel_rejected",
                 )
             ctrl.operator_lost_cancel_rejected = True
+            ctrl.operator_lost_outcome = "cancel_rejected"
 
     def _operator_lost_from_cancel(self, status: str, err: dict[str, Any] | None) -> bool:
         if status == "interrupted_unknown":
@@ -1811,15 +1827,53 @@ class Executor:
         except Exception as e:
             await self._pause(ctrl, "storage_error", nid, "after", inputs, rnd, message=str(e))
             return
+        prior = ctrl.operator_lost_outcome
         if ctrl.operator_lost_cancel_rejected:
+            outcome = "cancel_rejected"
+        elif prior == "ran_to_end" and status == "done":
+            outcome = "ran_to_end"
+        elif status == "stopped" and prior != "ran_to_end":
+            outcome = "cancelled"
+        else:
+            outcome = None
+        ctrl.operator_lost_outcome = outcome
+        ctrl.operator_lost_extra_s = None
+        ctrl.operator_lost_keep_node = outcome is not None
+        if outcome == "cancel_rejected":
+            # Refusal is shown while the action is still running. Once it
+            # finishes, the node keeps done (ui-spec §16); the pause line
+            # still says the robot refused the cancel.
             self._set_node(
                 ctrl,
                 nid,
-                "cancel_rejected",
+                "done" if status == "done" else "cancel_rejected",
                 rnd,
                 step,
                 duration_ms=dt,
-                error_summary="cancel_rejected",
+                side_effect_mode=mode,
+            )
+        elif outcome == "cancelled":
+            self._set_node(
+                ctrl,
+                nid,
+                "stopped",
+                rnd,
+                step,
+                duration_ms=dt,
+                side_effect_mode=mode,
+            )
+        elif outcome == "ran_to_end":
+            elapsed = time.monotonic() - ctrl.operator_lost_at if ctrl.operator_lost_at else 0.0
+            extra = max(0.0, elapsed)
+            rounded = round(extra, 1)
+            ctrl.operator_lost_extra_s = int(rounded) if rounded == int(rounded) else rounded
+            self._set_node(
+                ctrl,
+                nid,
+                "done",
+                rnd,
+                step,
+                duration_ms=dt,
                 side_effect_mode=mode,
             )
         await self._pause(
@@ -1912,7 +1966,7 @@ class Executor:
         rnd: int = 0,
         message: str | None = None,
     ) -> dict[str, Any]:
-        return {
+        body: dict[str, Any] = {
             "pause_id": new_id("ps_"),
             "reason": reason,
             "node_id": node_id,
@@ -1922,6 +1976,12 @@ class Executor:
             "inputs": inputs,
             "message": message,
         }
+        if reason == "operator_lost" and ctrl.operator_lost_outcome:
+            body["lost_outcome"] = ctrl.operator_lost_outcome
+            extra_s = ctrl.operator_lost_extra_s
+            if ctrl.operator_lost_outcome == "ran_to_end" and extra_s is not None:
+                body["lost_extra_s"] = extra_s
+        return body
 
     def _wait_abort_reason(self, ctrl: RunCtrl) -> str | None:
         if ctrl.stop_flag:
@@ -1976,7 +2036,8 @@ class Executor:
             ctrl.pause["readback"] = await self._read_robot(ctrl, node_id)
         if node_id and state:
             cur = (ctrl.node_state.get(node_id) or {}).get("state")
-            if cur != "cancel_rejected":
+            keep = reason == "operator_lost" and ctrl.operator_lost_keep_node
+            if not keep and cur != "cancel_rejected":
                 self._set_node(ctrl, node_id, state, rnd, ctrl.steps_used)
         self.store.update_run(ctrl.run_id, status="paused", pause=ctrl.pause)
         payload = {
