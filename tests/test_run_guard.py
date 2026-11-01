@@ -454,3 +454,114 @@ def test_paused_and_finished_allow_single_node(tmp_path):
         await hub.stop()
 
     asyncio.run(go())
+
+
+def _cmds(store, rid: str) -> list[dict]:
+    return list(getattr(store, "_commands", {}).get(rid, []))
+
+
+def _slow_pose(node_id: str, *, y: int = 200) -> dict:
+    node = n(node_id, "fake_set_pose", x=280, y=y)
+    node["params"] = {"x": 0.2, "y": 0.1, "z": 0.2}
+    return node
+
+
+async def _until_running(ex, rid: str, adapter: FakeAdapter) -> None:
+    for _ in range(50):
+        st = ex.get(rid)
+        if st and st.status == "running" and adapter.calls:
+            return
+        await asyncio.sleep(0.02)
+    st = ex.get(rid)
+    raise TimeoutError(f"slow run did not stay running, status={st.status if st else None}")
+
+
+def test_resume_refused_while_another_run_is_executing(tmp_path):
+    """Continuing a paused run must not join a run that is already executing."""
+
+    async def go():
+        adapter = FakeAdapter()
+        adapter.async_steps = 30
+        adapter.async_sleep_s = 0.05
+        ex, store, adapter, hub = adapter_ctx(tmp_path, adapter)
+        gate = n("gate", "echo", breakpoints={"before": {"enabled": True}})
+        graph = make_flow(
+            [
+                n("start", "start", data={"v": 1}),
+                gate,
+                _slow_pose("slow"),
+            ],
+            [e("e0", "start", "data", "gate", "value")],
+        )
+        fid, ver = boot(store, graph)
+        paused_id = await ex.start_full(fid, ver)
+        paused = await wait_status(ex, paused_id, "paused")
+        assert paused.pause["reason"] == "breakpoint"
+        pause_id = paused.pause["pause_id"]
+        pause_before = dict(paused.pause)
+
+        running_id = await ex.start_node(fid, ver, "slow", request_id="slow-req")
+        await _until_running(ex, running_id, adapter)
+        assert await ex.start_node(fid, ver, "slow", request_id="slow-req") == running_id
+        with pytest.raises(ApiError) as fresh:
+            await ex.start_full(fid, ver, request_id="other-req")
+        assert fresh.value.status == 409
+        assert fresh.value.error == "run_in_progress"
+        assert [row["run_id"] for row in store.list_runs(fid)].count(running_id) == 1
+
+        for resume in (
+            ex.continue_run(paused_id, pause_id),
+            ex.step_run(paused_id, pause_id),
+        ):
+            with pytest.raises(ApiError) as err:
+                await resume
+            assert err.value.status == 409
+            assert err.value.error == "run_in_progress"
+            still = ex.get(paused_id)
+            assert still is not None
+            assert still.status == "paused"
+            assert still.pause is not None
+            assert still.pause["pause_id"] == pause_id
+            assert still.pause["reason"] == pause_before["reason"]
+            assert still.last_used_pause_id is None
+            assert all(cmd["result"] != "200" for cmd in _cmds(store, paused_id))
+
+        await wait_status(ex, running_id, "completed", "error", timeout=6)
+        resumed = await ex.continue_run(paused_id, pause_id)
+        assert resumed["status"] == "running"
+        after = await wait_status(ex, paused_id, "running", "completed", timeout=3)
+        assert after.status != "paused"
+
+        ask = make_flow(
+            [
+                n("start", "start", data={"v": 1}),
+                n("ask", "human_confirm", x=280),
+                n("out", "output", x=560),
+                _slow_pose("motion", y=240),
+            ],
+            [
+                e("a0", "start", "data", "ask", "value"),
+                e("a1", "ask", "pass", "out", "value"),
+            ],
+        )
+        fid2, ver2 = boot(store, ask)
+        approval_id = await ex.start_full(fid2, ver2)
+        approval = await wait_status(ex, approval_id, "paused")
+        assert approval.pause["reason"] == "approval"
+        approval_pause = approval.pause["pause_id"]
+        other = await ex.start_node(fid2, ver2, "motion")
+        await _until_running(ex, other, adapter)
+        with pytest.raises(ApiError) as denied:
+            await ex.approve(approval_id, approval_pause, "approve")
+        assert denied.value.status == 409
+        assert denied.value.error == "run_in_progress"
+        held = ex.get(approval_id)
+        assert held is not None
+        assert held.status == "paused"
+        assert held.pause is not None
+        assert held.pause["pause_id"] == approval_pause
+        assert held.decision is None
+        assert all(cmd["result"] != "200" for cmd in _cmds(store, approval_id))
+        await hub.stop()
+
+    asyncio.run(go())

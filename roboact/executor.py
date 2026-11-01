@@ -163,8 +163,10 @@ class Executor:
             self._admit_task = None
             self._admit.release()
 
-    def _refuse_if_flow_running(self, flow_id: str) -> None:
+    def _refuse_if_flow_running(self, flow_id: str, *, except_run_id: str | None = None) -> None:
         for ctrl in self.runs.values():
+            if except_run_id is not None and ctrl.run_id == except_run_id:
+                continue
             if ctrl.abandoned or ctrl.flow_id != flow_id or ctrl.status != "running":
                 continue
             raise ApiError(
@@ -825,35 +827,42 @@ class Executor:
                     raise ApiError(
                         409, "readback_required", "read robot state first, then retry or mark done"
                     )
-                if resolution == "mark_done":
-                    self._apply_mark_done(ctrl, edits)
-                elif resolution != "retry":
+                if resolution not in ("mark_done", "retry"):
                     raise ApiError(
                         409, "readback_required", "resolution must be retry or mark_done"
                     )
-            if edits and not (
-                reason in MOTION_RESOLVE_REASONS and side == "motion" and resolution == "mark_done"
-            ):
-                self._apply_edits(ctrl, edits)
             if reason == "adapter_lost" and not getattr(self.adapter, "connected", True):
                 raise ApiError(
                     409, "adapter_disconnected", "robot controller is still disconnected"
                 )
-            if reason in (
-                "breakpoint",
-                "restart",
-                "user",
-                "storage_error",
-                "write_timeout",
-                "adapter_lost",
-                "operator_lost",
-                "motion_timeout",
-            ):
-                ctrl.ignore_bp = (ctrl.pause.get("node_id"), ctrl.pause.get("when"))
-            ctrl.last_used_pause_id = pause_id
-            ctrl.step_mode = mode == "step"
-            ctrl.user_pause = False
             async with self._admitted():
+                self._refuse_if_flow_running(ctrl.flow_id, except_run_id=run_id)
+                if (
+                    reason in MOTION_RESOLVE_REASONS
+                    and side == "motion"
+                    and resolution == "mark_done"
+                ):
+                    self._apply_mark_done(ctrl, edits)
+                if edits and not (
+                    reason in MOTION_RESOLVE_REASONS
+                    and side == "motion"
+                    and resolution == "mark_done"
+                ):
+                    self._apply_edits(ctrl, edits)
+                if reason in (
+                    "breakpoint",
+                    "restart",
+                    "user",
+                    "storage_error",
+                    "write_timeout",
+                    "adapter_lost",
+                    "operator_lost",
+                    "motion_timeout",
+                ):
+                    ctrl.ignore_bp = (ctrl.pause.get("node_id"), ctrl.pause.get("when"))
+                ctrl.last_used_pause_id = pause_id
+                ctrl.step_mode = mode == "step"
+                ctrl.user_pause = False
                 ctrl.status = "running"
                 self.store.update_run(run_id, status="running", pause=None)
                 self.store.add_command(run_id, client_id, mode, pause_id, "200")
@@ -873,6 +882,7 @@ class Executor:
         resolution: str | None = None,
         readback_id: str | None = None,
     ) -> dict[str, Any]:
+        # Same admission check as continue: mode "step" still sets this run running.
         return await self.continue_run(
             run_id,
             pause_id,
@@ -966,13 +976,14 @@ class Executor:
                 raise ApiError(409, "not_paused", "this run is not waiting for confirmation")
             if decision not in ("approve", "reject"):
                 raise ApiError(422, "invalid_graph", "decision must be approve or reject")
-            ctrl.decision = {
-                "decision": decision,
-                "comment": comment,
-                "node_id": ctrl.pause.get("node_id"),
-            }
-            ctrl.last_used_pause_id = pause_id
             async with self._admitted():
+                self._refuse_if_flow_running(ctrl.flow_id, except_run_id=run_id)
+                ctrl.decision = {
+                    "decision": decision,
+                    "comment": comment,
+                    "node_id": ctrl.pause.get("node_id"),
+                }
+                ctrl.last_used_pause_id = pause_id
                 ctrl.status = "running"
                 self.store.update_run(run_id, status="running", pause=None)
                 self.store.add_command(run_id, client_id, "approve", pause_id, "200")
