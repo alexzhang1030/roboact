@@ -237,6 +237,8 @@ export default {
   'parse.yes': '是',
   'parse.note_content': '内容',
   'confirm.default': '请确认',
+  'confirm.set_pose': '将仿真末端移到目标位姿。',
+  'confirm.gripper': '张开或闭合仿真夹爪。',
   'node.echo': '回显',
   'node.inc': '递增',
   'node.nop': '空操作',

@@ -170,12 +170,17 @@ def test_motion_single_run_requires_confirm(tmp_path) -> None:
             with pytest.raises(ApiError) as ei:
                 await ex.start_node(fid, ver, "go")
             assert ei.value.error == "confirm_required"
+            wording = get_type("fake_set_pose").confirm_text
+            with pytest.raises(ApiError) as ei:
+                await ex.start_node(fid, ver, "go", confirm=wording)
+            assert ei.value.error == "confirm_required"
             assert adapter.goals_sent == []
-            text = get_type("fake_set_pose").confirm_text
-            rid = await ex.start_node(fid, ver, "go", confirm=text)
+            rid = await ex.start_node(fid, ver, "go", confirm=True)
             await _wait_call(adapter, "fake_set_pose")
             assert rid
             assert adapter.goals_sent
+            rid = await ex.start_node(fid, ver, "go", confirm="fake_set_pose")
+            assert rid
         finally:
             await hub.stop()
 

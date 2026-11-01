@@ -237,6 +237,8 @@ export default {
   'parse.yes': 'yes',
   'parse.note_content': 'content',
   'confirm.default': 'Please confirm',
+  'confirm.set_pose': 'Move the sim end-effector to the target pose.',
+  'confirm.gripper': 'Open or close the sim gripper.',
   'node.echo': 'Echo',
   'node.inc': 'Increment',
   'node.nop': 'No-op',

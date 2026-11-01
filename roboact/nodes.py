@@ -79,6 +79,7 @@ class NodeType:
     side_effect: ClassVar[SideEffect] = SideEffect.none
     side_effect_note: ClassVar[str] = ""
     confirm_text: ClassVar[str] = ""
+    confirm_labels: ClassVar[dict[str, str]] = {}
     timeout_s: ClassVar[float] = NODE_TIMEOUT_S
     typical_s: ClassVar[float | None] = None
     icon: ClassVar[str] = ""
@@ -698,6 +699,7 @@ def make_action_node(desc: ActionDescriptor, adapter: Adapter) -> type[NodeType]
         side_effect = side
         side_effect_note = desc.side_effect_note
         confirm_text = desc.confirm_text
+        confirm_labels = desc.confirm_labels
         timeout_s = desc.timeout_s
         typical_s = desc.typical_s
         icon = desc.icon or ("node-tool" if side == SideEffect.motion else "node-constant")
@@ -828,6 +830,7 @@ def as_public(cls: type[NodeType], adapter: Any = None) -> dict[str, Any]:
         "shows_write_mark": cls.side_effect in EXTERNAL_SIDES,
         "side_effect_note": cls.side_effect_note,
         "confirm_text": cls.confirm_text,
+        "confirm_labels": dict(cls.confirm_labels),
         "timeout_s": cls.timeout_s,
         "typical_s": cls.typical_s,
         "icon": cls.icon,

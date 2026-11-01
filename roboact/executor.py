@@ -22,7 +22,6 @@ from .adapter import (
     WaitAborted,
     image_summary,
 )
-from .catalog import en
 from .errors import ApiError
 from .flow_file import inspect_run, inspect_values, is_imported, unlock_valid
 from .graph import (
@@ -106,7 +105,7 @@ class RunCtrl:
     not_cancelled: list[str] = field(default_factory=list)
     recovery: dict[str, Any] | None = None
     adapter_lost_flag: bool = False
-    confirm: str | None = None
+    confirm: bool | str | None = None
     done_counts: dict[str, int] = field(default_factory=dict)
     influencing: dict[str, set[str]] | None = None
     hash_cache: dict[str, str] = field(default_factory=dict)
@@ -155,7 +154,7 @@ class Executor:
         parent_run_id: str | None = None,
         base_step: int = 0,
         seed_pending: list[dict] | None = None,
-        confirm: str | None = None,
+        confirm: bool | str | None = None,
         input_source_hint: str | None = None,
         entry_sources: dict | None = None,
         base_rounds: dict | None = None,
@@ -259,7 +258,7 @@ class Executor:
         node_id: str,
         input_spec: dict | None = None,
         side_effects: str = "default",
-        confirm: str | None = None,
+        confirm: bool | str | None = None,
         client_id: str = "",
         request_id: str | None = None,
         max_steps: int | None = None,
@@ -302,7 +301,7 @@ class Executor:
         node_ids: list[str],
         entries: dict | None = None,
         side_effects: str = "default",
-        confirm: str | None = None,
+        confirm: bool | str | None = None,
         client_id: str = "",
         request_id: str | None = None,
         max_steps: int | None = None,
@@ -354,7 +353,7 @@ class Executor:
         parent_id: str,
         step: int,
         side_effects: str = "default",
-        confirm: str | None = None,
+        confirm: bool | str | None = None,
         client_id: str = "",
     ) -> str:
         parent = self.store.get_run(parent_id)
@@ -545,11 +544,16 @@ class Executor:
             if not types_compatible(src_t, dst_t):
                 raise ApiError(400, "invalid_graph", "edge port types do not match", {"edge": e})
 
-    def _check_confirm(self, node: dict[str, Any], confirm: str | None) -> None:
+    def _motion_confirmed(self, node: dict[str, Any], confirm: bool | str | None) -> bool:
+        """Explicit confirm. Not the displayed sentence, so any locale is accepted."""
+        if confirm is True:
+            return True
+        return isinstance(confirm, str) and confirm.strip() == str(node.get("type") or "")
+
+    def _check_confirm(self, node: dict[str, Any], confirm: bool | str | None) -> None:
         cls = get_type(node["type"])
         if cls.side_effect == SideEffect.motion:
-            text = cls.confirm_text or en("confirm.default")
-            if confirm != text:
+            if not self._motion_confirmed(node, confirm):
                 raise ApiError(422, "confirm_required", "motion rerun needs confirmation")
             return
         text = cls.confirm_text

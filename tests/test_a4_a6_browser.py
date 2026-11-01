@@ -652,3 +652,44 @@ def test_motion_single_run_confirm_cancel_sends_nothing(server) -> None:
         br.close()
     finally:
         p.stop()
+
+
+def test_motion_single_run_zh_confirm_shows_chinese_and_accept_sends(server) -> None:
+    """zh-CN single run of Go to pose: Chinese dialog; accept sends, cancel does not."""
+    put_flow(server["base"], motion_graph("motion confirm zh"))
+    text = zh("confirm.set_pose")
+    assert text
+    p, _path = _launch()
+    try:
+        br = _browser(p)
+        page, _blocked, _errs = _open(br, server["base"])
+        page.evaluate("() => window.__af.setLocaleMode('zh-CN')")
+        page.wait_for_function("() => document.documentElement.dataset.lang === 'zh-CN'")
+        page.evaluate("() => { window.__af.selected.value = 'go'; window.__af.tab.value = 'in' }")
+        seen: list[str] = []
+        accept = {"on": False}
+
+        def _on_dialog(dialog) -> None:
+            seen.append(dialog.message)
+            if accept["on"]:
+                dialog.accept()
+            else:
+                dialog.dismiss()
+
+        page.on("dialog", _on_dialog)
+        page.get_by_role("button", name=zh("in.run_this")).click()
+        page.wait_for_timeout(400)
+        assert seen == [text], seen
+        assert page.evaluate("() => window.__af.run.value") in (None, False)
+        assert http_json(server["base"], "/api/runs")["runs"] == []
+        assert http_json(server["base"], "/api/test/adapter").get("goals_sent") == []
+        accept["on"] = True
+        with page.expect_response(lambda r: "/api/single-runs/node" in r.url) as sent:
+            page.get_by_role("button", name=zh("in.run_this")).click()
+        assert sent.value.status == 201, sent.value.status
+        page.wait_for_timeout(500)
+        goals = http_json(server["base"], "/api/test/adapter").get("goals_sent") or []
+        assert goals == ["fake_set_pose"], goals
+        br.close()
+    finally:
+        p.stop()

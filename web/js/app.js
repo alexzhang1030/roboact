@@ -973,6 +973,15 @@ const App = defineComponent({
       rebuildSources()
     }
 
+    function adapterConfirmText(spec) {
+      if (!spec) return ''
+      const labels = spec.confirm_labels || (spec.action && spec.action.confirm_labels)
+      if (labels && typeof labels === 'object') {
+        const hit = labels[locale.value] || labels.en
+        if (hit) return hit
+      }
+      return spec.confirm_text || ''
+    }
     function runSingle() {
       if (!selected.value) return
       const spec = specOf(selectedNode.value)
@@ -984,9 +993,9 @@ const App = defineComponent({
         source_round: singleRound.value,
       }
       if (spec && spec.side_effect === 'motion') {
-        const text = spec.confirm_text || CATALOGS.en['confirm.default']
+        const text = adapterConfirmText(spec) || t('confirm.default')
         if (!window.confirm(text)) return
-        extra.confirm = text
+        extra.confirm = true
       }
       doRun('single', extra)
     }

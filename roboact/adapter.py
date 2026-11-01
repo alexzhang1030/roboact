@@ -79,6 +79,7 @@ class ActionDescriptor(BaseModel):
     name: str | None = None
     side_effect_note: str = ""
     confirm_text: str = ""
+    confirm_labels: dict[str, str] = Field(default_factory=dict)
     icon: str = ""
 
 
@@ -634,7 +635,8 @@ FAKE_ACTIONS: list[ActionDescriptor] = [
         read_state=True,
         expiry="controller",
         side_effect_note="moves sim joints to the target",
-        confirm_text="Move the sim end-effector to the target pose.",
+        confirm_text=en("confirm.set_pose"),
+        confirm_labels={"en": en("confirm.set_pose"), "zh-CN": zh("confirm.set_pose")},
         icon="node-tool",
     ),
     ActionDescriptor(
@@ -657,7 +659,8 @@ FAKE_ACTIONS: list[ActionDescriptor] = [
         read_state=True,
         expiry="controller",
         side_effect_note="drives the sim gripper",
-        confirm_text="Open or close the sim gripper.",
+        confirm_text=en("confirm.gripper"),
+        confirm_labels={"en": en("confirm.gripper"), "zh-CN": zh("confirm.gripper")},
         icon="node-tool",
     ),
     ActionDescriptor(
