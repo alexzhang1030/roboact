@@ -16,16 +16,6 @@ SIDES = {
     "clock": "none",
 }
 
-HINTS = {
-    "read_note": "reads the demo notes file",
-    "append_note": "appends a line to the demo notes file",
-    "clock": "returns the current time",
-}
-
-CONFIRM = {
-    "append_note": "This will append a line to the demo notes file.",
-}
-
 
 class NoteLedger:
     """SQLite file: note lines and idempotency keys share one transaction."""
@@ -41,23 +31,6 @@ class NoteLedger:
         self.conn.execute(
             "CREATE TABLE IF NOT EXISTS notes (id INTEGER PRIMARY KEY, line TEXT, created_at TEXT)"
         )
-        self.conn.execute("CREATE TABLE IF NOT EXISTS meta (k TEXT PRIMARY KEY, v TEXT)")
-
-    def get(self, key: str) -> Any:
-        row = self.conn.execute("SELECT result FROM ledger WHERE key=?", (key,)).fetchone()
-        return json.loads(row[0]) if row else None
-
-    def put(self, key: str, result: Any) -> None:
-        self.conn.execute("BEGIN IMMEDIATE")
-        try:
-            self.conn.execute(
-                "INSERT OR REPLACE INTO ledger(key,result,created_at) VALUES(?,?,?)",
-                (key, json.dumps(result, ensure_ascii=False), now_iso()),
-            )
-            self.conn.commit()
-        except Exception:
-            self.conn.rollback()
-            raise
 
     def count(self) -> int:
         return int(self.conn.execute("SELECT COUNT(*) FROM ledger").fetchone()[0])
@@ -130,44 +103,16 @@ class Tools(Adapter):
     def receive_heartbeat(self) -> None:
         return
 
-    async def ping(self) -> bool:
-        return True
-
     def list_actions(self) -> list[ActionDescriptor]:
         return []
 
     async def read_state(self, action_id: str) -> dict[str, Any]:
         return {}
 
-    async def goal_status(
-        self, handle_id: str | None = None, idem_key: str | None = None
-    ) -> dict[str, Any]:
-        return {"found": False}
-
-    def public(self) -> dict[str, Any]:
-        return {
-            "id": self.adapter_id,
-            "name": self.name,
-            "version": self.version,
-            "target": self.target,
-            "action_list_version": self.action_list_version,
-            "connected": True,
-            "status": "ok",
-            "source": f"{self.name} · {self.target}",
-            "fetched_at": now_iso(),
-            "actions": [],
-        }
-
     def side(self, name: str) -> str:
         if name not in SIDES:
             raise ValueError(f"unknown tool: {name}")
         return SIDES[name]
-
-    def list_tools(self) -> list[dict[str, Any]]:
-        return [
-            {"name": n, "side_effect": s, "hint": HINTS[n], "confirm_text": CONFIRM.get(n, "")}
-            for n, s in SIDES.items()
-        ]
 
     async def call(self, name: str, args: dict[str, Any], idem_key: str | None) -> Any:
         self.calls.append({"tool": name, "args": args, "idem_key": idem_key})

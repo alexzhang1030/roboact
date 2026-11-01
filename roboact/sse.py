@@ -36,9 +36,6 @@ class SseHub:
         self._subs.setdefault(run_id, []).append(q)
         return q
 
-    def subscriber_count(self, run_id: str) -> int:
-        return len(self._subs.get(run_id) or [])
-
     def unsubscribe(self, run_id: str, q: asyncio.Queue) -> None:
         subs = self._subs.get(run_id) or []
         if q in subs:

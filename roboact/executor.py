@@ -30,7 +30,6 @@ from .graph import (
     cycle_exit_errors,
     incoming,
     influencing_map,
-    influencing_nodes,
     node_map,
     outgoing,
     types_compatible,
@@ -117,22 +116,6 @@ class RunCtrl:
     operator_lost_cancel_rejected: bool = False
     last_paused_at_ms: float = 0.0
 
-    @property
-    def paused_node(self) -> str | None:
-        return (self.pause or {}).get("node_id")
-
-    @property
-    def paused_phase(self) -> str | None:
-        return (self.pause or {}).get("when")
-
-    @property
-    def current(self) -> Any:
-        class C:
-            def __init__(self, rnd: int):
-                self.round = rnd
-
-        return C((self.pause or {}).get("round") or 0)
-
 
 class Executor:
     def __init__(self, store: StoreLike, adapter: Adapter, hub: SseHub, data_dir: str) -> None:
@@ -142,7 +125,6 @@ class Executor:
         self.hub = hub
         self.data_dir = data_dir
         self.runs: dict[str, RunCtrl] = {}
-        self.crash_before_t2 = False
         self.hooks: dict[str, Any] = {}
         self.images: dict[str, dict[tuple[int, str], dict[str, Any]]] = {}
         self.ui_lost_s: float | None = UI_LOST_TIMEOUT_S
@@ -1085,9 +1067,6 @@ class Executor:
             ctrl.saw_ui = True
             ctrl.last_ui_at = time.monotonic()
 
-    def ui_subscribers(self, run_id: str) -> int:
-        return self.hub.subscriber_count(run_id)
-
     # ----- main loop -----
 
     async def _loop(self, ctrl: RunCtrl) -> None:
@@ -1220,9 +1199,10 @@ class Executor:
         if ctrl.edits and ctrl.edits.get("used"):
             source = "manual"
         nmap = node_map(ctrl.flow)
-        inf = (ctrl.influencing or {}).get(nid)
+        cached = ctrl.influencing
+        inf = None if cached is None else cached.get(nid)
         if inf is None:
-            inf = influencing_nodes(ctrl.flow, nid)
+            inf = influencing_map(ctrl.flow).get(nid, set())
         fps = {}
         for i in inf:
             node_i = nmap.get(i)
@@ -1476,8 +1456,7 @@ class Executor:
             )
             return
         dt = (time.perf_counter() - t0) * 1000
-        if side == "write" and (self.crash_before_t2 or self.hooks.get("crash_before_t2")):
-            self.crash_before_t2 = False
+        if side == "write" and self.hooks.get("crash_before_t2"):
             self.hooks["crash_before_t2"] = False
             # Simulate kill -9 after the write and before T2: leave the step
             # `running`.

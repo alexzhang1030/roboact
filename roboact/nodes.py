@@ -483,10 +483,6 @@ def known_type(type_id: str) -> bool:
     return type_id in REGISTRY
 
 
-def bound_adapter() -> Adapter | None:
-    return _bound_adapter
-
-
 def _models_from_desc(desc: ActionDescriptor) -> tuple[type[BaseModel], type[BaseModel]]:
     in_fields: dict[str, Any] = {}
     for p in desc.params:
