@@ -16,20 +16,8 @@ from roboact.nodes import (
     rejected_actions,
 )
 from roboact.sse import SseHub
-from roboact.store import Store
 
-from tests.helpers import boot, cont, e, make_flow, n, run_until, wait_status
-
-
-def adapter_ctx(tmp_path, adapter=None):
-    adapter = adapter or FakeAdapter()
-    bind_adapter(adapter)
-    store = Store(tmp_path / "t.db")
-    hub = SseHub(store, interval=0.1)
-    hub.start()
-    ex = Executor(store, adapter, hub, str(tmp_path / "data"))
-    ex.ui_lost_s = None
-    return ex, store, adapter, hub
+from tests.helpers import adapter_ctx, boot, cont, e, make_flow, n, run_until, wait_status
 
 
 def pose_flow(**go_bp):

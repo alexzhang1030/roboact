@@ -27,7 +27,10 @@ def test_a1_write_crash_does_not_double(tmp_path):
         fid, ver = boot(store, flow)
         ex.hooks["crash_before_t2"] = True
         rid = await ex.start_full(fid, ver)
-        await asyncio.sleep(0.4)
+        for _ in range(200):
+            if tools.note_lines() == ["once"] and ex.get(rid) is None:
+                break
+            await asyncio.sleep(0.01)
         assert tools.note_lines() == ["once"]
         assert ex.get(rid) is None
         hub2 = SseHub(store)

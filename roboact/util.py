@@ -2,8 +2,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import re
-import time
 import uuid
 from datetime import UTC, datetime
 from typing import Any
@@ -31,10 +29,6 @@ def load(text: str | None, default: Any = None) -> Any:
 
 def sha256_text(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
-
-
-def sha256_bytes(data: bytes) -> str:
-    return hashlib.sha256(data).hexdigest()
 
 
 def get_path(obj: Any, path: str | None) -> Any:
@@ -96,30 +90,3 @@ def compare(left: Any, op: str, right: Any) -> bool:
         return bool(fn(left, coerce_compare(left, right)))
     except TypeError:
         return False
-
-
-_SLOT_RE = re.compile(r"\{\{\s*([A-Za-z_][A-Za-z0-9_]*)\s*\}\}")
-
-
-def template_slots(template: str) -> list[str]:
-    seen: list[str] = []
-    for name in _SLOT_RE.findall(template or ""):
-        if name not in seen:
-            seen.append(name)
-    return seen
-
-
-def render_template(template: str, values: dict[str, Any]) -> str:
-    def repl(m: re.Match[str]) -> str:
-        val = values.get(m.group(1))
-        if val is None:
-            return ""
-        if isinstance(val, (dict, list)):
-            return json.dumps(val, ensure_ascii=False)
-        return str(val)
-
-    return _SLOT_RE.sub(repl, template or "")
-
-
-def mono_ms() -> float:
-    return time.monotonic() * 1000

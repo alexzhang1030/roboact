@@ -10,8 +10,8 @@ from roboact.errors import ApiError
 from roboact.flow_file import inspect_run
 from roboact.nodes import bind_adapter
 
-from tests.helpers import recs, run_until, wait_status
-from tests.test_a23_a37 import adapter_ctx, pose_flow
+from tests.helpers import adapter_ctx, recs, run_until, wait_status
+from tests.test_a23_a37 import pose_flow
 
 
 def _pose_uncancellable(timeout_s: float) -> FakeAdapter:
