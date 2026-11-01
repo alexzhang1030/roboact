@@ -225,15 +225,27 @@ const App = defineComponent({
       const n = ((runCheck.value && runCheck.value.missing_input) || []).length
       return n ? countLabel('run.missing_input_count', n) : ''
     })
+    const structureIds = computed(() => {
+      const s = (runCheck.value && runCheck.value.structure) || null
+      if (!s || !s.code) return []
+      return (s.node_ids || []).filter(Boolean)
+    })
     const structureText = computed(() => {
       void locale.value
       const s = (runCheck.value && runCheck.value.structure) || null
       if (!s || !s.code) return ''
-      if (s.code === 'end_count') return t('run.end_count', { n: s.n })
-      if (s.code === 'start_count') return t('run.start_count', { n: s.n })
-      if (s.code === 'end_unreachable') return t('run.end_unreachable', { node: s.node })
+      if (s.code === 'need_one_end') return t('run.need_one_end', { n: s.n })
+      if (s.code === 'need_one_start') return t('run.need_one_start', { n: s.n })
+      if (s.code === 'end_unreachable') return t('run.end_unreachable')
       return ''
     })
+    function importErrorLine(e) {
+      void locale.value
+      if (e && e.message === 'kind "output" is now "end"') {
+        return t('flow.output_renamed', { path: e.path || '' })
+      }
+      return t('flow.import_error', { path: e.path, message: e.message })
+    }
     const endPanelText = computed(() => {
       const n = selectedNode.value
       if (!n || !n.data || n.data.nodeType !== 'end') return ''
@@ -633,7 +645,10 @@ const App = defineComponent({
             timeout_s: e.timeout_s, node_label: e.node,
           }
         }
-        else if (cur.status === 'action_missing' || cur.status === 'missing_input' || cur.no_cancel_too_long) {
+        else if (!live && structureIds.value.includes(n.id)) {
+          nodeStatus[n.id] = { status: 'error', state: 'error', structure_mark: true }
+        }
+        else if (cur.status === 'action_missing' || cur.status === 'missing_input' || cur.no_cancel_too_long || cur.structure_mark) {
           nodeStatus[n.id] = { status: 'idle', state: 'idle' }
         }
       }
@@ -1319,7 +1334,7 @@ const App = defineComponent({
       motion, motionMode, motionOpen, pickMotion, savedViewport, defaultViewport, persistViewportNow, logFilter,
       showMini, showGrid, addMenu, addQ, rejectMsg, overlay, specOf, t, typeLabel, fieldLabel, groupTitle, slot1Key,
       adapterLabel, flowNameLabel, nameEditing, topEl, runLocked, runLockedText, slot1Title,
-      actionGoneCount, missingInputCount, timeoutCapText, timeoutCapIds, noCancelTooLongCount, structureText, endPanelText, lostLine, uncancellable, jumpToFirst, onNameClick, startNameEdit, finishNameEdit, fitTopBar,
+      actionGoneCount, missingInputCount, timeoutCapText, timeoutCapIds, noCancelTooLongCount, structureText, structureIds, importErrorLine, endPanelText, lostLine, uncancellable, jumpToFirst, onNameClick, startNameEdit, finishNameEdit, fitTopBar,
       nodeRecords, logRecords, rounds, shownRec, viewRound, runActive, waitingApproval, confirmNote, versionWarn, stepsClass, stepsText,
       filteredTypes, paletteTypes, paletteGroups, paletteStatus, groupBoxes, portSources, stepLimit, overrides, singleRound, compareA, compareB, compareOut,
       deadlineAdapterOnly, outputImages, isReal, crashRecovery, selectedSpec,
@@ -1364,9 +1379,9 @@ const App = defineComponent({
           <span class="run-counts" data-testid="count-action-gone" v-if="actionGoneCount" @click="jumpToFirst(runCheck.action_gone)">{{ actionGoneCount }}</span>
           <span class="run-counts missing" data-testid="count-missing-input" v-if="missingInputCount" @click="jumpToFirst(runCheck.missing_input)">{{ missingInputCount }}</span>
           <span class="run-counts" data-testid="motion-timeout-cap" v-if="noCancelTooLongCount" @click="jumpToFirst(timeoutCapIds)">{{ noCancelTooLongCount }}</span>
+          <span class="run-counts" data-testid="run-refused" v-if="structureText" @click="jumpToFirst(structureIds)">{{ structureText }}</span>
         </div>
           <p class="lost-line" data-testid="lost-line" v-if="lostLine">{{ lostLine }}</p>
-          <p class="lost-line" data-testid="run-refused" v-else-if="structureText">{{ structureText }}</p>
         <div class="mismatch" :class="{ out: mismatchFade }" v-if="mismatch">{{ mismatch }}</div>
       </div>
       <div class="right">
@@ -1438,7 +1453,7 @@ const App = defineComponent({
       <div class="box">
         <p>{{ t('flow.import_failed') }}</p>
         <ul>
-          <li v-for="(e, i) in importErrors" :key="i">{{ t('flow.import_error', { path: e.path, message: e.message }) }}</li>
+          <li v-for="(e, i) in importErrors" :key="i">{{ importErrorLine(e) }}</li>
         </ul>
         <button @click="importErrors=null">OK</button>
       </div>

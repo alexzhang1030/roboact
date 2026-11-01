@@ -288,7 +288,8 @@ export default {
   'lost.cancel_rejected': 'Page disconnected. The robot refused to cancel {node}; it ran to end, then the run paused.',
   'run.no_cancel_too_long': '{node} can\'t be cancelled and may run {s} s. The limit is 10 s.',
   'run.no_cancel_too_long_count': '{n} nodes can\'t be cancelled and run too long',
-  'run.end_count': 'This flow has {n} End nodes.',
-  'run.start_count': 'This flow has {n} Start nodes.',
-  'run.end_unreachable': 'End {node} cannot be reached from Start.',
+  'run.need_one_start': 'This flow needs exactly one Start. Found {n}.',
+  'run.need_one_end': 'This flow needs exactly one End. Found {n}.',
+  'run.end_unreachable': 'End can\'t be reached from Start.',
+  'flow.output_renamed': '{path}: `output` is now `end`.',
 }

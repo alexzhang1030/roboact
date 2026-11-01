@@ -29,21 +29,21 @@ def test_full_run_refuses_missing_extra_and_unreachable_end(tmp_path):
     async def go():
         ex, store, _, hub = ctx(tmp_path)
         cases = [
-            (_start_end(drop_end=True), "end_count", "0"),
-            (_start_end(extra_ends=1), "end_count", "2"),
-            (_start_end(linked=False), "end_unreachable", "end"),
+            (_start_end(drop_end=True), "need_one_end", "Found 0."),
+            (_start_end(extra_ends=1), "need_one_end", "Found 2."),
+            (_start_end(linked=False), "end_unreachable", "can't be reached"),
             (
                 make_flow([n("end", "end")], []),
-                "start_count",
-                "0",
+                "need_one_start",
+                "Found 0.",
             ),
             (
                 make_flow(
                     [n("s1", "start", data={}), n("s2", "start", data={}), n("end", "end")],
                     [e("e0", "s1", "data", "end", "value")],
                 ),
-                "start_count",
-                "2",
+                "need_one_start",
+                "Found 2.",
             ),
         ]
         try:
@@ -56,7 +56,6 @@ def test_full_run_refuses_missing_extra_and_unreachable_end(tmp_path):
                     assert err.status == 409
                     assert err.error == code
                     assert needle in err.message
-                    assert "End" in err.message or "Start" in err.message
             fid, ver = boot(store, _start_end())
             rid = await ex.start_full(fid, ver)
             st = await wait_status(ex, rid, "completed", timeout=4)
@@ -143,9 +142,10 @@ def test_run_check_names_missing_end(server):
     saved = http_json(base, f"/api/flows/{fid}", "PUT", graph)
     check = http_json(base, f"/api/flows/{saved['flow']['id']}/run-check")
     assert check["can_run"] is False
-    assert check["structure"]["code"] == "end_count"
+    assert check["structure"]["code"] == "need_one_end"
     assert check["structure"]["n"] == 0
-    assert "0" in check["structure"]["message"]
+    assert check["structure"]["node_ids"] == []
+    assert "Found 0." in check["structure"]["message"]
     code, body = http_status(
         base,
         "/api/runs",
@@ -153,8 +153,8 @@ def test_run_check_names_missing_end(server):
         {"flow_id": fid, "flow_version": saved["flow"]["version"]},
     )
     assert code == 409
-    assert body["error"] == "end_count"
-    assert "0" in body["message"]
+    assert body["error"] == "need_one_end"
+    assert "Found 0." in body["message"]
 
 
 def test_selected_node_run_skips_end_check(tmp_path):

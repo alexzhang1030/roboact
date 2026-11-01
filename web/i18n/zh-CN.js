@@ -288,7 +288,8 @@ export default {
   'lost.cancel_rejected': '页面断开。机器人拒绝取消 {node}，它一直运行到结束，随后运行暂停。',
   'run.no_cancel_too_long': '{node} 无法取消，可能要运行 {s} 秒。上限是 10 秒。',
   'run.no_cancel_too_long_count': '{n} 个节点无法取消，而且运行时间过长',
-  'run.end_count': '这个流程有 {n} 个结束节点。',
-  'run.start_count': '这个流程有 {n} 个开始节点。',
-  'run.end_unreachable': '从开始节点到不了结束节点 {node}。',
+  'run.need_one_start': '这个流程必须正好有一个开始节点。找到 {n} 个。',
+  'run.need_one_end': '这个流程必须正好有一个结束节点。找到 {n} 个。',
+  'run.end_unreachable': '从开始节点到不了结束节点。',
+  'flow.output_renamed': '{path}：`output` 现在是 `end`。',
 }

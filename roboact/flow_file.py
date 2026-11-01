@@ -85,6 +85,10 @@ def output_type_message(nodes: list[Any] | None) -> str | None:
     return None
 
 
+def _node_ids(nodes: list[dict[str, Any]]) -> list[str]:
+    return [str(n["id"]) for n in nodes if isinstance(n.get("id"), str) and n.get("id")]
+
+
 def flow_structure(graph: dict[str, Any]) -> dict[str, Any] | None:
     """Full-run gate. None when the flow has one Start, one End, and a path."""
     nodes = [n for n in (graph.get("nodes") or []) if isinstance(n, dict)]
@@ -93,24 +97,28 @@ def flow_structure(graph: dict[str, Any]) -> dict[str, Any] | None:
     if len(ends) != 1:
         count = len(ends)
         return {
-            "code": "end_count",
+            "code": "need_one_end",
             "n": count,
-            "message": f"This flow has {count} End nodes.",
+            "node_ids": _node_ids(ends),
+            "message": f"This flow needs exactly one End. Found {count}.",
         }
     if len(starts) != 1:
         count = len(starts)
         return {
-            "code": "start_count",
+            "code": "need_one_start",
             "n": count,
-            "message": f"This flow has {count} Start nodes.",
+            "node_ids": _node_ids(starts),
+            "message": f"This flow needs exactly one Start. Found {count}.",
         }
     end_id = str(ends[0].get("id") or "")
     if not _end_reachable(graph, end_id):
         return {
             "code": "end_unreachable",
+            "n": 1,
             "node": end_id,
             "node_id": end_id,
-            "message": f"End {end_id} cannot be reached from Start.",
+            "node_ids": [end_id] if end_id else [],
+            "message": "End can't be reached from Start.",
         }
     return None
 

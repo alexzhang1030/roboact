@@ -34,6 +34,8 @@ Version 1.5 (2026-10-31). Companion to `prd-en-v1.5.md` section 4. exec-model = 
 ## 5. Single node
 1. Run a middle node using the last run's record.
 2. Pass: only that node gets a new record.
+3. Start a full run with a fake `motion` action and, while it is running, open a node's menu, then box-select two nodes. Pass: "Run this only", "Run for real" and the group run button are disabled and show the reason. Pause the flow: all three are enabled. Let it finish: all three are enabled.
+4. While a full run is running, call the single-node run endpoint and the group run endpoint directly (not through the UI). Pass: the server refuses each with the reason; no new record; the robot state does not change from either call.
 
 <a id="6"></a>
 ## 6. Group
@@ -227,3 +229,12 @@ Version 1.5 (2026-10-31). Companion to `prd-en-v1.5.md` section 4. exec-model = 
 15. Fill in the secret param on a "missing input" node: the mark clears without a reload.
 16. Follow the README offline install on a clean machine: YAML import works.
 17. Export a flow as JSON and as YAML and commit both. Change one param and move one node; export again. Pass: `git diff` shows only the changed param value and the moved node's position lines; both files end with one newline; a float such as `0.1` is written as `0.1`.
+
+<a id="21"></a>
+## 21 Start and End
+1. Create a new flow. Pass: it has one Start and one End; End has an input port and no output port.
+2. Add a second Start, press Run; then a second End, press Run; then delete End, press Run. Pass: each Run is refused and the message names the problem.
+3. Connect Start to a node that does not lead to End, press Run. Pass: Run is refused and says End cannot be reached from Start.
+4. Box-select two nodes with no Start or End and run the group. Pass: the group runs.
+5. Run a flow where Start feeds End directly and also feeds a fake `motion` action on a parallel branch that finishes after End is reached. Pass: the run stays running until the action finishes, then shows completed; End shows its input value, and the panel shows the same value.
+6. Import a JSON file and a YAML file that each contain a node of kind `output`. Pass: each import is refused before the canvas changes; the message names the node and says `output` is now `end`.

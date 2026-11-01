@@ -24,8 +24,8 @@ First run
    - Result unknown (`write`/`motion` only): `read_state`, then user picks rerun or mark done; own icon.
    - Only the active edge animates.
 6. At breakpoint: Continue, Step, Stop; panel shows input, output, duration; edit input, continue.
-7. Run one node with past-run, manual or pinned input; upstream not rerun. Pins only in single-node/group runs; full runs mark them `src.pinned_unused`. Cached input port: hollow circle naming its source run.
-8. Run group: box-select; incoming edges become pinnable entry ports; outside nodes don't run.
+7. Run one node with past-run, manual or pinned input; upstream not rerun. Pins only in single-node/group runs; full runs mark them `src.pinned_unused`. Cached input port: hollow circle naming its source run. While a flow is running, single-node runs ("Run this only" and "Run for real") are disabled in the UI and refused by the server with the reason; allowed when the flow is paused or finished. Reason: another action would move the robot while the flow does; also an open browser dialog over 10 s triggers the disconnect pause (Steve, 2026-11-01; Torvalds, `app.js:985`, `1009`, `1482`, `1486`).
+8. Run group: box-select; incoming edges become pinnable entry ports; outside nodes don't run. Same rule as step 7: while a flow is running, group run is disabled in the UI and refused by the server with the reason; allowed when paused or finished (Steve, 2026-11-01).
 9. Error: red plus icon and text; panel shows I/O and error; rerun from here, upstream not rerun.
 10. Side-effect node (email, file write, external write API): title mark; replay mocked (`run.target_sim`) unless user clicks real run.
 11. Loop: dashed back edge routed below, labeled "round 3" (target's run count); exit via condition node; top bar "steps 37 / limit N"; node shows latest round, panel lists all.
@@ -129,7 +129,11 @@ Loops (§5.1)
 
 Control nodes (§5.2)
 
-- Start, Output, Constant, Condition (only loop exit), Merge, Human approval (exec-model §2.4); `none`. Test group: "text template", "model call", "tool call".
+- Start, End, Constant, Condition (only loop exit), Merge, Human approval (exec-model §2.4); `none`. End replaces Output (type `end`); no extra node (Alex, 2026-11-01).
+- A flow has exactly one Start and one End; a new flow starts with both. Run is refused, naming the problem, if either is missing or duplicated, or if no path leads from Start to End. Run group (step 8) skips this check.
+- End has one input port and no output port; the run result is End's input, shown on End and in the panel when the run finishes.
+- Reaching End does not end the run; the run completes when no node is left to run, as main does now (`executor.py:1090-1093`). Reason: stopping at End would cut off branches still running, including `motion` actions that cannot be cancelled. Nodes with no input (Constant) still run first.
+- A file with a node of kind `output` is refused at import; the message names the node and says `output` is now `end`. No conversion, `format_version` stays 1 (Steve, 2026-11-01). Test group: "text template", "model call", "tool call".
 - No seventh "wait" node (Tedrake). Reach goal: `return_mode = blocking`; JTC succeeds within goal tolerance and `constraints.goal_time` ([JTC](https://control.ros.org/master/doc/ros2_controllers/joint_trajectory_controller/doc/userdoc.html)); Nav2 goal checker accepts position and heading ([SimpleGoalChecker](https://docs.nav2.org/configuration/packages/nav2_controller-plugins/simple_goal_checker.html)). Wait for person: Human approval. Long or non-robot waits: not v1.
 - `precondition_wait_s`: poll `read_state` until true, else `precondition_failed`; absent → check once; shows `status.running_wait`; `timeout_s` starts at send; Stop → stopped, no read-back; resume restarts wait; restart → pending (exec-model v0.2.1 §2.5.5, A38); one record. Poll interval and fields: adapter author.
 - Blocking returns before stable and no stable field in `read_state` → adapter must add one (pre-real-robot check).
@@ -182,7 +186,7 @@ Hardware
 
 4. Refresh at a breakpoint keeps node and I/O. Steps: acceptance.md#4
 
-5. Single-node run records only that node. Steps: acceptance.md#5
+5. Single-node run records only that node; single-node and group runs refused while a flow is running, in UI and server. Steps: acceptance.md#5
 
 6. 2-node group run records only those 2; entry data matches chosen run. Steps: acceptance.md#6
 
@@ -239,6 +243,8 @@ Hardware
 19.10 `scripts/check.sh` passes on clean clone and aarch64; failures block merge except 19. Steps 5 and 7 need a real ROS adapter: before real robot, not v0.1 (Steve, 2026-11-01). Steps: acceptance.md#19.10
 
 20. Flow file: export, import, export is byte-identical; YAML converted to JSON equals the JSON export; unquoted `mode: on` stays a string; bad files change nothing; "action gone", "missing input" and mismatched files all lock Run. Steps: acceptance.md#20
+
+21. Start and End: exactly one each; no path from Start to End refuses Run; result shown on End; run ends when nothing is left to run; `output` files refused. Steps: acceptance.md#21
 
 A6: passing (PR #6). A38: 19.4. A40: 19.9. R1–R6 include two checks; Steps: acceptance.md#r1-r6
 
