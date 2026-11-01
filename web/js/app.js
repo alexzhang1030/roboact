@@ -682,6 +682,7 @@ const App = defineComponent({
           run.value = normalizeRun(ev)
           applyNodeStates(ev.nodes)
           applyPauseReason(ev.pause)
+          refreshRecords(runId)
           if (window.__afPauseTimes && ev.status === 'paused' && ev.paused_at_ms) {
             window.__afPauseTimes.push({
               at: performance.now(),

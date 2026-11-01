@@ -266,7 +266,7 @@ def test_7_rerun_after_error_skips_upstream(server, ui: _UI) -> None:
     _wait(page, "error")
     parent = _rid(page)
     before = _records(server["base"], parent)
-    page.locator(".vue-flow__node[data-id='bad']").click()
+    _open_log(page, "bad", "· error")
     page.get_by_role("button", name="Input").click()
     page.get_by_role("button", name="Rerun from here").click()
     page.wait_for_function(
