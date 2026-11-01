@@ -5,6 +5,7 @@ import socket
 import subprocess
 import sys
 import time
+import urllib.request
 from pathlib import Path
 from typing import Any
 
@@ -121,8 +122,6 @@ def server(tmp_path):
     )
     base = f"http://127.0.0.1:{port}"
     t0 = time.time()
-    import urllib.request
-
     while time.time() - t0 < 8:
         if proc.poll() is not None:
             out = proc.stdout.read().decode() if proc.stdout else ""
