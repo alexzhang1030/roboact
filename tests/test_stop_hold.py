@@ -246,8 +246,11 @@ def test_motion_single_run_requires_confirm(tmp_path) -> None:
             await _wait_call(adapter, "fake_set_pose")
             assert rid
             assert adapter.goals_sent
-            rid = await ex.start_node(fid, ver, "go", confirm="fake_set_pose")
-            assert rid
+            # A second single-node start is refused while this one is still executing.
+            await wait_status(ex, rid, "completed", "error", timeout=4)
+            rid2 = await ex.start_node(fid, ver, "go", confirm="fake_set_pose")
+            assert rid2
+            assert rid2 != rid
         finally:
             await hub.stop()
 

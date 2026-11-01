@@ -136,9 +136,45 @@ class Executor:
         self.step_delay_s: float = 0.0
         self._hb_task: asyncio.Task | None = None
         self._last_adapter_ok = time.monotonic()
+        # Admission for "is a run of this flow executing?" plus the insert.
+        # continue/approve take the same lock when they set status to running.
+        self._admit = asyncio.Lock()
+        self._admit_task: asyncio.Task[Any] | None = None
 
     def get(self, run_id: str) -> RunCtrl | None:
         return self.runs.get(run_id)
+
+    @contextlib.asynccontextmanager
+    async def _admitted(self):
+        """Serialize new-run admission on this task.
+
+        Reenters when the holder calls another start method. Other tasks wait,
+        so a check cannot pass while a paused run is being set back to running.
+        """
+        me = asyncio.current_task()
+        if me is not None and self._admit_task is me:
+            yield
+            return
+        await self._admit.acquire()
+        self._admit_task = me
+        try:
+            yield
+        finally:
+            self._admit_task = None
+            self._admit.release()
+
+    def _refuse_if_flow_running(self, flow_id: str, *, except_run_id: str | None = None) -> None:
+        for ctrl in self.runs.values():
+            if except_run_id is not None and ctrl.run_id == except_run_id:
+                continue
+            if ctrl.abandoned or ctrl.flow_id != flow_id or ctrl.status != "running":
+                continue
+            raise ApiError(
+                409,
+                "run_in_progress",
+                "The flow is running. Pause it, stop it, or wait for it to finish.",
+                {"run_id": ctrl.run_id},
+            )
 
     # ----- start -----
 
@@ -163,10 +199,53 @@ class Executor:
         entry_sources: dict | None = None,
         base_rounds: dict | None = None,
     ) -> str:
-        if request_id:
-            existing = self.store.run_for_request(request_id)
-            if existing:
-                return existing
+        async with self._admitted():
+            if request_id:
+                existing = self.store.run_for_request(request_id)
+                if existing:
+                    return existing
+            self._refuse_if_flow_running(flow_id)
+            return await self._start_full_body(
+                flow_id,
+                flow_version,
+                initial_input=initial_input,
+                max_steps=max_steps,
+                client_id=client_id,
+                request_id=request_id,
+                kind=kind,
+                node_id=node_id,
+                node_ids=node_ids,
+                side_effects=side_effects,
+                parent_run_id=parent_run_id,
+                base_step=base_step,
+                seed_pending=seed_pending,
+                confirm=confirm,
+                input_source_hint=input_source_hint,
+                entry_sources=entry_sources,
+                base_rounds=base_rounds,
+            )
+
+    async def _start_full_body(
+        self,
+        flow_id: str,
+        flow_version: int,
+        *,
+        initial_input: dict | None = None,
+        max_steps: int | None = None,
+        client_id: str = "",
+        request_id: str | None = None,
+        kind: str = "full",
+        node_id: str | None = None,
+        node_ids: list[str] | None = None,
+        side_effects: str = "default",
+        parent_run_id: str | None = None,
+        base_step: int = 0,
+        seed_pending: list[dict] | None = None,
+        confirm: bool | str | None = None,
+        input_source_hint: str | None = None,
+        entry_sources: dict | None = None,
+        base_rounds: dict | None = None,
+    ) -> str:
         graph = self.store.get_version(flow_id, flow_version)
         if graph is None:
             raise ApiError(
@@ -267,6 +346,33 @@ class Executor:
         request_id: str | None = None,
         max_steps: int | None = None,
     ) -> str:
+        async with self._admitted():
+            if not (request_id and self.store.run_for_request(request_id)):
+                self._refuse_if_flow_running(flow_id)
+            return await self._start_node_body(
+                flow_id,
+                flow_version,
+                node_id,
+                input_spec=input_spec,
+                side_effects=side_effects,
+                confirm=confirm,
+                client_id=client_id,
+                request_id=request_id,
+                max_steps=max_steps,
+            )
+
+    async def _start_node_body(
+        self,
+        flow_id: str,
+        flow_version: int,
+        node_id: str,
+        input_spec: dict | None = None,
+        side_effects: str = "default",
+        confirm: bool | str | None = None,
+        client_id: str = "",
+        request_id: str | None = None,
+        max_steps: int | None = None,
+    ) -> str:
         graph = self.store.get_version(flow_id, flow_version)
         if graph is None:
             raise ApiError(400, "invalid_graph", "flow version not found")
@@ -299,6 +405,35 @@ class Executor:
         )
 
     async def start_group(
+        self,
+        flow_id: str,
+        flow_version: int,
+        node_ids: list[str],
+        entries: dict | None = None,
+        side_effects: str = "default",
+        confirm: bool | str | None = None,
+        client_id: str = "",
+        request_id: str | None = None,
+        max_steps: int | None = None,
+        source_run_id: str | None = None,
+    ) -> tuple[str, dict[str, Any]]:
+        async with self._admitted():
+            if not (request_id and self.store.run_for_request(request_id)):
+                self._refuse_if_flow_running(flow_id)
+            return await self._start_group_body(
+                flow_id,
+                flow_version,
+                node_ids,
+                entries=entries,
+                side_effects=side_effects,
+                confirm=confirm,
+                client_id=client_id,
+                request_id=request_id,
+                max_steps=max_steps,
+                source_run_id=source_run_id,
+            )
+
+    async def _start_group_body(
         self,
         flow_id: str,
         flow_version: int,
@@ -360,9 +495,24 @@ class Executor:
         confirm: bool | str | None = None,
         client_id: str = "",
     ) -> str:
-        parent = self.store.get_run(parent_id)
-        if not parent:
-            raise ApiError(404, "not_found", "source run not found")
+        async with self._admitted():
+            parent = self.store.get_run(parent_id)
+            if not parent:
+                raise ApiError(404, "not_found", "source run not found")
+            self._refuse_if_flow_running(parent["flow_id"])
+            return await self._rerun_from_body(
+                parent_id, step, side_effects, confirm, client_id, parent
+            )
+
+    async def _rerun_from_body(
+        self,
+        parent_id: str,
+        step: int,
+        side_effects: str,
+        confirm: bool | str | None,
+        client_id: str,
+        parent: dict[str, Any],
+    ) -> str:
         rec = self.store.get_step(parent_id, step)
         if not rec:
             raise ApiError(400, "invalid_graph", f"step {step} not found")
@@ -678,43 +828,51 @@ class Executor:
                     raise ApiError(
                         409, "readback_required", "read robot state first, then retry or mark done"
                     )
-                if resolution == "mark_done":
-                    self._apply_mark_done(ctrl, edits)
-                elif resolution != "retry":
+                if resolution not in ("mark_done", "retry"):
                     raise ApiError(
                         409, "readback_required", "resolution must be retry or mark_done"
                     )
-            if edits and not (
-                reason in MOTION_RESOLVE_REASONS and side == "motion" and resolution == "mark_done"
-            ):
-                self._apply_edits(ctrl, edits)
             if reason == "adapter_lost" and not getattr(self.adapter, "connected", True):
                 raise ApiError(
                     409, "adapter_disconnected", "robot controller is still disconnected"
                 )
-            if reason in (
-                "breakpoint",
-                "restart",
-                "user",
-                "storage_error",
-                "write_timeout",
-                "adapter_lost",
-                "operator_lost",
-                "motion_timeout",
-            ):
-                ctrl.ignore_bp = (ctrl.pause.get("node_id"), ctrl.pause.get("when"))
-            ctrl.last_used_pause_id = pause_id
-            ctrl.step_mode = mode == "step"
-            ctrl.user_pause = False
-            ctrl.status = "running"
-            self.store.update_run(run_id, status="running", pause=None)
-            self.store.add_command(run_id, client_id, mode, pause_id, "200")
-            self.hub.emit(
-                run_id, "resumed", {"mode": mode, "by_client": client_id, "at": now_iso()}
-            )
-            ctrl.pause = None
-            ctrl.resume.set()
-            return {"status": "running"}
+            async with self._admitted():
+                self._refuse_if_flow_running(ctrl.flow_id, except_run_id=run_id)
+                if (
+                    reason in MOTION_RESOLVE_REASONS
+                    and side == "motion"
+                    and resolution == "mark_done"
+                ):
+                    self._apply_mark_done(ctrl, edits)
+                if edits and not (
+                    reason in MOTION_RESOLVE_REASONS
+                    and side == "motion"
+                    and resolution == "mark_done"
+                ):
+                    self._apply_edits(ctrl, edits)
+                if reason in (
+                    "breakpoint",
+                    "restart",
+                    "user",
+                    "storage_error",
+                    "write_timeout",
+                    "adapter_lost",
+                    "operator_lost",
+                    "motion_timeout",
+                ):
+                    ctrl.ignore_bp = (ctrl.pause.get("node_id"), ctrl.pause.get("when"))
+                ctrl.last_used_pause_id = pause_id
+                ctrl.step_mode = mode == "step"
+                ctrl.user_pause = False
+                ctrl.status = "running"
+                self.store.update_run(run_id, status="running", pause=None)
+                self.store.add_command(run_id, client_id, mode, pause_id, "200")
+                self.hub.emit(
+                    run_id, "resumed", {"mode": mode, "by_client": client_id, "at": now_iso()}
+                )
+                ctrl.pause = None
+                ctrl.resume.set()
+                return {"status": "running"}
 
     async def step_run(
         self,
@@ -725,6 +883,7 @@ class Executor:
         resolution: str | None = None,
         readback_id: str | None = None,
     ) -> dict[str, Any]:
+        # Same admission check as continue: mode "step" still sets this run running.
         return await self.continue_run(
             run_id,
             pause_id,
@@ -825,21 +984,23 @@ class Executor:
                 raise ApiError(409, "not_paused", "this run is not waiting for confirmation")
             if decision not in ("approve", "reject"):
                 raise ApiError(422, "invalid_graph", "decision must be approve or reject")
-            ctrl.decision = {
-                "decision": decision,
-                "comment": comment,
-                "node_id": ctrl.pause.get("node_id"),
-            }
-            ctrl.last_used_pause_id = pause_id
-            ctrl.status = "running"
-            self.store.update_run(run_id, status="running", pause=None)
-            self.store.add_command(run_id, client_id, "approve", pause_id, "200")
-            self.hub.emit(
-                run_id, "resumed", {"mode": "approve", "by_client": client_id, "at": now_iso()}
-            )
-            ctrl.pause = None
-            ctrl.resume.set()
-            return {"status": "running"}
+            async with self._admitted():
+                self._refuse_if_flow_running(ctrl.flow_id, except_run_id=run_id)
+                ctrl.decision = {
+                    "decision": decision,
+                    "comment": comment,
+                    "node_id": ctrl.pause.get("node_id"),
+                }
+                ctrl.last_used_pause_id = pause_id
+                ctrl.status = "running"
+                self.store.update_run(run_id, status="running", pause=None)
+                self.store.add_command(run_id, client_id, "approve", pause_id, "200")
+                self.hub.emit(
+                    run_id, "resumed", {"mode": "approve", "by_client": client_id, "at": now_iso()}
+                )
+                ctrl.pause = None
+                ctrl.resume.set()
+                return {"status": "running"}
 
     def _apply_edits(self, ctrl: RunCtrl, edits: dict[str, Any]) -> None:
         pause = ctrl.pause or {}
