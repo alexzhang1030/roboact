@@ -100,6 +100,18 @@ export default markRaw(defineComponent({
       void locale.value
       return statusWord(st.value)
     })
+    const took = computed(() => {
+      void locale.value
+      const s = st.value
+      const status = s.state || s.status
+      if (status !== 'done') return ''
+      if (s.side_effect_mode === 'mock' || s.mocked) return ''
+      if (s.duration_ms == null || s.duration_ms === '') return ''
+      const ms = Number(s.duration_ms)
+      if (!Number.isFinite(ms)) return ''
+      if (ms < 10) return t('status.summary.took_ms', { ms: Math.round(ms) })
+      return t('status.summary.took', { s: (ms / 1000).toFixed(1) })
+    })
     const summary = computed(() => {
       void locale.value
       const s = st.value
@@ -152,7 +164,7 @@ export default markRaw(defineComponent({
     const bpAfterTitle = computed(() => { void locale.value; return bpAfter.value.enabled ? t('bp.after_on') : t('bp.after_off') })
     return {
       Position, ins, outs, st, word, write, rows, spec, bpBefore, bpAfter, srcOf, toggleBp,
-      kind, icon, typeIcon, iconBase, icoUrl, summary, title, noCancel, sideTitle, bpBeforeTitle, bpAfterTitle, t, locale, portLabel,
+      kind, icon, typeIcon, iconBase, icoUrl, summary, took, title, noCancel, sideTitle, bpBeforeTitle, bpAfterTitle, t, locale, portLabel,
       isActionMissing, isMissingInput, portMissing,
     }
   },
@@ -179,6 +191,7 @@ export default markRaw(defineComponent({
         <span class="fn-st-word">{{ word }}</span>
       </span>
     </div>
+    <div class="fn-took" v-if="took" data-testid="node-took">{{ took }}</div>
     <div class="fn-err" v-if="summary" :class="{ amber: kind === 'unknown' }" :title="summary" data-testid="node-summary">{{ summary }}</div>
     <div class="fn-ports" v-if="rows">
       <div class="fn-port" v-for="n in rows" :key="n" :class="{ 'port-missing': portMissing(ins[n-1]) }">

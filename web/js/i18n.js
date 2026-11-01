@@ -191,10 +191,6 @@ export function statusWord(st) {
   if (status === 'awaiting_approval') return t('status.awaiting')
   if (status === 'done') {
     if (st.side_effect_mode === 'mock' || st.mocked) return t('status.done_mock')
-    if (st.duration_ms != null) {
-      const ms = st.duration_ms
-      return ms < 10 ? t('status.done_ms', { ms: Math.round(ms) }) : t('status.done_s', { s: (ms / 1000).toFixed(1) })
-    }
     return t('status.done')
   }
   const key = 'status.' + status

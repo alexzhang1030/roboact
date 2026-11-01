@@ -316,6 +316,11 @@ label { display: block; color: var(--muted); font-size: 12px; margin: 8px 0 4px;
 .vue-flow[data-flood="error"] .ico { --ico: url("/vendor/icons/state-error.svg"); }
 .vue-flow[data-flood="running"] .ico { --ico: url("/vendor/icons/state-running.svg"); }
 .vue-flow[data-flood="idle"] .ico { --ico: url("/vendor/icons/state-idle.svg"); }
+.fn-took {
+  padding: 3px var(--fn-pad-x); font-size: 12px; line-height: 18px; font-weight: 400;
+  font-family: var(--mono); font-variant-numeric: tabular-nums; color: var(--text);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
 .fn-err {
   padding: 3px var(--fn-pad-x); font-size: var(--fs-12); line-height: var(--lh-12); color: var(--red);
   background: var(--surface);
@@ -400,6 +405,7 @@ label { display: block; color: var(--muted); font-size: 12px; margin: 8px 0 4px;
 .lod-low .fn-st-word,
 .lod-low .fn-port-name,
 .lod-low .fn-err,
+.lod-low .fn-took,
 .lod-low .src { visibility: hidden; }
 
 .loop-label {

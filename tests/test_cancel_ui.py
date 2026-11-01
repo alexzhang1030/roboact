@@ -427,3 +427,63 @@ def test_lost_line_cancel_rejected(server) -> None:
     finally:
         p.stop()
         proxy.close()
+
+
+def test_done_motion_title_has_no_duration(server) -> None:
+    """Done motion: title is Done, duration is the mono summary, name stays whole."""
+    put_flow(server["base"], motion_graph("done title"))
+    http_json(
+        server["base"],
+        "/api/test/adapter",
+        "POST",
+        {"async_steps": 1, "async_sleep_s": 0.4},
+    )
+    p, _path = _launch()
+    try:
+        br = _browser(p)
+        page, _blocked, _errs = _open(br, server["base"])
+        _english(page)
+        page.evaluate(
+            """() => {
+              const vf = window.__af.vf
+              if (vf && vf.setViewport) vf.setViewport({ x: 40, y: 80, zoom: 1 })
+            }"""
+        )
+        page.evaluate("() => window.__af.doRun('all')")
+        page.wait_for_function(
+            """() => {
+              const r = window.__af.run.value
+              return r && r.status === 'completed'
+            }""",
+            timeout=20000,
+        )
+        card = page.locator('.fn[data-node-type="fake_set_pose"]')
+        word = card.locator(".fn-st-word").inner_text()
+        assert word == "Done", word
+        took = card.locator("[data-testid=node-took]").inner_text()
+        assert took.startswith("Took "), took
+        assert "Done" not in took, took
+        laid = page.evaluate(
+            """() => {
+              const card = document.querySelector('.fn[data-node-type="fake_set_pose"]')
+              const name = card.querySelector('.fn-name')
+              const tookEl = card.querySelector('[data-testid=node-took]')
+              const mark = card.querySelector('.fn-side')
+              const cs = getComputedStyle(tookEl)
+              return {
+                name: name.textContent,
+                nameOverflow: name.scrollWidth > name.clientWidth + 1,
+                width: Math.round(card.getBoundingClientRect().width),
+                tookFont: cs.fontFamily,
+                hasMark: !!mark,
+              }
+            }"""
+        )
+        assert laid["name"] == "Go to pose", laid
+        assert laid["nameOverflow"] is False, laid
+        assert laid["hasMark"] is True, laid
+        assert laid["width"] == 240, laid
+        assert "JetBrains Mono" in laid["tookFont"], laid
+        br.close()
+    finally:
+        p.stop()
