@@ -139,6 +139,10 @@ def content_type_is_json(headers: dict[str, str]) -> bool:
     return ct == "application/json"
 
 
+def _flow_file_detail(exc: FlowFileRejected) -> dict[str, Any]:
+    return {"errors": [{"path": i.path, "message": i.message} for i in exc.issues]}
+
+
 class App:
     def __init__(self, db_path: str, test_mode: bool = False, port: int | None = None) -> None:
         self.data_dir = str(Path(db_path).resolve().parent)
@@ -756,12 +760,7 @@ class App:
         try:
             text, filename = export_flow(graph, fmt, self.adapter)
         except FlowFileRejected as e:
-            raise ApiError(
-                422,
-                "import_failed",
-                "File not exported.",
-                {"errors": [{"path": i.path, "message": i.message} for i in e.issues]},
-            ) from e
+            raise ApiError(422, "import_failed", "File not exported.", _flow_file_detail(e)) from e
         kind = "yaml" if fmt.lower() in ("yaml", "yml") else "json"
         await self._json(writer, 200, {"text": text, "format": kind, "filename": filename})
 
@@ -777,7 +776,7 @@ class App:
                 422,
                 "import_failed",
                 "File not imported. Fix these errors:",
-                {"errors": [{"path": i.path, "message": i.message} for i in e.issues]},
+                _flow_file_detail(e),
             ) from e
         graph.pop("unlock_record", None)
         graph.pop("mismatch_unlocked", None)
