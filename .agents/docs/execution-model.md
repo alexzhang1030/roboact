@@ -7,4 +7,5 @@ See [docs/exec-model.md](../../docs/exec-model.md).
 - Adapter silent ~3 s → `adapter_lost`.
 - Codes on the wire. `motion` default. No auto-retry after crash.
 - Non-cancellable `motion` with `timeout_s` > 10 s blocks Run (checked before every run).
+- An in-flight `operator_lost` pause includes `lost_outcome` (`cancelled`, `ran_to_end`, or `cancel_rejected`). `ran_to_end` also includes `lost_extra_s`: seconds from the moment the page was judged lost until that action finished. The node stays `stopped`, `done`, or `cancel_rejected` for those three outcomes. A pause between nodes has no `lost_outcome`.
 

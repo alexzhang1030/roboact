@@ -120,7 +120,7 @@ Executor
 Loops (§5.1)
 
 - Stop: condition exit, step limit (`run.word.step_limit`), user. No exit: warn on save, refuse run.
-- Step limit default 1000 (Steve, 2026-10-31, temporary). No round limit.
+- Step limit default 1000 (Alex, 2026-11-01). No round limit.
 - Breakpoints every round, or "only round N", or condition comparing existing input fields (no Python); Step over back edge enters next round.
 - Record key run id + global step, plus node and round; no overwrite; unread edge data persisted.
 - Staleness includes the node itself in a loop.
@@ -138,19 +138,21 @@ Hardware
 
 - Robot model and interface specs await a source (Alex or Tedrake).
 - Backend shares the controller with control (inference): normal priority, off control-loop cores, memory cap; control threads never wait on it. ros2_control loops are real-time ([controller_manager](https://control.ros.org/rolling/doc/ros2_control/controller_manager/doc/userdoc.html), [RT Linux](https://docs.ros.org/en/jazzy/Tutorials/Miscellaneous/Building-Realtime-rt_preempt-kernel-for-ROS-2.html)).
-- Canvas Stop is not e-stop; e-stop is the robot's hardware path, never web or HTTP; no UI e-stop button. Proposed: IEC 60204-1 category 2 (hold, motors on; Thompson's suggestion, not certified).
+- Canvas Stop is not e-stop; e-stop is the robot's hardware path, never web or HTTP; no UI e-stop button. After Stop the controller stays powered and holds the current position; never cut power or torque, since an arm falls under gravity when torque is cut (Tedrake). No move to a safe pose (Alex, 2026-11-01). In v0.1 every action declares what it does after Stop or cancel: `hold` (the gripper keeps its grip) or `finish_step`. A `finish_step` action counts as non-cancellable: it runs to its end under the rule 14 cap of 10 s, then holds. An action declaring `safe_pose` is refused when the adapter loads; the fake adapter's `fake_gripper` changes to hold (Steve, 2026-11-01). JTC (ros2_controllers' joint trajectory controller) holds position by default after a trajectory is cancelled ([JTC docs](https://control.ros.org/master/doc/ros2_controllers/joint_trajectory_controller/doc/userdoc.html)); check the first robot's controller once chosen (Tedrake). Proposed: IEC 60204-1 category 2 (hold, motors on; Thompson's suggestion, not certified).
 - After cancel: robot state and gripper hold read back and shown.
 - Adapter reports `name`, `version`, `target` (sim/real, a field, not name-guessed), action-list version.
 - No per-run sim/real toggle; adapter name right of flow name; red `real_tag` tag when real.
 - v1: fake adapter, invented actions named as fake (sim).
+- v0.1 acceptance and CI stay on the fake adapter. It models time only: no kinematics, no real stop delay, `stable` is a set flag, camera is a generated image, no base. Before real robot: a ROS 2 Jazzy sim adapter on MuJoCo with mujoco_ros2_control, starting with one arm JTC goal plus cancel to measure cancel-to-stop time and hold; JTC goal tolerance as the cited `stable` (Tedrake, `/workspace/robotics/roboact-sim-choice-2026-11-01.md`; apt package, Thor rendering and stop delay unverified).
 - Adapter heartbeat; loss cancels active goals (ROS 2 goals outlive clients, [rclcpp #2241](https://github.com/ros2/rclcpp/issues/2241)).
 - Before real robot: the adapter or robot side stops on its own when the server heartbeat is lost, so a hung server still stops motion; the server's 10 s page pause is a backup (Tedrake, Thompson; inference).
 - `timeout_s` → controller expiry; controller without it: description says "expiry by adapter only", UI flags it.
 - Crash: `motion` → result unknown; poll actions query goal, blocking use `read_state`; human confirms.
 - Adapter silent 3 s → pause, `run.word.paused_adapter_lost`; deadline sent to adapter; 60 s Python timer as backup. Defaults adjustable, no source (Torvalds).
-- Listen 127.0.0.1 only; no `--host`; remote browser via SSH forwarding.
+- The browser runs on another computer on the LAN (Alex, 2026-11-01). How it connects is Alex's open choice:
+  - SSH forwarding (current code, Steve's recommendation): listen 127.0.0.1 only; no `--host`; the other computer runs `ssh -L`; no login in v0.1.
+  - Direct IP: `--host`, session login and Host/Origin allow-list per Thompson's `lan-auth-v1.md` (sha256 `d0c998f2…913039dc`), `r-token` screen (Rams); its own PR updates this section, A40 and acceptance 19.9.
 - Network loss: each action's adapter-defined behavior.
-- LAN access later: `--host` and tokens ship together.
 - A40 (exec-model v0.2.3 §0.2): `Host` `127.0.0.1`/`localhost`/`[::1]`; same `Origin`; `Content-Type: application/json`.
 
 ### Flow file (import / export) — added 2026-10-31 at Alex's request
@@ -234,26 +236,25 @@ Hardware
 
 19.9 A40 checks reject bad `Host`, `Content-Type`, `Origin`. Steps: acceptance.md#19.9
 
-19.10 `scripts/check.sh` passes on clean clone and aarch64; failures block merge except 19. Steps: acceptance.md#19.10
+19.10 `scripts/check.sh` passes on clean clone and aarch64; failures block merge except 19. Steps 5 and 7 need a real ROS adapter: before real robot, not v0.1 (Steve, 2026-11-01). Steps: acceptance.md#19.10
 
 20. Flow file: export, import, export is byte-identical; YAML converted to JSON equals the JSON export; unquoted `mode: on` stays a string; bad files change nothing; "action gone", "missing input" and mismatched files all lock Run. Steps: acceptance.md#20
 
-A6: failing (see 5). A38: 19.4. A40: 19.9. R1–R6 include two checks; Steps: acceptance.md#r1-r6
+A6: passing (PR #6). A38: 19.4. A40: 19.9. R1–R6 include two checks; Steps: acceptance.md#r1-r6
 
 ## 5. Risks and open questions
 
-- A6 failing: 11.251 s measured (PR #1) vs ≤ 10 s. Cause (Torvalds, 2026-11-01): executor checks disconnect only between nodes (`executor.py:1159`). Rule 14 changed to cancel the current action; until the executor and adapter change merges and acceptance.md#r1-r6 step 1 passes, 10 s is not a real-robot bound. A test-only change does not close A6.
+- A6 passed in PR #6 (main `2cdd0f4`): cancellable 30 s action, TCP cut, paused at 9.631–9.678 s over 5 runs; `timeout_s` = 11 non-cancellable `motion` blocks Run (Torvalds). Fake adapter only; the 10 s cap still needs Tedrake's per-robot check before the real robot.
 - Click to Paused: 35–54 frames under CI load, from queued node updates (Torvalds); same 3–4 frames on main and the A6 branch locally. Outside A5; fix in executor with A6; no limit set (Alex).
 - Cancel stop behavior (hold in place or decelerate) depends on each controller; adapter must state and test it (Tedrake, inference).
-- No auth; tokens (exec-model §0.2) or SSH before real robot.
 - Only 500 nodes tested; at thousands, LiteGraph (canvas) may win; re-measure first.
 - Perf numbers: headless, software rendering, ~60 Hz cap; compare libraries only.
 - React 19 has no UMD (esm.sh per upgrade).
 - Side-effect marks and no-memory data rely on node authors; check in code review. External state may change before single-node reruns.
-- Alex: step limit (1000 temporary); browser location (decides auth, affects v1); Stop = hold or safe pose; JetPack 7 real-time kernel and controller = Thor (not blocking v1).
+- Alex (2026-11-01): v0.1 runs on simulation only; first robot, controller and version not chosen, so heartbeat timing and the 10 s cap stay open. Target robot is a quadruped with an arm and a wrist camera (Steve); simulator: see robot section (Tedrake). JetPack 7 real-time kernel and controller = Thor (not blocking v1).
 - Torvalds: re-measure 19, 19.1; confirm 60 s timeout, 2 s SSE reconnect, 19.2 20 ms; fake-adapter actions.
 - Thompson: exec-model v0.2 keeps v0.1 storage and restart pause, A18, A20; adds action fields, pause/stop/crash under both `return_mode` values, cancel refused, `motion` rules (no mock, no idempotency dedupe, read state before resume).
 - Rams: English status words and buttons in the zh table; verify English fits nodes and top bar.
 - Tedrake: once vendor known, cite stop, controller power-loss and gripper power-loss behavior (adapter acceptance, not blocking v1).
 - Tedrake: confirm control nodes; `node-list-v0.md` obsolete (9 nodes kept for executor tests).
-- Flow file (added 2026-10-31): Alex, whether exported files should be diff-friendly for git (stable key order, no positions).
+- Flow file: export writes keys in a fixed order so git diffs stay small; positions stay in the file (Alex, 2026-11-01). Keys sorted, nodes by id, edges by their endpoints, 2-space indent, one final newline (already on main, `flow_file.py`, Torvalds); floats in the shortest form that reads back the same. Lists inside params (waypoints, loop steps) keep their order; only top-level nodes and edges are sorted (`flow-file-format-v1.md`, sha256 `412b44f4…628fee`, Thompson). Load then save with no edits gives the same bytes; a one-field edit changes only that line.
