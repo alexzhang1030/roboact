@@ -90,6 +90,13 @@ def _ids(rows: list[dict[str, Any]]) -> set[str]:
     return {str(r["node_id"]) for r in rows}
 
 
+def _open_log(page: Any, nid: str, needle: str) -> str:
+    page.locator(f".vue-flow__node[data-id='{nid}']").click()
+    page.get_by_role("button", name="Log").click()
+    page.locator("aside.right").get_by_text(needle).first.wait_for(timeout=15000)
+    return str(page.locator("aside.right").inner_text())
+
+
 def _restart(server: dict[str, Any]) -> None:
     proc = server["proc"]
     proc.terminate()
@@ -167,9 +174,7 @@ def test_3_edit_and_continue_downstream_sees_value(server, ui: _UI) -> None:
     rows = _records(server["base"], _rid(page))
     n4 = next(r for r in rows if r["node_id"] == "n4")
     assert n4["inputs"]["value"]["v"] == 99
-    page.locator(".vue-flow__node[data-id='n4']").click()
-    page.get_by_role("button", name="Log").click()
-    assert "99" in page.locator("aside.right").inner_text()
+    assert "99" in _open_log(page, "n4", "99")
 
 
 def test_4_refresh_keeps_pause_and_records(server, ui: _UI) -> None:
@@ -179,9 +184,7 @@ def test_4_refresh_keeps_pause_and_records(server, ui: _UI) -> None:
     page.locator(".vue-flow__node[data-id='n2'] .bp.after").click()
     page.locator("button.slot-1").click()
     _wait(page, "paused")
-    page.locator(".vue-flow__node[data-id='n2']").click()
-    page.get_by_role("button", name="Log").click()
-    before = page.locator("aside.right").inner_text()
+    before = _open_log(page, "n2", "keep-me")
     assert "keep-me" in before
     assert "Paused · breakpoint" in page.locator(".run-word").inner_text()
     page.reload(wait_until="domcontentloaded")
@@ -191,11 +194,9 @@ def test_4_refresh_keeps_pause_and_records(server, ui: _UI) -> None:
     assert pause["node_id"] == "n2"
     assert pause["reason"] == "breakpoint"
     assert "Paused · breakpoint" in page.locator(".run-word").inner_text()
-    page.locator(".vue-flow__node[data-id='n2']").click()
-    page.get_by_role("button", name="Log").click()
-    after = page.locator("aside.right").inner_text()
+    after = _open_log(page, "n2", "keep-me")
     assert "keep-me" in after
-    assert '"token"' in after or "token" in after
+    assert "token" in after
 
 
 def test_5_single_middle_node_one_record(server, ui: _UI) -> None:
@@ -465,9 +466,7 @@ def test_14_loop_exit_three_records(server, ui: _UI) -> None:
     for nid in ("body", "cond"):
         got = [r["round"] for r in rows if r["node_id"] == nid]
         assert got == [1, 2, 3], (nid, got)
-        page.locator(f".vue-flow__node[data-id='{nid}']").click()
-        page.get_by_role("button", name="Log").click()
-        text = page.locator("aside.right").inner_text()
+        text = _open_log(page, nid, "round 1")
         assert "round 1" in text
         assert "round 2" in text
         assert "round 3" in text
