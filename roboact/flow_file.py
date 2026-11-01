@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import math
 import multiprocessing
 import re
 from dataclasses import dataclass, field
@@ -147,7 +148,32 @@ class RunBlockers:
 
 
 def dump_json(obj: Any) -> str:
-    return json.dumps(obj, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
+    """Canonical JSON. Key order and list order: docs/flow-file.md §8."""
+    _reject_nonfinite(obj, "")
+    try:
+        text = json.dumps(obj, ensure_ascii=False, indent=2, sort_keys=True, allow_nan=False)
+    except ValueError as e:
+        raise FlowFileRejected([FileIssue("", str(e))]) from e
+    return text + "\n"
+
+
+def _reject_nonfinite(obj: Any, path: str) -> None:
+    """NaN and Infinity have no stable JSON spelling. docs/flow-file.md §8."""
+    if isinstance(obj, bool):
+        return
+    if isinstance(obj, float):
+        if not math.isfinite(obj):
+            label = "NaN" if math.isnan(obj) else "Infinity"
+            raise FlowFileRejected([FileIssue(path, f"{label} is not allowed")])
+        return
+    if isinstance(obj, dict):
+        for key, val in obj.items():
+            name = str(key)
+            _reject_nonfinite(val, f"{path}.{name}" if path else name)
+        return
+    if isinstance(obj, list):
+        for index, val in enumerate(obj):
+            _reject_nonfinite(val, f"{path}[{index}]")
 
 
 def canonical_filename(name: str, fmt: str) -> str:
@@ -255,6 +281,8 @@ def is_imported(graph: dict[str, Any]) -> bool:
 
 
 def dump_yaml(doc: dict[str, Any]) -> str:
+    """Canonical YAML. Same tree as dump_json. docs/flow-file.md §8."""
+    _reject_nonfinite(doc, "")
     yaml = YAML(typ="rt", pure=True)
     yaml.default_flow_style = False
     yaml.allow_unicode = True
@@ -638,6 +666,9 @@ def _check_limits(obj: Any, path: str, depth: int, issues: list[FileIssue]) -> N
         issues.append(FileIssue(path or "", f"string exceeds {MAX_STRING_CHARS} characters"))
     if isinstance(obj, int) and not isinstance(obj, bool) and abs(obj) > JS_MAX_SAFE:
         issues.append(FileIssue(path or "", "integer exceeds ±2^53"))
+    if isinstance(obj, float) and not math.isfinite(obj):
+        label = "NaN" if math.isnan(obj) else "Infinity"
+        issues.append(FileIssue(path or "", f"{label} is not allowed"))
     if isinstance(obj, dict):
         for key, val in obj.items():
             if not isinstance(key, str):
