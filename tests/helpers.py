@@ -5,8 +5,9 @@ import time
 from pathlib import Path
 from typing import Any
 
-from roboact.catalog import en
+from roboact.adapter import FakeAdapter
 from roboact.executor import Executor, compute_stale
+from roboact.nodes import bind_adapter
 from roboact.sse import SseHub
 from roboact.store import Store
 from roboact.tools import Tools
@@ -47,62 +48,6 @@ def make_flow(nodes, edges, fid="fl_test", version=1):
     }
 
 
-def chain_flow(bp_node: str | None = None, phase: str = "before", extra_bp: dict | None = None):
-    bps = {}
-    if bp_node:
-        bps[bp_node] = {phase: {"enabled": True, **(extra_bp or {})}}
-    nodes = [
-        n("start", "start", data={"v": 1}),
-        n("a", "echo", breakpoints=bps.get("a", {})),
-        n("b", "echo", breakpoints=bps.get("b", {})),
-        n("c", "echo", breakpoints=bps.get("c", {})),
-        n("out", "output"),
-    ]
-    edges = [
-        e("e0", "start", "data", "a", "value"),
-        e("e1", "a", "value", "b", "value"),
-        e("e2", "b", "value", "c", "value"),
-        e("e3", "c", "value", "out", "value"),
-    ]
-    return make_flow(nodes, edges)
-
-
-def loop_flow(compare=3, op="gte", inc_bp=None, fail=False):
-    inc_type = "fail" if fail else "inc"
-    nodes = [
-        n("start", "start", data={"value": 0}),
-        n("inc", inc_type, breakpoints={"before": inc_bp} if inc_bp else {}),
-        n("cond", "condition", field="value", op=op, compare=compare),
-        n("out", "output"),
-    ]
-    edges = [
-        e("e0", "start", "data", "inc", "value"),
-        e("e1", "inc", "value", "cond", "value"),
-        e("e2", "cond", "yes", "out", "value"),
-        e("e3", "cond", "no", "inc", "value"),
-    ]
-    return make_flow(nodes, edges)
-
-
-def confirm_flow():
-    nodes = [
-        n("start", "start", data={"v": 1}),
-        n("hc", "human_confirm", prompt=en("confirm.default")),
-        n("yes", "echo"),
-        n("no", "echo"),
-        n("out_yes", "output"),
-        n("out_no", "output"),
-    ]
-    edges = [
-        e("e0", "start", "data", "hc", "value"),
-        e("e1", "hc", "pass", "yes", "value"),
-        e("e2", "hc", "reject", "no", "value"),
-        e("e3", "yes", "value", "out_yes", "value"),
-        e("e4", "no", "value", "out_no", "value"),
-    ]
-    return make_flow(nodes, edges)
-
-
 def write_flow(line="hello"):
     nodes = [
         n("start", "start", data={"line": line}),
@@ -121,19 +66,6 @@ def write_flow(line="hello"):
     return make_flow(nodes, edges)
 
 
-def read_flow():
-    nodes = [
-        n("start", "start", data={}),
-        n("look", "tool_call", tool="read_note", allowed_tools=["read_note", "clock"]),
-        n("out", "output"),
-    ]
-    edges = [
-        e("e0", "start", "data", "look", "args"),
-        e("e1", "look", "result", "out", "value"),
-    ]
-    return make_flow(nodes, edges)
-
-
 def ctx(tmp_path: Path):
     store = Store(tmp_path / "t.db")
     hub = SseHub(store, interval=0.1)
@@ -142,6 +74,17 @@ def ctx(tmp_path: Path):
     ex = Executor(store, tools, hub, str(tmp_path / "data"))
     ex.ui_lost_s = None
     return ex, store, tools, hub
+
+
+def adapter_ctx(tmp_path: Path, adapter: FakeAdapter | None = None):
+    adapter = adapter or FakeAdapter()
+    bind_adapter(adapter)
+    store = Store(tmp_path / "t.db")
+    hub = SseHub(store, interval=0.1)
+    hub.start()
+    ex = Executor(store, adapter, hub, str(tmp_path / "data"))
+    ex.ui_lost_s = None
+    return ex, store, adapter, hub
 
 
 def boot(store: Store, flow: dict) -> tuple[str, int]:
@@ -232,7 +175,3 @@ def recs(store, rid):
         s["mocked"] = s.get("side_effect_mode") == "mock"
         out.append(s)
     return out
-
-
-def rec_nodes(store, rid):
-    return [r["node_id"] for r in recs(store, rid)]

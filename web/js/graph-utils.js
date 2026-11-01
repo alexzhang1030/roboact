@@ -1,15 +1,3 @@
-export function reachableFrom(nodes, edges, start) {
-  const seen = new Set()
-  const stack = [start]
-  while (stack.length) {
-    const u = stack.pop()
-    if (seen.has(u)) continue
-    seen.add(u)
-    for (const e of edges) if (e.source === u) stack.push(e.target)
-  }
-  return seen
-}
-
 export function isBackEdge(edges, edge) {
   if (edge.source === edge.target) return true
   const seen = new Set()

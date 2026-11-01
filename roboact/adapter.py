@@ -52,16 +52,6 @@ class Precondition(BaseModel):
     check: str | None = None
 
 
-class AdapterInfo(BaseModel):
-    """Adapter-level descriptor: name, version, target, action-list version."""
-
-    model_config = ConfigDict(extra="forbid")
-    name: str
-    version: str
-    target: Literal["sim", "real"]
-    action_list_version: str
-
-
 class ActionDescriptor(BaseModel):
     """Auto fields come from the adapter interface; the rest is the hand-written table."""
 
@@ -193,14 +183,6 @@ class Adapter:
         self.heartbeat_times: list[float] = []
         self.cancel_calls: list[dict[str, Any]] = []
 
-    def info(self) -> AdapterInfo:
-        return AdapterInfo(
-            name=self.name,
-            version=self.version,
-            target=self.target,
-            action_list_version=self.action_list_version,
-        )
-
     def list_actions(self) -> list[ActionDescriptor]:
         raise NotImplementedError
 
@@ -209,13 +191,6 @@ class Adapter:
             if d.id == action_id:
                 return d
         raise KeyError(f"unknown action: {action_id}")
-
-    def status(self) -> str:
-        if not self.connected:
-            return "disconnected"
-        if not self.list_actions():
-            return "empty"
-        return "ok"
 
     def public(self) -> dict[str, Any]:
         self.fetched_at = now_iso()
@@ -454,11 +429,6 @@ class Adapter:
 
     async def poll_progress(self, handle: ExecuteHandle) -> Progress | None:
         return handle.progress
-
-    async def get_result(self, handle: ExecuteHandle) -> ActionResult:
-        if handle.result is None:
-            raise RuntimeError("result not ready")
-        return handle.result
 
     async def run_blocking(
         self, action_id: str, inputs: dict[str, Any], handle: ExecuteHandle
@@ -952,33 +922,6 @@ class FakeAdapter(Adapter):
         if idem_key:
             self.idem[idem_key] = result
         return result
-
-    def write_count(self) -> int:
-        return len(self.writes)
-
-    def idem_count(self) -> int:
-        return len(self.idem)
-
-    # Names used by older write-fixture tests
-    def note_lines(self) -> list[str]:
-        out = []
-        for w in self.writes:
-            if w.get("kind") == "pose":
-                out.append(f"{w.get('x')},{w.get('y')},{w.get('z')}")
-            else:
-                out.append(str(w))
-        return out
-
-    @property
-    def ledger(self) -> Any:
-        class _L:
-            def __init__(self, n: int):
-                self._n = n
-
-            def count(self) -> int:
-                return self._n
-
-        return _L(self.idem_count())
 
 
 def _as_pose(inputs: dict[str, Any]) -> dict[str, float]:

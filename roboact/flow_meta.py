@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from . import FORMAT_VERSION
+
 GRAPH_FILE_KEYS = (
     "file_id",
     "revision",
@@ -10,6 +12,27 @@ GRAPH_FILE_KEYS = (
     "file_robot",
     "file_units",
 )
+
+
+def default_start_node() -> dict:
+    return {"id": "start", "type": "start", "x": 240, "y": 200, "params": {"data": {}}}
+
+
+def assemble_graph(flow_id: str, name: str, version: int, body: dict | None, nodes: list) -> dict:
+    src = body or {}
+    graph = {
+        "id": flow_id,
+        "flow_id": flow_id,
+        "name": name,
+        "version": version,
+        "format_version": FORMAT_VERSION,
+        "nodes": nodes,
+        "edges": src.get("edges") or [],
+        "groups": src.get("groups") or [],
+        "adapter_id": src.get("adapter_id"),
+        "action_list_version": src.get("action_list_version"),
+    }
+    return with_file_meta(graph, body)
 
 
 def with_file_meta(graph: dict, body: dict | None) -> dict:

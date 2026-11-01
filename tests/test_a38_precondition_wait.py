@@ -5,12 +5,8 @@ from __future__ import annotations
 import asyncio
 
 from roboact.adapter import FakeAdapter, Precondition
-from roboact.executor import Executor
-from roboact.nodes import bind_adapter
-from roboact.sse import SseHub
-from roboact.store import Store
 
-from tests.helpers import e, make_flow, n, recs, run_until
+from tests.helpers import adapter_ctx, e, make_flow, n, recs, run_until
 
 
 def _stand_adapter(
@@ -46,12 +42,7 @@ def _go_steps(store, rid):
 def test_a38_wait_then_send_when_stable(tmp_path):
     async def go():
         adapter = _stand_adapter(wait_s=2, stable_after_s=1.0)
-        bind_adapter(adapter)
-        store = Store(tmp_path / "t.db")
-        hub = SseHub(store, interval=0.1)
-        hub.start()
-        ex = Executor(store, adapter, hub, str(tmp_path / "data"))
-        ex.ui_lost_s = None
+        ex, store, adapter, hub = adapter_ctx(tmp_path, adapter)
         rid, st = await run_until(ex, store, _pose_flow(), "completed", timeout=8)
         await hub.stop()
         assert st.status == "completed"
@@ -67,12 +58,7 @@ def test_a38_wait_then_send_when_stable(tmp_path):
 def test_a38_deadline_precondition_failed_no_goal(tmp_path):
     async def go():
         adapter = _stand_adapter(wait_s=2, stable=False)
-        bind_adapter(adapter)
-        store = Store(tmp_path / "t.db")
-        hub = SseHub(store, interval=0.1)
-        hub.start()
-        ex = Executor(store, adapter, hub, str(tmp_path / "data"))
-        ex.ui_lost_s = None
+        ex, store, adapter, hub = adapter_ctx(tmp_path, adapter)
         rid, st = await run_until(ex, store, _pose_flow(), "error", timeout=8)
         await hub.stop()
         assert st.status == "error"
@@ -88,12 +74,7 @@ def test_a38_deadline_precondition_failed_no_goal(tmp_path):
 def test_a38_no_wait_fails_on_first_read(tmp_path):
     async def go():
         adapter = _stand_adapter(wait_s=None, stable=False)
-        bind_adapter(adapter)
-        store = Store(tmp_path / "t.db")
-        hub = SseHub(store, interval=0.1)
-        hub.start()
-        ex = Executor(store, adapter, hub, str(tmp_path / "data"))
-        ex.ui_lost_s = None
+        ex, store, adapter, hub = adapter_ctx(tmp_path, adapter)
         rid, st = await run_until(ex, store, _pose_flow(), "error", timeout=8)
         await hub.stop()
         assert st.status == "error"

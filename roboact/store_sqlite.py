@@ -7,7 +7,7 @@ from typing import Any
 
 from . import FORMAT_VERSION, SQLITE_BUSY_TIMEOUT_MS
 from .catalog import en
-from .flow_meta import persist_unlock_record, with_file_meta
+from .flow_meta import assemble_graph, default_start_node, persist_unlock_record
 from .util import dump, load, new_id, now_iso, sha256_text
 
 SCHEMA = f"""
@@ -153,9 +153,6 @@ class SqliteStore:
         )
         return g
 
-    def get_flow(self, flow_id: str) -> dict[str, Any] | None:
-        return self.latest_graph(flow_id)
-
     def latest_graph(self, flow_id: str) -> dict[str, Any] | None:
         meta = self.get_flow_meta(flow_id)
         if not meta:
@@ -170,22 +167,8 @@ class SqliteStore:
     ) -> dict[str, Any]:
         name = name or en("flow.untitled")
         flow_id = flow_id or new_id("fl_")
-        nodes = (body or {}).get("nodes") or [
-            {"id": "start", "type": "start", "x": 240, "y": 200, "params": {"data": {}}}
-        ]
-        graph = {
-            "id": flow_id,
-            "flow_id": flow_id,
-            "name": name,
-            "version": 1,
-            "format_version": FORMAT_VERSION,
-            "nodes": nodes,
-            "edges": (body or {}).get("edges") or [],
-            "groups": (body or {}).get("groups") or [],
-            "adapter_id": (body or {}).get("adapter_id"),
-            "action_list_version": (body or {}).get("action_list_version"),
-        }
-        with_file_meta(graph, body)
+        nodes = (body or {}).get("nodes") or [default_start_node()]
+        graph = assemble_graph(flow_id, name, 1, body, nodes)
         raw = dump(graph)
 
         def go(conn: sqlite3.Connection) -> dict[str, Any]:
@@ -208,19 +191,13 @@ class SqliteStore:
         if meta is None:
             return self.create_flow(body.get("name") or en("flow.untitled"), body, flow_id=flow_id)
         version = int(meta["latest_version"]) + (1 if bump else 0)
-        graph = {
-            "id": flow_id,
-            "flow_id": flow_id,
-            "name": body.get("name") or meta["name"],
-            "version": version,
-            "format_version": FORMAT_VERSION,
-            "nodes": body.get("nodes") or [],
-            "edges": body.get("edges") or [],
-            "groups": body.get("groups") or [],
-            "adapter_id": body.get("adapter_id"),
-            "action_list_version": body.get("action_list_version"),
-        }
-        with_file_meta(graph, body)
+        graph = assemble_graph(
+            flow_id,
+            body.get("name") or meta["name"],
+            version,
+            body,
+            body.get("nodes") or [],
+        )
         persist_unlock_record(graph, body)
         raw = dump(graph)
 
@@ -627,7 +604,3 @@ class SqliteStore:
             "VALUES(?,?,?,?,?,?,?)",
             (run_id, cmd_id, client_id, kind, pause_id, now_iso(), result),
         )
-
-
-# Leftover disk implementation. Do not extend. Default store is MemoryStore.
-Store = SqliteStore
