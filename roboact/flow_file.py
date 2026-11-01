@@ -63,17 +63,88 @@ KNOWN_JSON_TYPES = frozenset(
 BUILTIN_KINDS = frozenset(
     {"start", "end", "constant", "condition", "merge", "human_approval", "action"}
 )
-# File kind `end` is the Output node. The graph type is still `output`.
-# `kind: output` is refused in _validate_node, not mapped.
 KIND_TO_TYPE = {
     "start": "start",
-    "end": "output",
+    "end": "end",
     "constant": "constant",
     "condition": "condition",
     "merge": "merge",
     "human_approval": "human_confirm",
 }
 TYPE_TO_KIND = {v: k for k, v in KIND_TO_TYPE.items()}
+
+
+def output_type_message(nodes: list[Any] | None) -> str | None:
+    """Graph API still speaks type ids. `output` is refused, not converted."""
+    for index, node in enumerate(nodes or []):
+        if not isinstance(node, dict) or str(node.get("type") or "") != "output":
+            continue
+        raw_id = node.get("id")
+        label = raw_id if isinstance(raw_id, str) else ""
+        return f'nodes[{index}] (id {label}): type "output" was renamed to "end"'
+    return None
+
+
+def flow_structure(graph: dict[str, Any]) -> dict[str, Any] | None:
+    """Full-run gate. None when the flow has one Start, one End, and a path."""
+    nodes = [n for n in (graph.get("nodes") or []) if isinstance(n, dict)]
+    ends = [n for n in nodes if n.get("type") == "end"]
+    starts = [n for n in nodes if n.get("type") == "start"]
+    if len(ends) != 1:
+        count = len(ends)
+        return {
+            "code": "end_count",
+            "n": count,
+            "message": f"This flow has {count} End nodes.",
+        }
+    if len(starts) != 1:
+        count = len(starts)
+        return {
+            "code": "start_count",
+            "n": count,
+            "message": f"This flow has {count} Start nodes.",
+        }
+    end_id = str(ends[0].get("id") or "")
+    if not _end_reachable(graph, end_id):
+        return {
+            "code": "end_unreachable",
+            "node": end_id,
+            "node_id": end_id,
+            "message": f"End {end_id} cannot be reached from Start.",
+        }
+    return None
+
+
+def _end_reachable(graph: dict[str, Any], end_id: str) -> bool:
+    if not end_id:
+        return False
+    starts = [
+        str(n.get("id"))
+        for n in (graph.get("nodes") or [])
+        if isinstance(n, dict) and n.get("type") == "start" and isinstance(n.get("id"), str)
+    ]
+    if not starts:
+        return False
+    succ: dict[str, list[str]] = {}
+    for edge in graph.get("edges") or []:
+        if not isinstance(edge, dict):
+            continue
+        src = edge.get("source")
+        dst = edge.get("target")
+        if isinstance(src, str) and isinstance(dst, str):
+            succ.setdefault(src, []).append(dst)
+    seen: set[str] = set()
+    stack = list(starts)
+    while stack:
+        cur = stack.pop()
+        if cur in seen:
+            continue
+        seen.add(cur)
+        if cur == end_id:
+            return True
+        stack.extend(succ.get(cur, []))
+    return False
+
 
 TOP_KEYS = frozenset({"format", "format_version", "flow", "nodes", "edges"})
 FLOW_KEYS = frozenset(

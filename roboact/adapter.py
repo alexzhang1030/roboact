@@ -561,7 +561,7 @@ FAKE_ACTIONS: list[ActionDescriptor] = [
         read_state=False,
         expiry="controller",
         side_effect_note="reads sim pose",
-        icon="node-output",
+        icon="node-end",
     ),
     ActionDescriptor(
         id="fake_set_pose",

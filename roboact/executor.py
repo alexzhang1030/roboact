@@ -23,7 +23,14 @@ from .adapter import (
     image_summary,
 )
 from .errors import ApiError
-from .flow_file import inspect_run, inspect_values, is_imported, unlock_valid
+from .flow_file import (
+    flow_structure,
+    inspect_run,
+    inspect_values,
+    is_imported,
+    output_type_message,
+    unlock_valid,
+)
 from .graph import (
     connected_types,
     cycle_exit_details,
@@ -176,6 +183,13 @@ class Executor:
                 {"flow_id": flow_id, "flow_version": flow_version},
             )
         graph = copy.deepcopy(graph)
+        renamed = output_type_message(graph.get("nodes"))
+        if renamed:
+            raise ApiError(422, "invalid_graph", renamed)
+        if kind == "full":
+            bad = flow_structure(graph)
+            if bad:
+                raise ApiError(409, str(bad["code"]), str(bad["message"]), bad)
         self._check_adapter(graph)
         self._validate_graph(graph)
         self._check_cycles(graph, kind, node_ids)
@@ -1504,7 +1518,7 @@ class Executor:
             ctrl.t2_retry = t2
             await self._pause(ctrl, "storage_error", nid, "after", inputs, rnd, message=str(e))
             return
-        if node["type"] == "output":
+        if node["type"] == "end":
             ctrl.result = inputs.get("value")
             self.store.update_run(ctrl.run_id, result=image_summary(ctrl.result))
         if status == "stopped":
@@ -2074,6 +2088,7 @@ class Executor:
                 "last_step": ctrl.steps_used,
                 "last_node_id": last_node,
                 "error": ctrl.error,
+                "result": ctrl.result,
                 "at": now_iso(),
             },
         )

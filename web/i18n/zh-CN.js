@@ -188,7 +188,7 @@ export default {
   'confirm.external': '将按所选工具执行外部操作（可能写入文件）。',
   'node.fallback': '节点',
   'node.start': '开始',
-  'node.output': '输出',
+  'node.end': '结束',
   'node.constant': '常量',
   'node.condition': '条件判断',
   'node.merge': '合并',
@@ -288,4 +288,7 @@ export default {
   'lost.cancel_rejected': '页面断开。机器人拒绝取消 {node}，它一直运行到结束，随后运行暂停。',
   'run.no_cancel_too_long': '{node} 无法取消，可能要运行 {s} 秒。上限是 10 秒。',
   'run.no_cancel_too_long_count': '{n} 个节点无法取消，而且运行时间过长',
+  'run.end_count': '这个流程有 {n} 个结束节点。',
+  'run.start_count': '这个流程有 {n} 个开始节点。',
+  'run.end_unreachable': '从开始节点到不了结束节点 {node}。',
 }

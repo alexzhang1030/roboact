@@ -1,7 +1,7 @@
 import { defineComponent, markRaw, computed, inject } from 'vue'
 import { Handle, Position } from '@vue-flow/core'
 import { nodeStatus } from '../status-store.js'
-import { inputPorts } from '../graph-utils.js'
+import { endResultText, inputPorts } from '../graph-utils.js'
 import { t, locale, actionLabel, statusWord, mapError, portLabel } from '../i18n.js'
 
 const ICONS = {
@@ -47,6 +47,7 @@ export default markRaw(defineComponent({
     const toggleBp = inject('toggleBp', () => {})
     const tools = inject('tools', [])
     const iconBase = inject('iconBase', '/vendor/icons')
+    const runState = inject('runState', null)
     const spec = computed(() => (nodeTypes.value || nodeTypes).find(t => t.type === props.data.nodeType || t.type_id === props.data.nodeType))
     const ins = computed(() => inputPorts(spec.value, props.data.params))
     const outs = computed(() => (spec.value && spec.value.outputs) || [])
@@ -99,6 +100,11 @@ export default markRaw(defineComponent({
     const word = computed(() => {
       void locale.value
       return statusWord(st.value)
+    })
+    const endResult = computed(() => {
+      if (!props.data || props.data.nodeType !== 'end') return ''
+      const run = runState && runState.value
+      return endResultText(run, st.value)
     })
     const took = computed(() => {
       void locale.value
@@ -164,7 +170,7 @@ export default markRaw(defineComponent({
     const bpAfterTitle = computed(() => { void locale.value; return bpAfter.value.enabled ? t('bp.after_on') : t('bp.after_off') })
     return {
       Position, ins, outs, st, word, write, rows, spec, bpBefore, bpAfter, srcOf, toggleBp,
-      kind, icon, typeIcon, iconBase, icoUrl, summary, took, title, noCancel, sideTitle, bpBeforeTitle, bpAfterTitle, t, locale, portLabel,
+      kind, icon, typeIcon, iconBase, icoUrl, summary, took, endResult, title, noCancel, sideTitle, bpBeforeTitle, bpAfterTitle, t, locale, portLabel,
       isActionMissing, isMissingInput, portMissing,
     }
   },
@@ -193,6 +199,7 @@ export default markRaw(defineComponent({
     </div>
     <div class="fn-took" v-if="took" data-testid="node-took">{{ took }}</div>
     <div class="fn-err" v-if="summary" :class="{ amber: kind === 'unknown' }" :title="summary" data-testid="node-summary">{{ summary }}</div>
+    <div class="fn-result" v-if="endResult" data-testid="end-result">{{ endResult }}</div>
     <div class="fn-ports" v-if="rows">
       <div class="fn-port" v-for="n in rows" :key="n" :class="{ 'port-missing': portMissing(ins[n-1]) }">
         <template v-if="ins[n-1]">

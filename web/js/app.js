@@ -4,7 +4,7 @@ import { MiniMap } from '@vue-flow/minimap'
 import FlowNode from './components/FlowNode.js'
 import LoopEdge from './components/LoopEdge.js'
 import { nodeStatus, resetStatus, applyNodeStates } from './status-store.js'
-import { isBackEdge, typesOk, portType, toFlow, fromFlow } from './graph-utils.js'
+import { isBackEdge, typesOk, portType, toFlow, fromFlow, endResultText } from './graph-utils.js'
 import { get, send, openEvents } from './api.js'
 import { createHistory } from './history.js'
 import {
@@ -145,6 +145,7 @@ const App = defineComponent({
     provide('toggleBp', (...a) => toggleBp(...a))
     provide('tools', tools)
     provide('iconBase', '/vendor/icons')
+    provide('runState', run)
 
     const lodLow = ref(false)
     watch(() => vf.viewport.value.zoom < 0.6, v => { lodLow.value = v })
@@ -200,6 +201,7 @@ const App = defineComponent({
       if ((c.action_gone || []).length || (c.missing_input || []).length) return true
       if ((c.type_errors || []).length || (c.limit_errors || []).length) return true
       if ((c.timeout_errors || []).length) return true
+      if (c.structure && c.structure.code) return true
       if ((c.mismatches || []).length && !c.mismatch_unlocked) return true
       return false
     })
@@ -222,6 +224,20 @@ const App = defineComponent({
       void locale.value
       const n = ((runCheck.value && runCheck.value.missing_input) || []).length
       return n ? countLabel('run.missing_input_count', n) : ''
+    })
+    const structureText = computed(() => {
+      void locale.value
+      const s = (runCheck.value && runCheck.value.structure) || null
+      if (!s || !s.code) return ''
+      if (s.code === 'end_count') return t('run.end_count', { n: s.n })
+      if (s.code === 'start_count') return t('run.start_count', { n: s.n })
+      if (s.code === 'end_unreachable') return t('run.end_unreachable', { node: s.node })
+      return ''
+    })
+    const endPanelText = computed(() => {
+      const n = selectedNode.value
+      if (!n || !n.data || n.data.nodeType !== 'end') return ''
+      return endResultText(run.value, nodeStatus[n.id])
     })
     const timeoutCapText = computed(() => {
       void locale.value
@@ -339,13 +355,23 @@ const App = defineComponent({
       return t(key, { used: s, limit: lim })
     })
     const paletteTypes = computed(() => nodeTypesList.value.filter(t => t.palette !== false))
+    const CONTROL_ORDER = ['start', 'end', 'constant', 'condition', 'merge', 'human_confirm']
     const paletteGroups = computed(() => {
       const map = {}
       for (const t of paletteTypes.value) {
         const g = t.group || (t.from_adapter ? (adapter.value.name || adapter.value.id || 'adapter') : 'control')
         ;(map[g] = map[g] || []).push(t)
       }
-      return Object.entries(map).map(([name, items]) => ({ name, items }))
+      return Object.entries(map).map(([name, items]) => {
+        if (name === 'control') {
+          items.sort((a, b) => {
+            const ia = CONTROL_ORDER.indexOf(a.type)
+            const ib = CONTROL_ORDER.indexOf(b.type)
+            return (ia < 0 ? CONTROL_ORDER.length : ia) - (ib < 0 ? CONTROL_ORDER.length : ib)
+          })
+        }
+        return { name, items }
+      })
     })
     const paletteStatus = computed(() => {
       void locale.value
@@ -582,7 +608,7 @@ const App = defineComponent({
       } catch (_) {
           runCheck.value = {
             action_gone: [], missing_input: [], mismatches: [], mismatch_unlocked: false,
-            type_errors: [], limit_errors: [], timeout_errors: [], can_run: false,
+            type_errors: [], limit_errors: [], timeout_errors: [], structure: null, can_run: false,
           }
       }
       applyImportMarks()
@@ -758,7 +784,7 @@ const App = defineComponent({
           flushNodes()
           storageErr.value = ''
           pausePending.value = false
-          if (run.value) run.value = { ...run.value, status: ev.status, steps_used: ev.steps_used, error: ev.error, pause: null }
+          if (run.value) run.value = { ...run.value, status: ev.status, steps_used: ev.steps_used, error: ev.error, pause: null, result: ev.result }
           refreshRecords(runId)
         },
         version_drift: (ev) => { if (run.value) run.value = { ...run.value, latest_flow_version: ev.latest_version } },
@@ -1293,7 +1319,7 @@ const App = defineComponent({
       motion, motionMode, motionOpen, pickMotion, savedViewport, defaultViewport, persistViewportNow, logFilter,
       showMini, showGrid, addMenu, addQ, rejectMsg, overlay, specOf, t, typeLabel, fieldLabel, groupTitle, slot1Key,
       adapterLabel, flowNameLabel, nameEditing, topEl, runLocked, runLockedText, slot1Title,
-      actionGoneCount, missingInputCount, timeoutCapText, timeoutCapIds, noCancelTooLongCount, lostLine, uncancellable, jumpToFirst, onNameClick, startNameEdit, finishNameEdit, fitTopBar,
+      actionGoneCount, missingInputCount, timeoutCapText, timeoutCapIds, noCancelTooLongCount, structureText, endPanelText, lostLine, uncancellable, jumpToFirst, onNameClick, startNameEdit, finishNameEdit, fitTopBar,
       nodeRecords, logRecords, rounds, shownRec, viewRound, runActive, waitingApproval, confirmNote, versionWarn, stepsClass, stepsText,
       filteredTypes, paletteTypes, paletteGroups, paletteStatus, groupBoxes, portSources, stepLimit, overrides, singleRound, compareA, compareB, compareOut,
       deadlineAdapterOnly, outputImages, isReal, crashRecovery, selectedSpec,
@@ -1339,7 +1365,8 @@ const App = defineComponent({
           <span class="run-counts missing" data-testid="count-missing-input" v-if="missingInputCount" @click="jumpToFirst(runCheck.missing_input)">{{ missingInputCount }}</span>
           <span class="run-counts" data-testid="motion-timeout-cap" v-if="noCancelTooLongCount" @click="jumpToFirst(timeoutCapIds)">{{ noCancelTooLongCount }}</span>
         </div>
-        <p class="lost-line" data-testid="lost-line" v-if="lostLine">{{ lostLine }}</p>
+          <p class="lost-line" data-testid="lost-line" v-if="lostLine">{{ lostLine }}</p>
+          <p class="lost-line" data-testid="run-refused" v-else-if="structureText">{{ structureText }}</p>
         <div class="mismatch" :class="{ out: mismatchFade }" v-if="mismatch">{{ mismatch }}</div>
       </div>
       <div class="right">
@@ -1518,7 +1545,8 @@ const App = defineComponent({
                 <img :src="img.data || img.url" :alt="name">
                 <p class="img-cap">{{ t('out.cap', { name: name, bytes: img.bytes || '?', w: img.width, h: img.height, at: img.captured_at, round: shownRec && shownRec.round, step: shownRec && shownRec.step }) }}</p>
               </div>
-              <div class="kv">{{ JSON.stringify(shownRec && shownRec.outputs || run && run.output || {}, null, 2) }}</div>
+              <div class="kv" v-if="endPanelText" data-testid="end-panel-result">{{ endPanelText }}</div>
+              <div class="kv" v-else>{{ JSON.stringify(shownRec && shownRec.outputs || run && run.output || {}, null, 2) }}</div>
               <p v-if="shownRec && shownRec.error" style="color:var(--red)">{{ shownRec.error }}</p>
             </template>
             <template v-if="tab==='params'">

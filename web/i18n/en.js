@@ -188,7 +188,7 @@ export default {
   'confirm.external': 'This will run the selected tool for real (it may write files).',
   'node.fallback': 'Node',
   'node.start': 'Start',
-  'node.output': 'Output',
+  'node.end': 'End',
   'node.constant': 'Constant',
   'node.condition': 'Condition',
   'node.merge': 'Merge',
@@ -288,4 +288,7 @@ export default {
   'lost.cancel_rejected': 'Page disconnected. The robot refused to cancel {node}; it ran to end, then the run paused.',
   'run.no_cancel_too_long': '{node} can\'t be cancelled and may run {s} s. The limit is 10 s.',
   'run.no_cancel_too_long_count': '{n} nodes can\'t be cancelled and run too long',
+  'run.end_count': 'This flow has {n} End nodes.',
+  'run.start_count': 'This flow has {n} Start nodes.',
+  'run.end_unreachable': 'End {node} cannot be reached from Start.',
 }

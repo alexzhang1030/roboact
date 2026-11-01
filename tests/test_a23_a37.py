@@ -25,7 +25,7 @@ def pose_flow(**go_bp):
         [
             n("start", "start", data={"x": 0.4, "y": 0.1, "z": 0.2}),
             n("go", "fake_set_pose", breakpoints=go_bp or {}),
-            n("out", "output"),
+            n("out", "end"),
         ],
         [
             e("e0", "start", "data", "go", "target"),
@@ -159,11 +159,13 @@ def test_a33_operator_lost_pauses_without_cancel(tmp_path):
                 n("a", "echo"),
                 n("s", "sleep", seconds=0.6),
                 n("b", "echo"),
+                n("end", "end"),
             ],
             [
                 e("e0", "start", "data", "a", "value"),
                 e("e1", "a", "value", "s", "value"),
                 e("e2", "s", "value", "b", "value"),
+                e("e3", "b", "value", "end", "value"),
             ],
         )
         rid, _ = await run_until(ex, store, flow, "running", timeout=2)
@@ -190,11 +192,13 @@ def test_a34_adapter_lost_pauses(tmp_path):
                 n("a", "echo"),
                 n("s", "sleep", seconds=0.8),
                 n("b", "echo"),
+                n("end", "end"),
             ],
             [
                 e("e0", "start", "data", "a", "value"),
                 e("e1", "a", "value", "s", "value"),
                 e("e2", "s", "value", "b", "value"),
+                e("e3", "b", "value", "end", "value"),
             ],
         )
         rid, _ = await run_until(ex, store, flow, "running", timeout=2)

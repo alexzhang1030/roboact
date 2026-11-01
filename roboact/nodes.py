@@ -157,18 +157,18 @@ class StartNode(NodeType):
         return StartOut(data=params.data)
 
 
-class OutputIn(BaseModel):
+class EndIn(BaseModel):
     value: Any = Field(default=None, json_schema_extra={"port_type": "any"}, title="Result")
 
 
-class OutputNode(NodeType):
-    type_id = "output"
-    title = en("node.output")
-    Inputs = OutputIn
+class EndNode(NodeType):
+    type_id = "end"
+    title = en("node.end")
+    Inputs = EndIn
     Outputs = Empty
-    icon = "node-output"
+    icon = "node-end"
 
-    async def run(self, inputs: OutputIn, params: BaseModel, ctx: RunContext):
+    async def run(self, inputs: EndIn, params: BaseModel, ctx: RunContext):
         return Empty()
 
 
@@ -448,7 +448,7 @@ REGISTRY: dict[str, type[NodeType]] = {
     cls.type_id: cls
     for cls in (
         StartNode,
-        OutputNode,
+        EndNode,
         ConstantNode,
         ConditionNode,
         MergeNode,

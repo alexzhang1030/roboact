@@ -50,7 +50,7 @@ def http_status(
 
 
 def echo_chain_graph(n_nodes: int, name: str = "") -> dict[str, Any]:
-    """start + echoes + output. n_nodes includes start and output."""
+    """start + echoes + end. n_nodes includes start and end."""
     n_echo = max(0, n_nodes - 2)
     nodes: list[dict[str, Any]] = [
         {"id": "start", "type": "start", "x": 0, "y": 0, "params": {"data": {"v": 1}}},
@@ -79,7 +79,7 @@ def echo_chain_graph(n_nodes: int, name: str = "") -> dict[str, Any]:
             }
         )
         prev, prev_port = nid, "value"
-    nodes.append({"id": "out", "type": "output", "x": 40, "y": 40, "params": {}})
+    nodes.append({"id": "out", "type": "end", "x": 40, "y": 40, "params": {}})
     edges.append(
         {
             "id": "eout",
@@ -118,7 +118,7 @@ def motion_graph(name: str = "A6 motion") -> dict[str, Any]:
                 "params": {"x": 0.4, "y": 0.1, "z": 0.2},
             },
             {"id": "grip", "type": "fake_gripper", "x": 560, "y": 160, "params": {"open": True}},
-            {"id": "out", "type": "output", "x": 560, "y": 360, "params": {}},
+            {"id": "out", "type": "end", "x": 560, "y": 360, "params": {}},
         ],
         "edges": [
             {

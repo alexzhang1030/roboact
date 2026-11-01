@@ -7,7 +7,7 @@ from typing import Any
 
 from . import FORMAT_VERSION, SQLITE_BUSY_TIMEOUT_MS
 from .catalog import en
-from .flow_meta import assemble_graph, default_start_node, persist_unlock_record
+from .flow_meta import assemble_graph, default_new_flow, persist_unlock_record
 from .util import dump, load, new_id, now_iso, sha256_text
 
 SCHEMA = f"""
@@ -167,8 +167,14 @@ class SqliteStore:
     ) -> dict[str, Any]:
         name = name or en("flow.untitled")
         flow_id = flow_id or new_id("fl_")
-        nodes = (body or {}).get("nodes") or [default_start_node()]
-        graph = assemble_graph(flow_id, name, 1, body, nodes)
+        src = dict(body or {})
+        if src.get("nodes"):
+            nodes = src["nodes"]
+        else:
+            nodes, edges = default_new_flow()
+            src["nodes"] = nodes
+            src["edges"] = edges
+        graph = assemble_graph(flow_id, name, 1, src, nodes)
         raw = dump(graph)
 
         def go(conn: sqlite3.Connection) -> dict[str, Any]:

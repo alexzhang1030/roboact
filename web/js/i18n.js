@@ -153,6 +153,9 @@ export function mapError(code, params) {
     param_out_of_limit: 'run.param_out_of_limit',
     motion_timeout_cap: 'run.motion_timeout_cap',
     missing_input: 'status.missing_input',
+    end_count: 'run.end_count',
+    start_count: 'run.start_count',
+    end_unreachable: 'run.end_unreachable',
   }
   const key = aliases[code] || ('error.' + code)
   const hit = t(key, params)

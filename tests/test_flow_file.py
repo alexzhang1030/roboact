@@ -1310,7 +1310,7 @@ DEMO_NODE_CLIENT_H = {
     "fake_set_pose": 132,
     "fake_gripper": 84,
     "fake_camera": 60,
-    "output": 60,
+    "end": 60,
 }
 
 
