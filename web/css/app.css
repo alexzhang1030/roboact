@@ -149,6 +149,11 @@ label { display: block; color: var(--muted); font-size: 12px; margin: 8px 0 4px;
   height: 36px; flex: none; display: flex; align-items: center; gap: 8px; padding: 0 12px;
   background: var(--bg); border-bottom: 1px solid var(--border); color: var(--text);
 }
+.banner.banner-busy {
+  height: auto; align-items: flex-start; padding-top: 6px; padding-bottom: 6px;
+}
+.banner-rerun { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; max-width: 420px; }
+.banner-rerun .in-busy { margin: 0; }
 .banner .spacer { flex: 1; }
 .banner.amber { box-shadow: inset 3px 0 0 var(--amber); }
 .banner.danger { box-shadow: inset 3px 0 0 var(--red); }
@@ -524,6 +529,8 @@ dialog.confirm-dialog .confirm-actions {
   color: var(--muted);
   text-align: left;
 }
+.group-run { margin-bottom: 8px; }
+.group-run-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 
 @media (max-width: 800px) {
   .left { display: none; }

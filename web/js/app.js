@@ -1280,7 +1280,7 @@ const App = defineComponent({
       jumpToFirst, runLocked, runLockedText, actionGoneCount, missingInputCount, timeoutCapText,
       adapterLost, uiLost, operatorLost, rejectedActions, resolveMotion, theme, themeMode, setThemeMode,
       applyTheme, selected, tab, toggleTheme, locale, localeMode, setLocaleMode, motion, motionMode,
-      setMotionMode, t, leftOpen, rightW, showMini, meta, logFilter,
+      setMotionMode, t, leftOpen, rightW, showMini, meta, groups, logFilter,
     }
 
     return {
@@ -1382,10 +1382,15 @@ const App = defineComponent({
       </span>
     </div>
     <div class="banners">
-      <div class="banner" v-for="b in banners" :key="b.id" :class="b.kind">
+      <div class="banner" v-for="b in banners" :key="b.id" :class="[b.kind, nodeBusy && b.actions==='version' ? 'banner-busy' : '']">
         <span>{{ b.text }}</span>
         <span class="spacer"></span>
-        <template v-if="b.actions==='version'"><button :disabled="nodeBusy" :aria-describedby="nodeBusy ? (selectedNode ? 'in-busy' : 'in-busy-group') : null" @click="rerunNew">{{ t('banner.rerun') }}</button></template>
+        <template v-if="b.actions==='version'">
+          <div class="banner-rerun">
+            <button :disabled="nodeBusy" :aria-describedby="nodeBusy ? 'in-busy-banner' : null" @click="rerunNew">{{ t('banner.rerun') }}</button>
+            <p v-if="nodeBusy" id="in-busy-banner" class="in-busy">{{ t('in.busy') }}</p>
+          </div>
+        </template>
         <template v-if="b.actions==='approval'">
           <button @click="decide('reject')">{{ t('banner.reject') }}</button>
           <button class="primary" @click="decide('approve')">{{ t('banner.approve') }}</button>
@@ -1587,11 +1592,13 @@ const App = defineComponent({
               <div v-if="compareOut" class="kv">{{ compareOut.map(x => x.key + (JSON.stringify((x.a||{}).outputs)===JSON.stringify((x.b||{}).outputs) ? (' ' + t('run.same')) : (' ' + t('run.diff')))).join('\\n') }}</div>
             </template>
             <h3 style="margin-top:16px">{{ t('groups.title') }}</h3>
-            <div v-for="g in groups" :key="g.id" style="margin-bottom:8px">
-              {{ g.name }} ({{ g.node_ids.length }})
-              <button :disabled="nodeBusy" :aria-describedby="nodeBusy ? 'in-busy-group' : null" @click="runGroup(g)">{{ t('groups.run') }}</button>
+            <div v-for="g in groups" :key="g.id" class="group-run">
+              <div class="group-run-head">
+                <span>{{ g.name }} ({{ g.node_ids.length }})</span>
+                <button :disabled="nodeBusy" :aria-describedby="nodeBusy ? ('in-busy-group-' + g.id) : null" @click="runGroup(g)">{{ t('groups.run') }}</button>
+              </div>
+              <p v-if="nodeBusy" :id="'in-busy-group-' + g.id" class="in-busy">{{ t('in.busy') }}</p>
             </div>
-            <p v-if="nodeBusy && groups.length" id="in-busy-group" class="in-busy">{{ t('in.busy') }}</p>
             <p v-if="!groups.length" style="color:var(--muted)">{{ t('groups.empty') }}</p>
           </div>
         </template>

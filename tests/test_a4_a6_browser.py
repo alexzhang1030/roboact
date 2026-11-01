@@ -985,7 +985,8 @@ def test_run_buttons_off_while_node_executes(server) -> None:
         page.evaluate("() => { window.__af.selected.value = null }")
         group_run = page.get_by_role("button", name="Run this group")
         assert group_run.is_disabled()
-        assert page.locator("#in-busy-group").inner_text() == _BUSY
+        assert page.locator("#in-busy-group-g1").inner_text() == _BUSY
+        assert group_run.get_attribute("aria-describedby") == "in-busy-group-g1"
         _stop_run(page)
         page.wait_for_function(
             """() => {
@@ -997,6 +998,99 @@ def test_run_buttons_off_while_node_executes(server) -> None:
         _select_in(page, "go")
         assert not page.get_by_role("button", name="Run this only").is_disabled()
         assert page.locator("#in-busy").count() == 0
+        br.close()
+    finally:
+        p.stop()
+
+
+def _describedby_missing(page) -> list:
+    return page.evaluate(
+        """() => {
+          const missing = []
+          for (const el of document.querySelectorAll('[aria-describedby]')) {
+            const id = el.getAttribute('aria-describedby')
+            if (!id || !document.getElementById(id)) {
+              missing.push({ text: (el.textContent || '').trim(), id: id || '' })
+            }
+          }
+          return missing
+        }"""
+    )
+
+
+def _show_version_banner(page) -> None:
+    page.evaluate(
+        """() => {
+          const meta = window.__af.meta.value
+          window.__af.meta.value = { ...meta, version: (meta.version || 0) + 1 }
+        }"""
+    )
+    page.wait_for_function(
+        """() => [...document.querySelectorAll('button')].some(
+          b => (b.textContent || '').includes('Rerun from the new version')
+            || (b.textContent || '').includes('从新版本重跑')
+        )"""
+    )
+
+
+def test_busy_describedby_targets_exist(server) -> None:
+    """Every aria-describedby while a node executes names an element that is in the DOM."""
+    put_flow(server["base"], motion_graph("confirm describedby"))
+    http_json(
+        server["base"],
+        "/api/test/adapter",
+        "POST",
+        {"async_steps": 1, "async_sleep_s": 40.0},
+    )
+    p, _path = _launch()
+    try:
+        br = _browser(p)
+        page, _blocked, _errs = _open(br, server["base"])
+        page.evaluate("async () => { await window.__af.doRun('all') }")
+        _wait_run(page, "running")
+        rid = _run_id(page)
+        deadline = time.monotonic() + 20
+        while time.monotonic() < deadline:
+            snap = http_json(server["base"], f"/api/runs/{rid}")
+            node = (snap.get("nodes") or {}).get("go") or {}
+            st = node.get("state") or node.get("status")
+            if (snap.get("run") or snap).get("status") == "running" and st == "running":
+                break
+            time.sleep(0.05)
+        else:
+            raise AssertionError("go never started")
+        _select_in(page, "go")
+        _show_version_banner(page)
+
+        def check(label: str) -> None:
+            missing = _describedby_missing(page)
+            assert missing == [], (label, missing)
+            banner = page.locator("#in-busy-banner")
+            assert banner.count() == 1, label
+            assert (
+                page.get_by_role("button", name="Rerun from the new version").get_attribute(
+                    "aria-describedby"
+                )
+                == "in-busy-banner"
+            )
+
+        check("no groups, node selected")
+        page.evaluate("() => { window.__af.selected.value = null }")
+        page.wait_for_timeout(50)
+        check("no groups, nothing selected")
+        page.evaluate(
+            """() => {
+              window.__af.groups.value = [{ id: 'g1', name: 'Bunch', node_ids: ['go', 'grip'] }]
+            }"""
+        )
+        page.wait_for_timeout(50)
+        check("a group, nothing selected")
+        group = page.get_by_role("button", name="Run this group")
+        assert group.get_attribute("aria-describedby") == "in-busy-group-g1"
+        assert page.locator("#in-busy-group-g1").count() == 1
+        _select_in(page, "go")
+        check("a group, node selected")
+        _stop_run(page)
         br.close()
     finally:
         p.stop()
