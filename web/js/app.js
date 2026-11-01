@@ -468,7 +468,7 @@ const App = defineComponent({
       } catch (e) { overlay.value = mapError(e.code) || e.message }
     }
 
-    function setBpRound() {
+    async function setBpRound() {
       const n = selectedNode.value
       if (!n) return
       const raw = prompt(t('params.bp_prompt'), ((n.data.breakpoints || {}).before || {}).round || '')
@@ -479,6 +479,13 @@ const App = defineComponent({
       bps.before = cur
       n.data = { ...n.data, breakpoints: bps }
       scheduleSave(true)
+      try {
+        await send('/api/flows/' + meta.value.id + '/breakpoints/' + n.id + '/before', 'PUT', {
+          enabled: true,
+          mode: cur.round ? 'round' : 'every',
+          round: cur.round || null,
+        })
+      } catch (e) { overlay.value = mapError(e.code) || e.message }
     }
 
     function removeSelected() {
@@ -522,6 +529,8 @@ const App = defineComponent({
         const r = await send('/api/flows/' + meta.value.id, 'PUT', body)
         meta.value = { ...meta.value, version: r.flow.version, name: r.flow.name }
         await refreshRunCheck()
+        const rid = run.value && (run.value.run_id || run.value.id)
+        if (rid) await refreshRecords(rid)
       } catch (e) { overlay.value = mapError(e.code) || e.message }
     }
 
@@ -806,7 +815,9 @@ const App = defineComponent({
         records.value = []
         listen(rid)
       } catch (e) {
-        rejectMsg.value = mapError(e.code, (e.body && e.body.detail) || {}) || e.message
+        const detail = (e.body && e.body.detail) || {}
+        const named = (detail.errors && detail.errors[0]) || detail
+        rejectMsg.value = mapError(e.code, named) || (e.body && e.body.message) || e.message
         overlay.value = rejectMsg.value
       }
     }
@@ -975,8 +986,15 @@ const App = defineComponent({
 
     function runSingle() {
       if (!selected.value) return
-      const rec = shownRec.value
-      doRun('single', { node_id: selected.value, source_run_id: rec && rec.run_id, step: rec && rec.step, source_round: singleRound.value })
+      const wanted = singleRound.value == null || singleRound.value === '' ? null : Number(singleRound.value)
+      const list = records.value.filter(r => r.node_id === selected.value && (wanted == null || r.round === wanted))
+      const rec = list.length ? list[list.length - 1] : shownRec.value
+      doRun('single', {
+        node_id: selected.value,
+        source_run_id: rec && rec.run_id,
+        step: rec && rec.step,
+        source_round: wanted,
+      })
     }
     function runFrom() {
       if (!selected.value || !shownRec.value) return

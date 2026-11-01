@@ -2,15 +2,15 @@
 
 from __future__ import annotations
 
-import pytest
 from roboact import ADAPTER_HEARTBEAT_S, UI_LOST_TIMEOUT_S
 from roboact.catalog import zh
 
+from tests.conftest import import_playwright
 from tests.http_api import http_json, motion_graph, put_flow
 from tests.test_prd195_theme_contrast_fonts import _browser, _goto_ready, _wired_page
 from tests.test_ui import _launch
 
-pw = pytest.importorskip("playwright.sync_api")
+pw = import_playwright()
 
 
 def test_prd196_default_locale_from_navigator(server):

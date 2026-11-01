@@ -14,7 +14,6 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
-import pytest
 from roboact.catalog import en
 from roboact.flow_file import (
     MAX_FILE_BYTES,
@@ -23,7 +22,7 @@ from roboact.flow_file import (
     parse_yaml,
 )
 
-from .conftest import launch_chromium, record_c11_heartbeat_gap
+from .conftest import import_playwright, launch_chromium, missing_browser, record_c11_heartbeat_gap
 from .http_api import http_json, http_status
 
 FORBIDDEN_KEYS = (
@@ -268,11 +267,12 @@ def _forged_unlock(adapter: dict[str, Any], file_id: str) -> dict[str, Any]:
 
 
 def _open_ui(base: str, flow_id: str | None = None):
-    pw = pytest.importorskip("playwright.sync_api")
+    pw = import_playwright()
     try:
         playwright = pw.sync_playwright().start()
     except Exception as e:
-        pytest.skip("playwright/chromium not available: " + str(e))
+        missing_browser(str(e))
+        raise
     try:
         browser = launch_chromium(playwright)
     except BaseException:
@@ -444,6 +444,8 @@ edges:
     assert any(e["param"] == "ver" for e in check["type_errors"])
     code, body = http_status(base, "/api/runs", "POST", {"flow_id": fid, "flow_version": 1})
     assert code == 409
+    assert body["error"] == "param_type_mismatch"
+    assert "Note" in body["message"]
     assert "ver" in body["message"]
     note["params"]["ver"] = "1.10"
     http_json(
@@ -458,6 +460,72 @@ edges:
         base, "/api/runs", "POST", {"flow_id": fid, "flow_version": 2, "max_steps": 20}
     )
     assert started["run_id"]
+
+
+def test_20_5_quoted_string_runs(server):
+    """Quoted ver \"1.10\" stays a string, and the run executes that flow version."""
+    base = server["base"]
+    yml = """
+format: roboact-flow
+format_version: 1
+flow:
+  id: "handq"
+  name: "handq"
+  revision: 1
+  step_limit: 20
+  action_list_version: "fake-v1"
+  adapter: {name: "__ADAPTER__", version: "0.2", target: "sim"}
+  robot: {id: "fake-1", model: "FakeArm"}
+  units: {angle: "rad", length: "m"}
+nodes:
+  - id: "start"
+    kind: start
+    title: Start
+    params: {data: {x: 0.1}}
+    position: {x: 0, y: 0}
+  - id: "note"
+    kind: action
+    action: fake_note
+    title: Note
+    params: {mode: "on", ver: "1.10", token: "filled"}
+    position: {x: 40, y: 80}
+  - id: "out"
+    kind: output
+    title: Out
+    params: {}
+    position: {x: 280, y: 0}
+edges:
+  - from: {node: start, port: data}
+    to: {node: out, port: value}
+""".replace("__ADAPTER__", en("adapter.fake"))
+    code, imported = _import(base, yml, "yml")
+    assert code == 200, imported
+    note = next(n for n in imported["flow"]["nodes"] if n["id"] == "note")
+    assert note["params"]["ver"] == "1.10"
+    assert isinstance(note["params"]["ver"], str)
+    fid = imported["flow"]["id"]
+    check = http_json(base, f"/api/flows/{fid}/run-check")
+    assert check["can_run"]
+    assert not check["type_errors"]
+    started = http_json(
+        base, "/api/runs", "POST", {"flow_id": fid, "flow_version": 1, "max_steps": 20}
+    )
+    rid = started["run_id"]
+    t0 = time.time()
+    status = None
+    while time.time() - t0 < 20:
+        body = http_json(base, f"/api/runs/{rid}")
+        status = (body.get("run") or body).get("status")
+        if status in ("completed", "error", "stopped", "step_limit"):
+            break
+        time.sleep(0.05)
+    assert status == "completed", status
+    locked = (body.get("run") or body)["flow_version"]
+    flow = http_json(base, f"/api/flows/{fid}")["flow"]
+    assert flow["version"] == locked
+    executed = next(n for n in flow["nodes"] if n["id"] == "note")
+    assert executed["params"]["ver"] == "1.10"
+    assert isinstance(executed["params"]["ver"], str)
 
 
 def test_20_6(server):
@@ -703,6 +771,8 @@ def test_20_11(server):
     code, body = http_status(base, "/api/runs", "POST", {"flow_id": fid, "flow_version": 1})
     assert code == 409
     assert body["error"] == "param_out_of_limit"
+    assert "Go" in body["message"]
+    assert "z" in body["message"]
     http_json(
         base,
         "/api/test/adapter",
@@ -798,10 +868,15 @@ def test_20_14(server):
     fid = imported["flow"]["id"]
     http_json(base, "/api/test/adapter", "POST", {"velocity_limits": {"speed": [0, 2]}})
     check = http_json(base, f"/api/flows/{fid}/run-check")
-    assert any(e["param"] == "mode" and e.get("type") == "enum" for e in check["type_errors"])
-    assert any(e["param"] == "speed" for e in check["limit_errors"])
-    code, _body = http_status(base, "/api/runs", "POST", {"flow_id": fid, "flow_version": 1})
+    assert any(
+        e["param"] == "mode" and e.get("type") == "enum" and e.get("node") == "Note"
+        for e in check["type_errors"]
+    )
+    assert any(e["param"] == "speed" and e.get("node") == "Go" for e in check["limit_errors"])
+    code, body = http_status(base, "/api/runs", "POST", {"flow_id": fid, "flow_version": 1})
     assert code == 409
+    assert "Note" in body["message"]
+    assert "mode" in body["message"]
 
 
 def test_20_15(server, tmp_path):

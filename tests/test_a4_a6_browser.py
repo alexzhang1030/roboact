@@ -4,11 +4,10 @@ from __future__ import annotations
 
 import time
 
-import pytest
 from roboact import A5_MAX_MS, A5_P95_MS
 from roboact.catalog import zh
 
-from tests.conftest import launch_chromium
+from tests.conftest import import_playwright, launch_chromium
 from tests.http_api import (
     SSE_WRAP,
     echo_chain_graph,
@@ -20,7 +19,7 @@ from tests.http_api import (
 from tests.tcp_proxy import TcpProxy
 from tests.test_ui import _launch, _page
 
-pw = pytest.importorskip("playwright.sync_api")
+pw = import_playwright()
 
 
 def _browser(p):

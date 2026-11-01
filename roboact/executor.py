@@ -1199,8 +1199,8 @@ class Executor:
         if ctrl.edits and ctrl.edits.get("used"):
             source = "manual"
         nmap = node_map(ctrl.flow)
-        cached = ctrl.influencing
-        inf = None if cached is None else cached.get(nid)
+        inf_map = ctrl.influencing
+        inf = None if inf_map is None else inf_map.get(nid)
         if inf is None:
             inf = influencing_map(ctrl.flow).get(nid, set())
         fps = {}
