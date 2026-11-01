@@ -475,6 +475,43 @@ label { display: block; color: var(--muted); font-size: 12px; margin: 8px 0 4px;
 }
 .log-filter select { font: inherit; color: var(--text); background: var(--surface); border: 1px solid var(--control); border-radius: 4px; height: 28px; }
 
+dialog.confirm-dialog {
+  width: 400px;
+  padding: 20px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: var(--shadow);
+  font: inherit;
+}
+dialog.confirm-dialog::backdrop {
+  background: color-mix(in srgb, var(--bg) 40%, transparent);
+}
+dialog.confirm-dialog h2 {
+  margin: 0 0 8px;
+  font-size: var(--fs-14);
+  line-height: var(--lh-14);
+  font-weight: 600;
+}
+dialog.confirm-dialog p {
+  margin: 0;
+  font-size: var(--fs-13);
+  line-height: var(--lh-13);
+  font-weight: 400;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  line-clamp: 3;
+  overflow: hidden;
+}
+dialog.confirm-dialog .confirm-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 16px;
+}
+
 @media (max-width: 800px) {
   .left { display: none; }
   .right { width: 280px; min-width: 240px; }

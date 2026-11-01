@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import itertools
 import time
+from pathlib import Path
 
 import pytest
 from roboact import A5_MAX_MS, A5_P95_MS
@@ -19,7 +21,10 @@ from tests.http_api import (
     put_flow,
 )
 from tests.tcp_proxy import TcpProxy
+from tests.test_i18n import _catalog
 from tests.test_ui import _launch, _page
+
+_ZH = _catalog(Path(__file__).resolve().parents[1] / "web" / "i18n" / "zh-CN.js")
 
 pw = pytest.importorskip("playwright.sync_api")
 
@@ -624,6 +629,28 @@ def test_r16_cancel_rejected_then_pause(server):
         proxy.close()
 
 
+def _select_in(page, nid: str) -> None:
+    page.evaluate(
+        """(nid) => { window.__af.selected.value = nid; window.__af.tab.value = 'in' }""",
+        nid,
+    )
+
+
+def _confirm(page):
+    return page.locator("dialog.confirm-dialog")
+
+
+def _focused_confirm(page) -> str | None:
+    return page.evaluate(
+        "() => document.activeElement && document.activeElement.getAttribute('data-confirm')"
+    )
+
+
+def _open_run_this(page, label: str = "Run this only"):
+    page.get_by_role("button", name=label).click()
+    _confirm(page).wait_for(state="visible")
+
+
 def test_motion_single_run_confirm_cancel_sends_nothing(server) -> None:
     """Acceptance 8.3: confirm is shown; dismissing it sends no action."""
     put_flow(server["base"], motion_graph("motion confirm"))
@@ -633,17 +660,11 @@ def test_motion_single_run_confirm_cancel_sends_nothing(server) -> None:
     try:
         br = _browser(p)
         page, _blocked, _errs = _open(br, server["base"])
-        page.evaluate("() => { window.__af.selected.value = 'go'; window.__af.tab.value = 'in' }")
-        seen: list[str] = []
-
-        def _on_dialog(dialog) -> None:
-            seen.append(dialog.message)
-            dialog.dismiss()
-
-        page.on("dialog", _on_dialog)
-        page.get_by_role("button", name="Run this only").click()
-        page.wait_for_timeout(400)
-        assert seen == [text], seen
+        _select_in(page, "go")
+        _open_run_this(page)
+        assert page.locator("#confirm-dialog-body").inner_text() == text
+        page.locator("[data-confirm=cancel]").click()
+        _confirm(page).wait_for(state="hidden")
         assert page.evaluate("() => window.__af.run.value") in (None, False)
         runs = http_json(server["base"], "/api/runs")
         assert runs["runs"] == []
@@ -655,7 +676,7 @@ def test_motion_single_run_confirm_cancel_sends_nothing(server) -> None:
 
 
 def test_motion_single_run_zh_confirm_shows_chinese_and_accept_sends(server) -> None:
-    """zh-CN single run of Go to pose: Chinese dialog; accept sends, cancel does not."""
+    """zh-CN single run of Go to pose: Chinese body; Run sends, Cancel does not."""
     put_flow(server["base"], motion_graph("motion confirm zh"))
     text = zh("confirm.set_pose")
     assert text
@@ -665,31 +686,256 @@ def test_motion_single_run_zh_confirm_shows_chinese_and_accept_sends(server) -> 
         page, _blocked, _errs = _open(br, server["base"])
         page.evaluate("() => window.__af.setLocaleMode('zh-CN')")
         page.wait_for_function("() => document.documentElement.dataset.lang === 'zh-CN'")
-        page.evaluate("() => { window.__af.selected.value = 'go'; window.__af.tab.value = 'in' }")
-        seen: list[str] = []
-        accept = {"on": False}
-
-        def _on_dialog(dialog) -> None:
-            seen.append(dialog.message)
-            if accept["on"]:
-                dialog.accept()
-            else:
-                dialog.dismiss()
-
-        page.on("dialog", _on_dialog)
-        page.get_by_role("button", name=zh("in.run_this")).click()
-        page.wait_for_timeout(400)
-        assert seen == [text], seen
+        _select_in(page, "go")
+        _open_run_this(page, zh("in.run_this"))
+        assert page.locator("#confirm-dialog-body").inner_text() == text
+        page.locator("[data-confirm=cancel]").click()
+        _confirm(page).wait_for(state="hidden")
         assert page.evaluate("() => window.__af.run.value") in (None, False)
         assert http_json(server["base"], "/api/runs")["runs"] == []
         assert http_json(server["base"], "/api/test/adapter").get("goals_sent") == []
-        accept["on"] = True
+        _open_run_this(page, zh("in.run_this"))
         with page.expect_response(lambda r: "/api/single-runs/node" in r.url) as sent:
-            page.get_by_role("button", name=zh("in.run_this")).click()
+            page.locator("[data-confirm=run]").click()
         assert sent.value.status == 201, sent.value.status
+        assert sent.value.request.post_data_json["confirm"] is True
         page.wait_for_timeout(500)
         goals = http_json(server["base"], "/api/test/adapter").get("goals_sent") or []
         assert goals == ["fake_set_pose"], goals
+        br.close()
+    finally:
+        p.stop()
+
+
+def test_confirm_focus_starts_on_cancel(server) -> None:
+    put_flow(server["base"], motion_graph("confirm focus"))
+    p, _path = _launch()
+    try:
+        br = _browser(p)
+        page, _blocked, _errs = _open(br, server["base"])
+        _select_in(page, "go")
+        _open_run_this(page)
+        assert _focused_confirm(page) == "cancel"
+        page.keyboard.press("Tab")
+        assert _focused_confirm(page) == "run"
+        page.keyboard.press("Shift+Tab")
+        assert _focused_confirm(page) == "cancel"
+        page.keyboard.press("Escape")
+        br.close()
+    finally:
+        p.stop()
+
+
+def test_confirm_enter_on_cancel_does_not_run(server) -> None:
+    put_flow(server["base"], motion_graph("confirm enter cancel"))
+    p, _path = _launch()
+    try:
+        br = _browser(p)
+        page, _blocked, _errs = _open(br, server["base"])
+        _select_in(page, "go")
+        _open_run_this(page)
+        page.keyboard.press("Enter")
+        _confirm(page).wait_for(state="hidden")
+        page.wait_for_timeout(300)
+        assert page.evaluate("() => window.__af.run.value") in (None, False)
+        assert http_json(server["base"], "/api/runs")["runs"] == []
+        assert http_json(server["base"], "/api/test/adapter").get("goals_sent") == []
+        br.close()
+    finally:
+        p.stop()
+
+
+def test_confirm_escape_cancels(server) -> None:
+    put_flow(server["base"], motion_graph("confirm esc"))
+    p, _path = _launch()
+    try:
+        br = _browser(p)
+        page, _blocked, _errs = _open(br, server["base"])
+        _select_in(page, "go")
+        _open_run_this(page)
+        page.keyboard.press("Escape")
+        _confirm(page).wait_for(state="hidden")
+        page.wait_for_timeout(300)
+        assert http_json(server["base"], "/api/runs")["runs"] == []
+        br.close()
+    finally:
+        p.stop()
+
+
+def test_confirm_backdrop_cancels(server) -> None:
+    put_flow(server["base"], motion_graph("confirm backdrop"))
+    p, _path = _launch()
+    try:
+        br = _browser(p)
+        page, _blocked, _errs = _open(br, server["base"])
+        _select_in(page, "go")
+        _open_run_this(page)
+        page.mouse.click(8, 8)
+        _confirm(page).wait_for(state="hidden")
+        page.wait_for_timeout(300)
+        assert http_json(server["base"], "/api/runs")["runs"] == []
+        br.close()
+    finally:
+        p.stop()
+
+
+def test_confirm_run_sends(server) -> None:
+    put_flow(server["base"], motion_graph("confirm run"))
+    p, _path = _launch()
+    try:
+        br = _browser(p)
+        page, _blocked, _errs = _open(br, server["base"])
+        _select_in(page, "go")
+        _open_run_this(page)
+        with page.expect_response(lambda r: "/api/single-runs/node" in r.url) as sent:
+            page.locator("[data-confirm=run]").click()
+        assert sent.value.status == 201, sent.value.status
+        assert sent.value.request.post_data_json["confirm"] is True
+        page.wait_for_timeout(400)
+        goals = http_json(server["base"], "/api/test/adapter").get("goals_sent") or []
+        assert goals == ["fake_set_pose"], goals
+        br.close()
+    finally:
+        p.stop()
+
+
+def test_confirm_focus_returns(server) -> None:
+    put_flow(server["base"], motion_graph("confirm focus return"))
+    p, _path = _launch()
+    try:
+        br = _browser(p)
+        page, _blocked, _errs = _open(br, server["base"])
+        _select_in(page, "go")
+        opener = page.get_by_role("button", name="Run this only")
+        opener.focus()
+        opener.click()
+        _confirm(page).wait_for(state="visible")
+        page.keyboard.press("Escape")
+        _confirm(page).wait_for(state="hidden")
+        same = page.evaluate(
+            """() => {
+              const btn = [...document.querySelectorAll('button')]
+                .find(el => (el.textContent || '').includes('Run this only'))
+              return document.activeElement === btn
+            }"""
+        )
+        assert same
+        br.close()
+    finally:
+        p.stop()
+
+
+def test_confirm_zh_title_and_buttons(server) -> None:
+    put_flow(server["base"], motion_graph("confirm zh labels"))
+    p, _path = _launch()
+    try:
+        br = _browser(p)
+        page, _blocked, _errs = _open(br, server["base"])
+        page.evaluate("() => window.__af.setLocaleMode('zh-CN')")
+        page.wait_for_function("() => document.documentElement.dataset.lang === 'zh-CN'")
+        _select_in(page, "go")
+        _open_run_this(page, zh("in.run_this"))
+        name = _ZH["node.fake_set_pose"]
+        assert page.locator("#confirm-dialog-title").inner_text() == _ZH["confirm.title"].replace(
+            "{name}", name
+        )
+        assert page.locator("[data-confirm=cancel]").inner_text() == _ZH["confirm.cancel"]
+        assert page.locator("[data-confirm=run]").inner_text() == _ZH["confirm.run"]
+        assert page.locator("#confirm-dialog-body").inner_text() == zh("confirm.set_pose")
+        page.keyboard.press("Escape")
+        br.close()
+    finally:
+        p.stop()
+
+
+def _tool_graph(name: str) -> dict:
+    graph = motion_graph(name)
+    graph["nodes"].append(
+        {
+            "id": "tool",
+            "type": "tool_call",
+            "title": "Clock tool",
+            "x": 40,
+            "y": 40,
+            "params": {"tool": "clock", "allowed_tools": []},
+        }
+    )
+    return graph
+
+
+def test_confirm_tool_run_sends_confirm_text(server) -> None:
+    put_flow(server["base"], _tool_graph("confirm tool"))
+    p, _path = _launch()
+    try:
+        br = _browser(p)
+        page, _blocked, _errs = _open(br, server["base"])
+        _select_in(page, "tool")
+        page.get_by_role("button", name="Run for real").click()
+        _confirm(page).wait_for(state="visible")
+        body = page.locator("#confirm-dialog-body").inner_text()
+        assert body == "This will run the selected tool for real (it may write files)."
+        assert page.locator("#confirm-dialog-title").inner_text() == "Run this tool for real?"
+        with page.expect_response(lambda r: "/api/single-runs/node" in r.url) as sent:
+            page.locator("[data-confirm=run]").click()
+        assert sent.value.status == 201, sent.value.status
+        assert sent.value.request.post_data_json["confirm"] == body
+        br.close()
+    finally:
+        p.stop()
+
+
+def test_confirm_open_keeps_ui_beat(server) -> None:
+    """An open confirm does not stall ui-beat, so a running node is not page-lost."""
+    put_flow(server["base"], motion_graph("confirm beat"))
+    http_json(
+        server["base"],
+        "/api/test/adapter",
+        "POST",
+        {"async_steps": 1, "async_sleep_s": 40.0},
+    )
+    p, _path = _launch()
+    try:
+        br = _browser(p)
+        page, _blocked, _errs = _open(br, server["base"])
+        beats: list[float] = []
+
+        def _on_req(req) -> None:
+            if req.method == "POST" and req.url.endswith("/ui-beat"):
+                beats.append(time.monotonic())
+
+        page.on("request", _on_req)
+        page.evaluate("async () => { await window.__af.doRun('all') }")
+        _wait_run(page, "running")
+        rid = _run_id(page)
+        deadline = time.monotonic() + 20
+        while time.monotonic() < deadline:
+            snap = http_json(server["base"], f"/api/runs/{rid}")
+            node = (snap.get("nodes") or {}).get("go") or {}
+            st = node.get("state") or node.get("status")
+            if (snap.get("run") or snap).get("status") == "running" and st == "running":
+                break
+            time.sleep(0.05)
+        else:
+            raise AssertionError("go never started")
+        _select_in(page, "go")
+        beats.clear()
+        opened = time.monotonic()
+        _open_run_this(page)
+        page.wait_for_timeout(12000)
+        closed = time.monotonic()
+        assert _confirm(page).is_visible()
+        snap = http_json(server["base"], f"/api/runs/{rid}")
+        run = snap.get("run") or snap
+        assert run.get("status") == "running", run.get("status")
+        assert not run.get("pause"), run.get("pause")
+        node = (snap.get("nodes") or {}).get("go") or {}
+        assert (node.get("state") or node.get("status")) == "running", node
+        during = [t for t in beats if opened <= t <= closed]
+        assert len(during) >= 4, during
+        gaps = [b - a for a, b in itertools.pairwise(during)]
+        assert gaps and max(gaps) < 4.5, gaps
+        page.keyboard.press("Escape")
+        _stop_run(page)
         br.close()
     finally:
         p.stop()

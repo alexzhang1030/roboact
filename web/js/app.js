@@ -14,6 +14,7 @@ import {
   serverLabel, countLabel,
 } from './i18n.js'
 import { KEYS, writeRaw, readRaw, readPanels, writePanels, readViewport, writeViewport, readLogFilter } from './prefs.js'
+import { openConfirm } from './confirm-dialog.js'
 
 const q = new URLSearchParams(location.search)
 const PERF_N = +(q.get('n') || 0)
@@ -982,8 +983,14 @@ const App = defineComponent({
       }
       return spec.confirm_text || ''
     }
-    function runSingle() {
+    function nodeFullTitle(n) {
+      if (n && n.data && n.data.title) return n.data.title
+      const spec = specOf(n)
+      return actionLabel(spec, locale.value) || (n && n.data && n.data.nodeType) || t('node.fallback')
+    }
+    async function runSingle(ev) {
       if (!selected.value) return
+      const opener = (ev && ev.currentTarget) || document.activeElement
       const spec = specOf(selectedNode.value)
       const rec = shownRec.value
       const extra = {
@@ -994,7 +1001,12 @@ const App = defineComponent({
       }
       if (spec && spec.side_effect === 'motion') {
         const text = adapterConfirmText(spec) || t('confirm.default')
-        if (!window.confirm(text)) return
+        const ok = await openConfirm({
+          title: t('confirm.title', { name: nodeFullTitle(selectedNode.value) }),
+          body: text,
+          returnTo: opener,
+        })
+        if (!ok) return
         extra.confirm = true
       }
       doRun('single', extra)
@@ -1006,11 +1018,17 @@ const App = defineComponent({
     function runGroup(g) {
       doRun('group', { node_ids: g.node_ids, source_run_id: run.value && run.value.id })
     }
-    async function really() {
+    async function really(ev) {
       if (!selected.value) return
+      const opener = (ev && ev.currentTarget) || document.activeElement
       const spec = specOf(selectedNode.value)
       const text = (spec && spec.confirm_text) || t('confirm.external')
-      if (!window.confirm(text)) return
+      const ok = await openConfirm({
+        title: t('confirm.external_title'),
+        body: text,
+        returnTo: opener,
+      })
+      if (!ok) return
       doRun('single', { node_id: selected.value, side_effects: 'real', confirm: text, source_run_id: run.value && run.value.id })
     }
     async function decide(decision) {
