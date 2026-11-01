@@ -8,4 +8,5 @@ See [docs/exec-model.md](../../docs/exec-model.md).
 - Codes on the wire. `motion` default. No auto-retry after crash.
 - Non-cancellable `motion` with `timeout_s` > 10 s blocks Run (checked before every run).
 - An in-flight `operator_lost` pause includes `lost_outcome` (`cancelled`, `ran_to_end`, or `cancel_rejected`). `ran_to_end` also includes `lost_extra_s`: seconds from the moment the page was judged lost until that action finished. The node stays `stopped`, `done`, or `cancel_rejected` for those three outcomes. A pause between nodes has no `lost_outcome`.
+- While any run of a flow has status `running`, the executor refuses every new run of that flow (full, single-node including real side effects, group, rerun-from). The check and the insert share the executor admission lock; continue and approve take that same lock when they set status back to `running`. Paused runs (breakpoint, approval, or any other pause), stopped runs, and finished runs do not block. No run row is written when the start is refused.
 
