@@ -1,3 +1,13 @@
+const TERMINAL_RUN = ['completed', 'stopped', 'error', 'step_limit']
+
+export function endResultText(run, status) {
+  if (!run || !TERMINAL_RUN.includes(run.status)) return ''
+  if (run.result === undefined) return ''
+  const state = status && (status.state || status.status)
+  if (state !== 'done') return ''
+  return JSON.stringify(run.result)
+}
+
 export function isBackEdge(edges, edge) {
   if (edge.source === edge.target) return true
   const seen = new Set()

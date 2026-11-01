@@ -123,7 +123,7 @@ def sample_doc(**flow_over: Any) -> dict[str, Any]:
             },
             {
                 "id": "out",
-                "kind": "output",
+                "kind": "end",
                 "params": {},
                 "position": {"x": 600, "y": 160},
                 "title": "Out",
@@ -178,7 +178,7 @@ def run_doc(**param_over: Any) -> dict[str, Any]:
             },
             {
                 "id": "out",
-                "kind": "output",
+                "kind": "end",
                 "params": {},
                 "position": {"x": 600, "y": 160},
                 "title": "Out",
@@ -423,7 +423,7 @@ nodes:
     params: {x: 0.1, y: 0.1, z: 0.1}
     position: {x: 200, y: 0}
   - id: "out"
-    kind: output
+    kind: end
     title: Out
     params: {}
     position: {x: 400, y: 0}
@@ -490,7 +490,7 @@ nodes:
     params: {mode: "on", ver: "1.10", token: "filled"}
     position: {x: 40, y: 80}
   - id: "out"
-    kind: output
+    kind: end
     title: Out
     params: {}
     position: {x: 280, y: 0}
@@ -634,6 +634,80 @@ def test_20_6(server):
         assert graph1["id"] == graph0["id"]
         assert graph1["nodes"] == graph0["nodes"]
         assert runs1 == runs0
+
+
+def _file_node(nid: str, kind: str, **params: Any) -> dict[str, Any]:
+    return {
+        "id": nid,
+        "kind": kind,
+        "params": params,
+        "position": {"x": 0, "y": 0},
+        "title": nid,
+    }
+
+
+def _count_doc(nodes: list[dict[str, Any]]) -> dict[str, Any]:
+    return {
+        "edges": [],
+        "flow": {"id": "flow-count", "name": "count", "revision": 1, "step_limit": 20},
+        "format": "roboact-flow",
+        "format_version": 1,
+        "nodes": nodes,
+    }
+
+
+def _joined_errors(body: dict[str, Any]) -> list[str]:
+    errs = (body.get("detail") or {}).get("errors") or []
+    return [f"{e.get('path')}: {e.get('message')}" for e in errs]
+
+
+def test_import_rejects_kind_output_and_accepts_end_counts(server):
+    """kind output is refused. Zero or two End nodes import; counts are a run check."""
+    base = server["base"]
+    ids0, graph0, runs0 = _snapshot(base)
+    renamed = 'nodes[2] (id n_out): kind "output" is now "end"'
+    code, body = _import(
+        base,
+        dump_json(
+            _count_doc(
+                [
+                    _file_node("n_start", "start"),
+                    _file_node("n_const", "constant", value="a", value_type="string"),
+                    _file_node("n_out", "output"),
+                ]
+            )
+        ),
+        "json",
+    )
+    assert 400 <= code < 500, body
+    assert body["error"] == "import_failed"
+    assert renamed in _joined_errors(body)
+    ids1, graph1, runs1 = _snapshot(base)
+    assert ids1 == ids0
+    assert graph1["id"] == graph0["id"]
+    assert graph1["nodes"] == graph0["nodes"]
+    assert runs1 == runs0
+
+    accepted = [
+        _count_doc(
+            [
+                _file_node("n_start", "start"),
+                _file_node("n_const", "constant", value="a", value_type="string"),
+            ]
+        ),
+        _count_doc(
+            [
+                _file_node("n_start", "start"),
+                _file_node("n_end_a", "end"),
+                _file_node("n_end_b", "end"),
+            ]
+        ),
+    ]
+    for doc in accepted:
+        code, imported = _import(base, dump_json(doc), "json")
+        assert code == 200, imported
+        kinds = [n["type"] for n in imported["flow"]["nodes"]]
+        assert kinds.count("end") == sum(1 for n in doc["nodes"] if n["kind"] == "end")
 
 
 def test_20_7(server):
@@ -1294,7 +1368,7 @@ DEMO_NODE_CLIENT_H = {
     "fake_set_pose": 132,
     "fake_gripper": 84,
     "fake_camera": 60,
-    "output": 60,
+    "end": 60,
 }
 
 

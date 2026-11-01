@@ -1,7 +1,7 @@
 import { defineComponent, markRaw, computed, inject } from 'vue'
 import { Handle, Position } from '@vue-flow/core'
 import { nodeStatus } from '../status-store.js'
-import { inputPorts } from '../graph-utils.js'
+import { endResultText, inputPorts } from '../graph-utils.js'
 import { t, locale, actionLabel, statusWord, mapError, portLabel } from '../i18n.js'
 
 const ICONS = {
@@ -21,6 +21,7 @@ const ICONS = {
   cancel_rejected: 'state-running',
   action_missing: 'state-unknown',
   missing_input: 'state-unknown',
+  blocked: 'state-unknown',
 }
 
 const KIND = {
@@ -31,9 +32,10 @@ const KIND = {
   stopped: 'stopped',
   interrupted: 'interrupted',
   interrupted_unknown: 'unknown',
-  cancel_rejected: 'running',
+  cancel_rejected: 'cancel_rejected',
   action_missing: 'missing',
   missing_input: 'missing_input',
+  blocked: 'blocked',
 }
 
 export default markRaw(defineComponent({
@@ -47,6 +49,7 @@ export default markRaw(defineComponent({
     const toggleBp = inject('toggleBp', () => {})
     const tools = inject('tools', [])
     const iconBase = inject('iconBase', '/vendor/icons')
+    const runState = inject('runState', null)
     const spec = computed(() => (nodeTypes.value || nodeTypes).find(t => t.type === props.data.nodeType || t.type_id === props.data.nodeType))
     const ins = computed(() => inputPorts(spec.value, props.data.params))
     const outs = computed(() => (spec.value && spec.value.outputs) || [])
@@ -62,6 +65,16 @@ export default markRaw(defineComponent({
       if (custom) return custom
       return actionLabel(spec.value, locale.value) || props.data.nodeType
     })
+    const noCancel = computed(() => {
+      const cancel = spec.value && spec.value.action && spec.value.action.cancel
+      return !!(cancel && cancel.cancellable === false)
+    })
+    function formatSeconds(v) {
+      const n = Number(v)
+      if (!Number.isFinite(n)) return v == null ? '' : String(v)
+      const r = Math.round(n * 10) / 10
+      return Number.isInteger(r) ? String(r) : r.toFixed(1)
+    }
     const isActionMissing = computed(() => kind.value === 'missing')
     const isMissingInput = computed(() => kind.value === 'missing_input')
     const emptyPorts = computed(() => {
@@ -90,10 +103,35 @@ export default markRaw(defineComponent({
       void locale.value
       return statusWord(st.value)
     })
+    const endResult = computed(() => {
+      if (!props.data || props.data.nodeType !== 'end') return ''
+      const run = runState && runState.value
+      return endResultText(run, st.value)
+    })
+    const took = computed(() => {
+      void locale.value
+      const s = st.value
+      const status = s.state || s.status
+      if (status !== 'done') return ''
+      if (s.side_effect_mode === 'mock' || s.mocked) return ''
+      if (s.duration_ms == null || s.duration_ms === '') return ''
+      const ms = Number(s.duration_ms)
+      if (!Number.isFinite(ms)) return ''
+      if (ms < 10) return t('status.summary.took_ms', { ms: Math.round(ms) })
+      return t('status.summary.took', { s: (ms / 1000).toFixed(1) })
+    })
     const summary = computed(() => {
       void locale.value
       const s = st.value
+      const status = s.state || s.status
+      if (status === 'blocked' && (s.no_cancel_too_long || s.summary_key === 'status.summary.no_cancel_too_long')) {
+        return t('status.summary.no_cancel_too_long', { s: formatSeconds(s.timeout_s) })
+      }
+      if (status === 'blocked' && s.summary_key) {
+        return t(s.summary_key, s.summary_params || {})
+      }
       if (isActionMissing.value) return t('error.action_missing')
+      if (status === 'interrupted_unknown') return t('status.summary.result_unknown')
       if (kind.value === 'unknown') {
         const code = s.error_type || s.error
         return (code && mapError(code)) || t('error.may_have_written')
@@ -136,7 +174,7 @@ export default markRaw(defineComponent({
     const bpAfterTitle = computed(() => { void locale.value; return bpAfter.value.enabled ? t('bp.after_on') : t('bp.after_off') })
     return {
       Position, ins, outs, st, word, write, rows, spec, bpBefore, bpAfter, srcOf, toggleBp,
-      kind, icon, typeIcon, iconBase, icoUrl, summary, title, sideTitle, bpBeforeTitle, bpAfterTitle, t, locale, portLabel,
+      kind, icon, typeIcon, iconBase, icoUrl, summary, took, endResult, title, noCancel, sideTitle, bpBeforeTitle, bpAfterTitle, t, locale, portLabel,
       isActionMissing, isMissingInput, portMissing,
     }
   },
@@ -156,13 +194,16 @@ export default markRaw(defineComponent({
       <span v-if="typeIcon" class="fn-type-ico" :style="{ '--ico': icoUrl(typeIcon) }"></span>
       <span v-if="write" class="fn-side" :style="{ '--ico': icoUrl('mark-write') }" :title="sideTitle"></span>
       <span class="fn-name" :class="{ full: isActionMissing }">{{ title }}</span>
+      <span v-if="noCancel" class="fn-no-cancel" data-testid="node-no-cancel">{{ t('node.no_cancel') }}</span>
       <span v-if="isActionMissing" class="fn-gone-x" aria-hidden="true">×</span>
       <span class="fn-st" v-else>
         <span class="ico" :data-kind="kind" :style="{ '--ico': icoUrl(icon) }"></span>
         <span class="fn-st-word">{{ word }}</span>
       </span>
     </div>
+    <div class="fn-took" v-if="took" data-testid="node-took">{{ took }}</div>
     <div class="fn-err" v-if="summary" :class="{ amber: kind === 'unknown' }" :title="summary" data-testid="node-summary">{{ summary }}</div>
+    <div class="fn-result" v-if="endResult" data-testid="end-result">{{ endResult }}</div>
     <div class="fn-ports" v-if="rows">
       <div class="fn-port" v-for="n in rows" :key="n" :class="{ 'port-missing': portMissing(ins[n-1]) }">
         <template v-if="ins[n-1]">

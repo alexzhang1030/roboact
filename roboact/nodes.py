@@ -79,6 +79,7 @@ class NodeType:
     side_effect: ClassVar[SideEffect] = SideEffect.none
     side_effect_note: ClassVar[str] = ""
     confirm_text: ClassVar[str] = ""
+    confirm_labels: ClassVar[dict[str, str]] = {}
     timeout_s: ClassVar[float] = NODE_TIMEOUT_S
     typical_s: ClassVar[float | None] = None
     icon: ClassVar[str] = ""
@@ -157,18 +158,18 @@ class StartNode(NodeType):
         return StartOut(data=params.data)
 
 
-class OutputIn(BaseModel):
+class EndIn(BaseModel):
     value: Any = Field(default=None, json_schema_extra={"port_type": "any"}, title="Result")
 
 
-class OutputNode(NodeType):
-    type_id = "output"
-    title = en("node.output")
-    Inputs = OutputIn
+class EndNode(NodeType):
+    type_id = "end"
+    title = en("node.end")
+    Inputs = EndIn
     Outputs = Empty
-    icon = "node-output"
+    icon = "node-end"
 
-    async def run(self, inputs: OutputIn, params: BaseModel, ctx: RunContext):
+    async def run(self, inputs: EndIn, params: BaseModel, ctx: RunContext):
         return Empty()
 
 
@@ -448,7 +449,7 @@ REGISTRY: dict[str, type[NodeType]] = {
     cls.type_id: cls
     for cls in (
         StartNode,
-        OutputNode,
+        EndNode,
         ConstantNode,
         ConditionNode,
         MergeNode,
@@ -563,6 +564,48 @@ def _as_action_dict(raw: Any) -> dict[str, Any]:
     return data
 
 
+def _settle_cancel(data: dict[str, Any]) -> dict[str, Any] | None:
+    """Hold, or non-cancellable (runs to the end, then holds).
+
+    `finish_step` means non-cancellable. `safe_pose` is refused and the
+    reason names the action. Called at load, before the action is registered.
+    """
+    cancel = data.get("cancel")
+    if not isinstance(cancel, dict):
+        return None
+    cancel = dict(cancel)
+    data["cancel"] = cancel
+    aid = str(data.get("id") or "")
+    title = str(data.get("title") or data.get("name") or aid or "?")
+    named = aid or title
+    for key in ("post_cancel", "after"):
+        if cancel.get(key) == "safe_pose":
+            return {
+                "id": aid,
+                "title": title,
+                "missing": [f"cancel.{key}"],
+                "reason": f"{named}: safe_pose is refused",
+            }
+    if cancel.get("post_cancel") == "finish_step" or cancel.get("after") == "finish_step":
+        cancel["cancellable"] = False
+        cancel["post_cancel"] = "hold"
+        cancel["after"] = "hold"
+    for key in ("post_cancel", "after"):
+        val = cancel.get(key)
+        if val not in (None, "hold"):
+            return {
+                "id": aid,
+                "title": title,
+                "missing": [f"cancel.{key}"],
+                "reason": (
+                    f"{named}: post_cancel must be hold, or the action must be non-cancellable"
+                ),
+            }
+    if cancel.get("cancellable") is False and cancel.get("post_cancel") in (None, "hold"):
+        cancel["post_cancel"] = "hold"
+    return None
+
+
 def ingest_action(
     raw: Any, adapter: Adapter
 ) -> tuple[type[NodeType] | None, dict[str, Any] | None]:
@@ -572,6 +615,9 @@ def ingest_action(
     write is reserved for hand-written test nodes and is rejected here.
     """
     data = _as_action_dict(raw)
+    refused = _settle_cancel(data)
+    if refused:
+        return None, refused
     aid = data.get("id") or ""
     title = data.get("title") or aid or "?"
     se = data.get("side_effect")
@@ -653,6 +699,7 @@ def make_action_node(desc: ActionDescriptor, adapter: Adapter) -> type[NodeType]
         side_effect = side
         side_effect_note = desc.side_effect_note
         confirm_text = desc.confirm_text
+        confirm_labels = desc.confirm_labels
         timeout_s = desc.timeout_s
         typical_s = desc.typical_s
         icon = desc.icon or ("node-tool" if side == SideEffect.motion else "node-constant")
@@ -713,6 +760,8 @@ def make_action_node(desc: ActionDescriptor, adapter: Adapter) -> type[NodeType]
             handle = self._handle
             if handle is None and hasattr(bound, "handle_by_idem"):
                 handle = bound.handle_by_idem(self.idem)
+            if handle is not None:
+                self._handle = handle
             return await bound.cancel(handle)
 
     ActionNode.__name__ = f"Action_{desc.id}"
@@ -781,6 +830,7 @@ def as_public(cls: type[NodeType], adapter: Any = None) -> dict[str, Any]:
         "shows_write_mark": cls.side_effect in EXTERNAL_SIDES,
         "side_effect_note": cls.side_effect_note,
         "confirm_text": cls.confirm_text,
+        "confirm_labels": dict(cls.confirm_labels),
         "timeout_s": cls.timeout_s,
         "typical_s": cls.typical_s,
         "icon": cls.icon,

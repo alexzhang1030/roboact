@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import math
 import multiprocessing
 import re
 from dataclasses import dataclass, field
@@ -60,17 +61,98 @@ KNOWN_JSON_TYPES = frozenset(
 )
 
 BUILTIN_KINDS = frozenset(
-    {"start", "output", "constant", "condition", "merge", "human_approval", "action"}
+    {"start", "end", "constant", "condition", "merge", "human_approval", "action"}
 )
 KIND_TO_TYPE = {
     "start": "start",
-    "output": "output",
+    "end": "end",
     "constant": "constant",
     "condition": "condition",
     "merge": "merge",
     "human_approval": "human_confirm",
 }
 TYPE_TO_KIND = {v: k for k, v in KIND_TO_TYPE.items()}
+
+
+def output_type_message(nodes: list[Any] | None) -> str | None:
+    """Graph API still speaks type ids. `output` is refused, not converted."""
+    for index, node in enumerate(nodes or []):
+        if not isinstance(node, dict) or str(node.get("type") or "") != "output":
+            continue
+        raw_id = node.get("id")
+        label = raw_id if isinstance(raw_id, str) else ""
+        return f'nodes[{index}] (id {label}): type "output" is now "end"'
+    return None
+
+
+def _node_ids(nodes: list[dict[str, Any]]) -> list[str]:
+    return [str(n["id"]) for n in nodes if isinstance(n.get("id"), str) and n.get("id")]
+
+
+def flow_structure(graph: dict[str, Any]) -> dict[str, Any] | None:
+    """Full-run gate. None when the flow has one Start, one End, and a path."""
+    nodes = [n for n in (graph.get("nodes") or []) if isinstance(n, dict)]
+    ends = [n for n in nodes if n.get("type") == "end"]
+    starts = [n for n in nodes if n.get("type") == "start"]
+    if len(ends) != 1:
+        count = len(ends)
+        return {
+            "code": "need_one_end",
+            "n": count,
+            "node_ids": _node_ids(ends),
+            "message": f"This flow needs exactly one End. Found {count}.",
+        }
+    if len(starts) != 1:
+        count = len(starts)
+        return {
+            "code": "need_one_start",
+            "n": count,
+            "node_ids": _node_ids(starts),
+            "message": f"This flow needs exactly one Start. Found {count}.",
+        }
+    end_id = str(ends[0].get("id") or "")
+    if not _end_reachable(graph, end_id):
+        return {
+            "code": "end_unreachable",
+            "n": 1,
+            "node": end_id,
+            "node_id": end_id,
+            "node_ids": [end_id] if end_id else [],
+            "message": "End can't be reached from Start.",
+        }
+    return None
+
+
+def _end_reachable(graph: dict[str, Any], end_id: str) -> bool:
+    if not end_id:
+        return False
+    starts = [
+        str(n.get("id"))
+        for n in (graph.get("nodes") or [])
+        if isinstance(n, dict) and n.get("type") == "start" and isinstance(n.get("id"), str)
+    ]
+    if not starts:
+        return False
+    succ: dict[str, list[str]] = {}
+    for edge in graph.get("edges") or []:
+        if not isinstance(edge, dict):
+            continue
+        src = edge.get("source")
+        dst = edge.get("target")
+        if isinstance(src, str) and isinstance(dst, str):
+            succ.setdefault(src, []).append(dst)
+    seen: set[str] = set()
+    stack = list(starts)
+    while stack:
+        cur = stack.pop()
+        if cur in seen:
+            continue
+        seen.add(cur)
+        if cur == end_id:
+            return True
+        stack.extend(succ.get(cur, []))
+    return False
+
 
 TOP_KEYS = frozenset({"format", "format_version", "flow", "nodes", "edges"})
 FLOW_KEYS = frozenset(
@@ -147,7 +229,32 @@ class RunBlockers:
 
 
 def dump_json(obj: Any) -> str:
-    return json.dumps(obj, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
+    """Canonical JSON. Key order and list order: docs/flow-file.md §8."""
+    _reject_nonfinite(obj, "")
+    try:
+        text = json.dumps(obj, ensure_ascii=False, indent=2, sort_keys=True, allow_nan=False)
+    except ValueError as e:
+        raise FlowFileRejected([FileIssue("", str(e))]) from e
+    return text + "\n"
+
+
+def _reject_nonfinite(obj: Any, path: str) -> None:
+    """NaN and Infinity have no stable JSON spelling. docs/flow-file.md §8."""
+    if isinstance(obj, bool):
+        return
+    if isinstance(obj, float):
+        if not math.isfinite(obj):
+            label = "NaN" if math.isnan(obj) else "Infinity"
+            raise FlowFileRejected([FileIssue(path, f"{label} is not allowed")])
+        return
+    if isinstance(obj, dict):
+        for key, val in obj.items():
+            name = str(key)
+            _reject_nonfinite(val, f"{path}.{name}" if path else name)
+        return
+    if isinstance(obj, list):
+        for index, val in enumerate(obj):
+            _reject_nonfinite(val, f"{path}[{index}]")
 
 
 def canonical_filename(name: str, fmt: str) -> str:
@@ -255,6 +362,8 @@ def is_imported(graph: dict[str, Any]) -> bool:
 
 
 def dump_yaml(doc: dict[str, Any]) -> str:
+    """Canonical YAML. Same tree as dump_json. docs/flow-file.md §8."""
+    _reject_nonfinite(doc, "")
     yaml = YAML(typ="rt", pure=True)
     yaml.default_flow_style = False
     yaml.allow_unicode = True
@@ -638,6 +747,9 @@ def _check_limits(obj: Any, path: str, depth: int, issues: list[FileIssue]) -> N
         issues.append(FileIssue(path or "", f"string exceeds {MAX_STRING_CHARS} characters"))
     if isinstance(obj, int) and not isinstance(obj, bool) and abs(obj) > JS_MAX_SAFE:
         issues.append(FileIssue(path or "", "integer exceeds ±2^53"))
+    if isinstance(obj, float) and not math.isfinite(obj):
+        label = "NaN" if math.isnan(obj) else "Infinity"
+        issues.append(FileIssue(path or "", f"{label} is not allowed"))
     if isinstance(obj, dict):
         for key, val in obj.items():
             if not isinstance(key, str):
@@ -762,7 +874,15 @@ def _validate_node(node: Any, index: int, seen: dict[str, int], issues: list[Fil
     else:
         seen[nid] = index
     kind = node.get("kind")
-    if kind not in BUILTIN_KINDS:
+    if kind == "output":
+        label = nid if isinstance(nid, str) else ""
+        issues.append(
+            FileIssue(
+                f"{path} (id {label})",
+                'kind "output" is now "end"',
+            )
+        )
+    elif kind not in BUILTIN_KINDS:
         issues.append(FileIssue(f"{path}.kind", "unknown kind"))
     if "title" in node and not isinstance(node["title"], str):
         issues.append(FileIssue(f"{path}.title", "must be a string"))

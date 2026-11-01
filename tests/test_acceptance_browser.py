@@ -664,7 +664,7 @@ nodes:
     params: {mode: __MODE__, ver: __VER__, token: "filled"}
     position: {x: 40, y: 120}
   - id: "out"
-    kind: output
+    kind: end
     title: Out
     params: {}
     position: {x: 320, y: 0}

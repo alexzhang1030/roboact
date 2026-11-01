@@ -8,6 +8,7 @@ import json
 import mimetypes
 import os
 import sys
+import time
 from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, unquote, urlparse
@@ -21,9 +22,11 @@ from .flow_file import (
     MAX_BODY_BYTES,
     FlowFileRejected,
     export_flow,
+    flow_structure,
     import_flow,
     inspect_run,
     make_unlock_record,
+    output_type_message,
     unlock_valid,
 )
 from .flow_meta import GRAPH_FILE_KEYS
@@ -186,7 +189,7 @@ class App:
                     "params": {"open": True},
                 },
                 {"id": "cam", "type": "fake_camera", "x": 300, "y": 360, "params": {}},
-                {"id": "out", "type": "output", "x": 560, "y": 360, "params": {}},
+                {"id": "end", "type": "end", "x": 560, "y": 360, "params": {}},
             ],
             "edges": [
                 {
@@ -207,7 +210,7 @@ class App:
                     "id": "e2",
                     "source": "grip",
                     "source_port": "open",
-                    "target": "out",
+                    "target": "end",
                     "target_port": "value",
                 },
             ],
@@ -376,6 +379,7 @@ class App:
             body = dict(data or {})
             body.pop("unlock_record", None)
             body.pop("mismatch_unlocked", None)
+            _reject_output_type(body.get("nodes"))
             flow = self.store.create_flow(body.get("name") or en("flow.untitled"), body)
             await self._json(writer, 200, {"flow": flow})
             return
@@ -437,6 +441,7 @@ class App:
                 body["revision"] = int(prev) + 1
             body.setdefault("adapter_id", self.adapter.adapter_id)
             body.setdefault("action_list_version", self.adapter.action_list_version)
+            _reject_output_type(body.get("nodes"))
             flow = self.store.save_flow(fid, body, bump=bump)
             if old and params_changed(old, flow):
                 pass
@@ -658,6 +663,26 @@ class App:
             self.ex.hooks["crash_before_t2"] = True
             await self._json(writer, 200, {"ok": True})
             return
+        if self.test_mode and route == "/api/test/ui-seen" and method == "POST":
+            ago = float((data or {}).get("ago_s") or 0)
+            rid = str((data or {}).get("run_id") or "")
+            ctrl = self.ex.runs.get(rid) if rid else None
+            if ctrl is None:
+                for candidate in self.ex.runs.values():
+                    if candidate.status == "running":
+                        ctrl = candidate
+                        break
+            if ctrl is None:
+                raise ApiError(404, "not_found", "no running run")
+            ctrl.saw_ui = True
+            ctrl.last_ui_at = time.monotonic() - ago
+            await self._json(writer, 200, {"ok": True, "ago_s": ago})
+            return
+        if self.test_mode and route == "/api/test/ui-lost" and method == "POST":
+            raw = (data or {}).get("seconds")
+            self.ex.ui_lost_s = None if raw is None else float(raw)
+            await self._json(writer, 200, {"ui_lost_s": self.ex.ui_lost_s})
+            return
         if self.test_mode and route == "/api/test/step-delay" and method == "POST":
             self.ex.step_delay_s = float((data or {}).get("seconds") or 0)
             await self._json(writer, 200, {"ok": True, "seconds": self.ex.step_delay_s})
@@ -675,6 +700,9 @@ class App:
                         self.adapter, "goals_cancelled_by_lost_heartbeat", 0
                     ),
                     "cancel_calls": list(getattr(self.adapter, "cancel_calls", [])),
+                    "goals_sent": [
+                        row.get("action") for row in getattr(self.adapter, "goals_sent", [])
+                    ],
                 },
             )
             return
@@ -805,6 +833,7 @@ class App:
             raise ApiError(404, "not_found", "flow not found")
         blockers = inspect_run(graph, self.adapter)
         unlocked = unlock_valid(graph, self.adapter)
+        structure = flow_structure(graph)
         await self._json(
             writer,
             200,
@@ -816,7 +845,8 @@ class App:
                 "type_errors": blockers.type_errors,
                 "limit_errors": blockers.limit_errors,
                 "timeout_errors": blockers.timeout_errors,
-                "can_run": not blockers.blocks_run(unlocked),
+                "structure": structure,
+                "can_run": not blockers.blocks_run(unlocked) and structure is None,
             },
         )
 
@@ -1089,6 +1119,12 @@ async def _client(app: App, reader: asyncio.StreamReader, writer: asyncio.Stream
 
 
 BIND_HOST = "127.0.0.1"
+
+
+def _reject_output_type(nodes: list[Any] | None) -> None:
+    message = output_type_message(nodes)
+    if message:
+        raise ApiError(422, "invalid_graph", message)
 
 
 def refuse_host_flag(argv: list[str] | None = None) -> None:

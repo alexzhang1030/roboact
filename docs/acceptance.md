@@ -34,6 +34,8 @@ Version 1.5 (2026-10-31). Companion to `prd-en-v1.5.md` section 4. exec-model = 
 ## 5. Single node
 1. Run a middle node using the last run's record.
 2. Pass: only that node gets a new record.
+3. Start a full run with a fake `motion` action and, while it is running, open a node's menu, then box-select two nodes. Pass: "Run this only", "Run for real" and the group run button are disabled and show the reason. Pause the flow: all three are enabled. Resume until a `motion` node waits for its confirmation: all three are enabled. Confirm, then let it finish: all three are enabled.
+4. While a node of a full run is executing, call the single-node run endpoint and the group run endpoint directly (not through the UI). Pass: the server refuses each with the reason; no new record; the robot state does not change from either call.
 
 <a id="6"></a>
 ## 6. Group
@@ -194,9 +196,9 @@ Version 1.5 (2026-10-31). Companion to `prd-en-v1.5.md` section 4. exec-model = 
 2. Pyright: strict mode for the `roboact` package, basic mode for tests, no file-wide ignores. Every remaining `# type: ignore` has a one-line reason.
 3. GitHub CI runs the same script. Pass: any failure blocks merge (except 19).
 4. CI linux/aarch64 job (`ubuntu-24.04-arm`) runs `uv sync --frozen` and pytest (Jetson Thor is aarch64).
-5. Check `rclpy` is absent from `pyproject.toml`, including optional groups; it is imported only in adapter modules, from system Python via `--system-site-packages`; type checking ignores its missing import only there.
+5. (Before real robot, not v0.1.) Check `rclpy` is absent from `pyproject.toml`, including optional groups; it is imported only in adapter modules, from system Python via `--system-site-packages`; type checking ignores its missing import only there.
 6. Check Python is 3.12 (Jazzy, Ubuntu 24.04, REP 2000).
-7. Real robot: on aarch64 Ubuntu with ROS 2, a clean checkout passes `uv sync --frozen` and pytest; the adapter can `import rclpy`. No frontend build step.
+7. (Before real robot, not v0.1.) Real robot: on aarch64 Ubuntu with ROS 2, a clean checkout passes `uv sync --frozen` and pytest; the adapter can `import rclpy`. No frontend build step.
 
 <a id="r1-r6"></a>
 ## Pre-real-robot checks (part of R1–R6)
@@ -205,6 +207,7 @@ Version 1.5 (2026-10-31). Companion to `prd-en-v1.5.md` section 4. exec-model = 
 3. Set a non-cancellable `motion` action's `timeout_s` to 11. Pass: Run is blocked and names the node.
 4. Make the adapter refuse the cancel. Pass: node shows `status.cancel_rejected`, runs to end, then pauses.
 5. Confirm "stable" is detectable: blocking actions return only once stable, or `read_state` has a stable field; at least one, with a cited source. Neither: do not connect a real robot.
+6. Press Stop while a cancellable fake `motion` action and a fake gripper action are running. Pass: the adapter is asked to hold; after the robot stops, state is read several times at a fixed interval and every change between reads is within the controller's goal tolerance; the gripper keeps its grip; nothing moves to a safe pose. Do not compare with the state at the moment of Stop: a real or MuJoCo JTC decelerates first, so the stop position differs by the braking distance (Tedrake, [JTC docs](https://control.ros.org/jazzy/doc/ros2_controllers/joint_trajectory_controller/doc/userdoc.html)). Press Stop while a fake `finish_step` action is running: it runs to its end, then holds; it never runs past 10 s. Load an adapter with an action that declares `safe_pose`: it is refused and the action is named.
 
 <a id="20"></a>
 ## 20 Flow file import / export
@@ -225,3 +228,13 @@ Version 1.5 (2026-10-31). Companion to `prd-en-v1.5.md` section 4. exec-model = 
 14. Set an enum param to a value outside its enum, and a nested `motion` param over its limit: Run is blocked and each is named.
 15. Fill in the secret param on a "missing input" node: the mark clears without a reload.
 16. Follow the README offline install on a clean machine: YAML import works.
+17. Export a flow as JSON and as YAML and commit both. Change one param and move one node; export again. Pass: `git diff` shows only the changed param value and the moved node's position lines; both files end with one newline; a float such as `0.1` is written as `0.1`.
+
+<a id="21"></a>
+## 21 Start and End
+1. Create a new flow. Pass: it has one Start and one End; End has an input port and no output port.
+2. Add a second Start, press Run; then a second End, press Run; then delete End, press Run. Pass: each Run is refused and the message names the problem.
+3. Connect Start to a node that does not lead to End, press Run. Pass: Run is refused and says End cannot be reached from Start.
+4. Box-select two nodes with no Start or End and run the group. Pass: the group runs.
+5. Run a flow where Start feeds End directly and also feeds a fake `motion` action on a parallel branch that finishes after End is reached. Pass: the run stays running until the action finishes, then shows completed; End shows its input value, and the panel shows the same value.
+6. Import a JSON file and a YAML file that each contain a node of kind `output`. Pass: each import is refused before the canvas changes; the message names the node and says `output` is now `end`.

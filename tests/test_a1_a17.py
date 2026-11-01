@@ -11,6 +11,7 @@ from tests.helpers import (
     boot,
     cont,
     ctx,
+    e,
     make_flow,
     n,
     recs,
@@ -53,10 +54,13 @@ def test_a1_write_crash_does_not_double(tmp_path):
 def test_a16_timeout(tmp_path):
     async def go():
         ex, store, _, hub = ctx(tmp_path)
-        flow = make_flow([n("s", "sleep", seconds=2.0)], [])
+        flow = make_flow(
+            [n("start", "start", data={}), n("s", "sleep", seconds=2.0), n("end", "end")],
+            [e("e0", "start", "data", "end", "value")],
+        )
         rid, st = await run_until(ex, store, flow, "error", timeout=3)
         assert st.status == "error"
-        rec = recs(store, rid)[0]
+        rec = next(r for r in recs(store, rid) if r["node_id"] == "s")
         assert rec["error"]["type"] == "timeout"
         await hub.stop()
 

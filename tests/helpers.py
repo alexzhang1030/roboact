@@ -57,7 +57,7 @@ def write_flow(line="hello"):
             tool="append_note",
             allowed_tools=["append_note", "read_note", "clock"],
         ),
-        n("out", "output"),
+        n("out", "end"),
     ]
     edges = [
         e("e0", "start", "data", "mail", "args"),

@@ -42,7 +42,7 @@ def test_8_2_read_replay_uses_cached_value(tmp_path):
             [
                 n("start", "start", data={"k": 1}),
                 n("rd", "tool_call", tool="read_note", allowed_tools=["read_note"]),
-                n("out", "output"),
+                n("out", "end"),
             ],
             [
                 e("e0", "start", "data", "rd", "args"),

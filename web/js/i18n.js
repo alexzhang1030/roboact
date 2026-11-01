@@ -96,6 +96,7 @@ export function serverLabel(value, keys) {
 const EN_COUNT_ONE = {
   'run.action_missing_count': '1 missing action',
   'run.missing_input_count': '1 node needs input',
+  'run.no_cancel_too_long_count': '1 node can\'t be cancelled and runs too long',
 }
 
 export function countLabel(key, n) {
@@ -152,6 +153,9 @@ export function mapError(code, params) {
     param_out_of_limit: 'run.param_out_of_limit',
     motion_timeout_cap: 'run.motion_timeout_cap',
     missing_input: 'status.missing_input',
+    need_one_end: 'run.need_one_end',
+    need_one_start: 'run.need_one_start',
+    end_unreachable: 'run.end_unreachable',
   }
   const key = aliases[code] || ('error.' + code)
   const hit = t(key, params)
@@ -169,7 +173,7 @@ export function statusWord(st) {
   if (status === 'cancel_rejected') return t('status.cancel_rejected')
   if (status === 'action_missing') return t('status.action_missing')
   if (status === 'missing_input') return t('status.missing_input')
-  if (status === 'interrupted_unknown' || status === 'interrupted') return t('status.' + status)
+  if (status === 'interrupted_unknown' || status === 'interrupted') return t('status.interrupted')
   if (status === 'running') {
     if (st.phase === 'waiting_precondition') return t('status.running_wait')
     if (st.feedback) {
@@ -190,10 +194,6 @@ export function statusWord(st) {
   if (status === 'awaiting_approval') return t('status.awaiting')
   if (status === 'done') {
     if (st.side_effect_mode === 'mock' || st.mocked) return t('status.done_mock')
-    if (st.duration_ms != null) {
-      const ms = st.duration_ms
-      return ms < 10 ? t('status.done_ms', { ms: Math.round(ms) }) : t('status.done_s', { s: (ms / 1000).toFixed(1) })
-    }
     return t('status.done')
   }
   const key = 'status.' + status

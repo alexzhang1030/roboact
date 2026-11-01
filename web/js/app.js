@@ -4,7 +4,7 @@ import { MiniMap } from '@vue-flow/minimap'
 import FlowNode from './components/FlowNode.js'
 import LoopEdge from './components/LoopEdge.js'
 import { nodeStatus, resetStatus, applyNodeStates } from './status-store.js'
-import { isBackEdge, typesOk, portType, toFlow, fromFlow } from './graph-utils.js'
+import { isBackEdge, typesOk, portType, toFlow, fromFlow, endResultText } from './graph-utils.js'
 import { get, send, openEvents } from './api.js'
 import { createHistory } from './history.js'
 import {
@@ -14,6 +14,7 @@ import {
   serverLabel, countLabel,
 } from './i18n.js'
 import { KEYS, writeRaw, readRaw, readPanels, writePanels, readViewport, writeViewport, readLogFilter } from './prefs.js'
+import { openConfirm } from './confirm-dialog.js'
 
 const q = new URLSearchParams(location.search)
 const PERF_N = +(q.get('n') || 0)
@@ -145,6 +146,7 @@ const App = defineComponent({
     provide('toggleBp', (...a) => toggleBp(...a))
     provide('tools', tools)
     provide('iconBase', '/vendor/icons')
+    provide('runState', run)
 
     const lodLow = ref(false)
     watch(() => vf.viewport.value.zoom < 0.6, v => { lodLow.value = v })
@@ -179,6 +181,7 @@ const App = defineComponent({
     const versionWarn = computed(() => runActive.value && run.value.flow_version != null && meta.value.version !== run.value.flow_version)
     const controlsOff = computed(() => conn.value !== 'ok')
     const isRunning = computed(() => !!(run.value && run.value.status === 'running'))
+    const nodeBusy = computed(() => isRunning.value)
     const isPaused = computed(() => !!(run.value && run.value.status === 'paused'))
     const adapterLost = computed(() => !!(isPaused.value && run.value && run.value.pause && run.value.pause.reason === 'adapter_lost'))
     const operatorLost = computed(() => !!(isPaused.value && run.value && run.value.pause && run.value.pause.reason === 'operator_lost'))
@@ -194,13 +197,15 @@ const App = defineComponent({
       return 'run.start'
     })
     const slot1Label = computed(() => { void locale.value; return t(slot1Key.value) })
+    const preRunShown = ref(false)
     const flowBlocked = computed(() => {
       const c = runCheck.value || {}
-      if (c.can_run === false) return true
       if ((c.action_gone || []).length || (c.missing_input || []).length) return true
       if ((c.type_errors || []).length || (c.limit_errors || []).length) return true
-      if ((c.timeout_errors || []).length) return true
       if ((c.mismatches || []).length && !c.mismatch_unlocked) return true
+      if (!preRunShown.value) return false
+      if ((c.timeout_errors || []).length) return true
+      if (c.structure && c.structure.code) return true
       return false
     })
     const slot1Disabled = computed(() => controlsOff.value || pausePending.value || waitingApproval.value || needsReadback.value || (adapterLost.value && adapterDown.value) || (!isRunning.value && !isPaused.value && flowBlocked.value))
@@ -223,6 +228,40 @@ const App = defineComponent({
       const n = ((runCheck.value && runCheck.value.missing_input) || []).length
       return n ? countLabel('run.missing_input_count', n) : ''
     })
+    const structureIds = computed(() => {
+      const s = (runCheck.value && runCheck.value.structure) || null
+      if (!s || !s.code) return []
+      return (s.node_ids || []).filter(Boolean)
+    })
+    const structureText = computed(() => {
+      void locale.value
+      if (!preRunShown.value) return ''
+      const s = (runCheck.value && runCheck.value.structure) || null
+      if (!s || !s.code) return ''
+      if (s.code === 'need_one_end') return t('run.need_one_end', { n: s.n })
+      if (s.code === 'need_one_start') return t('run.need_one_start', { n: s.n })
+      if (s.code === 'end_unreachable') return t('run.end_unreachable')
+      return ''
+    })
+    function importErrorLine(e) {
+      void locale.value
+      if (e && e.message === 'kind "output" is now "end"') {
+        return t('flow.output_renamed', { path: e.path || '' })
+      }
+      return t('flow.import_error', { path: e.path, message: e.message })
+    }
+    const endPanelText = computed(() => {
+      const n = selectedNode.value
+      if (!n || !n.data || n.data.nodeType !== 'end') return ''
+      return endResultText(run.value, nodeStatus[n.id])
+    })
+    const selectedNoCancelLine = computed(() => {
+      void locale.value
+      const id = selected.value
+      const s = id && nodeStatus[id]
+      if (!s || !s.no_cancel_too_long) return ''
+      return t('run.no_cancel_too_long', { node: s.node_label || id, s: s.timeout_s })
+    })
     const timeoutCapText = computed(() => {
       void locale.value
       const errs = (runCheck.value && runCheck.value.timeout_errors) || []
@@ -230,6 +269,12 @@ const App = defineComponent({
       return t('run.motion_timeout_cap', { node: errs[0].node })
     })
     const timeoutCapIds = computed(() => ((runCheck.value && runCheck.value.timeout_errors) || []).map(e => e.node_id).filter(Boolean))
+    const noCancelTooLongCount = computed(() => {
+      void locale.value
+      if (!preRunShown.value) return ''
+      const n = ((runCheck.value && runCheck.value.timeout_errors) || []).length
+      return n ? countLabel('run.no_cancel_too_long_count', n) : ''
+    })
     const adapterLabel = computed(() => { void locale.value; return serverLabel(adapter.value && adapter.value.name) })
     const flowNameLabel = computed(() => { void locale.value; return serverLabel(meta.value && meta.value.name) || t('flow.untitled') })
     const slot2Disabled = computed(() => controlsOff.value || !isPaused.value || waitingApproval.value || needsReadback.value || (adapterLost.value && adapterDown.value))
@@ -319,7 +364,9 @@ const App = defineComponent({
     const showLostReadback = computed(() => !!(isPaused.value && operatorLost.value && readback.value))
     const selectedCancelRejected = computed(() => {
       const s = selected.value && nodeStatus[selected.value]
-      return !!(s && (s.status === 'cancel_rejected' || s.state === 'cancel_rejected'))
+      if (s && (s.status === 'cancel_rejected' || s.state === 'cancel_rejected')) return true
+      const pause = run.value && run.value.pause
+      return !!(pause && pause.lost_outcome === 'cancel_rejected' && pause.node_id === selected.value)
     })
     watch(waitingApproval, v => { if (v) bannerClock.approval = Date.now() })
     watch(versionWarn, v => { if (v) bannerClock.version = Date.now() })
@@ -332,13 +379,23 @@ const App = defineComponent({
       return t(key, { used: s, limit: lim })
     })
     const paletteTypes = computed(() => nodeTypesList.value.filter(t => t.palette !== false))
+    const CONTROL_ORDER = ['start', 'end', 'constant', 'condition', 'merge', 'human_confirm']
     const paletteGroups = computed(() => {
       const map = {}
       for (const t of paletteTypes.value) {
         const g = t.group || (t.from_adapter ? (adapter.value.name || adapter.value.id || 'adapter') : 'control')
         ;(map[g] = map[g] || []).push(t)
       }
-      return Object.entries(map).map(([name, items]) => ({ name, items }))
+      return Object.entries(map).map(([name, items]) => {
+        if (name === 'control') {
+          items.sort((a, b) => {
+            const ia = CONTROL_ORDER.indexOf(a.type)
+            const ib = CONTROL_ORDER.indexOf(b.type)
+            return (ia < 0 ? CONTROL_ORDER.length : ia) - (ib < 0 ? CONTROL_ORDER.length : ib)
+          })
+        }
+        return { name, items }
+      })
     })
     const paletteStatus = computed(() => {
       void locale.value
@@ -352,6 +409,33 @@ const App = defineComponent({
       return { kind: 'ok', text: (serverLabel(a.name) || a.name || '') + (a.target ? ' · ' + a.target : '') + when }
     })
     const typeLabel = (spec) => actionLabel(spec, locale.value)
+    function formatSeconds(v) {
+      const n = Number(v)
+      if (!Number.isFinite(n)) return v == null ? '' : String(v)
+      const r = Math.round(n * 10) / 10
+      return Number.isInteger(r) ? String(r) : r.toFixed(1)
+    }
+    function uncancellable(spec) {
+      const cancel = spec && spec.action && spec.action.cancel
+      return !!(cancel && cancel.cancellable === false)
+    }
+    function nodeTitle(nid) {
+      const n = nodes.value.find(x => x.id === nid)
+      if (!n) return nid || ''
+      if (n.data && n.data.title) return n.data.title
+      return typeLabel(specOf(n)) || nid || ''
+    }
+    const lostLine = computed(() => {
+      void locale.value
+      if (!operatorLost.value || !run.value || !run.value.pause) return ''
+      const pause = run.value.pause
+      const outcome = pause.lost_outcome
+      const name = nodeTitle(pause.node_id)
+      if (outcome === 'cancelled') return t('lost.cancelled', { node: name })
+      if (outcome === 'ran_to_end') return t('lost.ran_to_end', { node: name, s: formatSeconds(pause.lost_extra_s) })
+      if (outcome === 'cancel_rejected') return t('lost.cancel_rejected', { node: name })
+      return ''
+    })
     const filteredTypes = computed(() => {
       void locale.value
       const qv = addQ.value.trim()
@@ -557,20 +641,55 @@ const App = defineComponent({
       } catch (_) {
           runCheck.value = {
             action_gone: [], missing_input: [], mismatches: [], mismatch_unlocked: false,
-            type_errors: [], limit_errors: [], timeout_errors: [], can_run: false,
+            type_errors: [], limit_errors: [], timeout_errors: [], structure: null, can_run: false,
           }
       }
+      if (preRunShown.value) {
+        const c = runCheck.value || {}
+        const still = !!((c.structure && c.structure.code) || (c.timeout_errors || []).length)
+        if (!still) preRunShown.value = false
+      }
       applyImportMarks()
+    }
+
+    function structureSummary(s) {
+      if (!s) return { key: '', params: {} }
+      if (s.code === 'need_one_start') return { key: 'status.summary.extra_start', params: { n: s.n } }
+      if (s.code === 'need_one_end') return { key: 'status.summary.extra_end', params: { n: s.n } }
+      if (s.code === 'end_unreachable') return { key: 'status.summary.end_unreachable', params: {} }
+      return { key: '', params: {} }
     }
 
     function applyImportMarks() {
       const gone = new Set((runCheck.value && runCheck.value.action_gone) || [])
       const missing = new Set((runCheck.value && runCheck.value.missing_input) || [])
+      const tooLong = new Map()
+      for (const e of ((runCheck.value && runCheck.value.timeout_errors) || [])) {
+        if (e && e.node_id) tooLong.set(e.node_id, e)
+      }
+      const live = !!(run.value && (run.value.status === 'running' || run.value.status === 'paused'))
+      const showPre = preRunShown.value && !live
+      const summary = structureSummary((runCheck.value && runCheck.value.structure) || null)
       for (const n of nodes.value) {
         const cur = nodeStatus[n.id] || {}
         if (gone.has(n.id)) nodeStatus[n.id] = { status: 'action_missing', state: 'action_missing' }
         else if (missing.has(n.id)) nodeStatus[n.id] = { status: 'missing_input', state: 'missing_input' }
-        else if (cur.status === 'action_missing' || cur.status === 'missing_input') {
+        else if (showPre && tooLong.has(n.id)) {
+          const e = tooLong.get(n.id)
+          nodeStatus[n.id] = {
+            status: 'blocked', state: 'blocked', no_cancel_too_long: true,
+            timeout_s: e.timeout_s, node_label: e.node,
+            summary_key: 'status.summary.no_cancel_too_long',
+            summary_params: { s: e.timeout_s },
+          }
+        }
+        else if (showPre && structureIds.value.includes(n.id)) {
+          nodeStatus[n.id] = {
+            status: 'blocked', state: 'blocked', structure_mark: true,
+            summary_key: summary.key, summary_params: summary.params,
+          }
+        }
+        else if (cur.status === 'action_missing' || cur.status === 'missing_input' || cur.no_cancel_too_long || cur.structure_mark || cur.status === 'blocked') {
           nodeStatus[n.id] = { status: 'idle', state: 'idle' }
         }
       }
@@ -592,6 +711,8 @@ const App = defineComponent({
     }
 
     async function loadAll(flowId) {
+      preRunShown.value = false
+      resetStatus()
       const q = flowId ? ('?flow_id=' + encodeURIComponent(flowId)) : ''
       const b = await get('/api/bootstrap' + q)
       nodeTypesList.value = (b.node_types || []).map(t => ({ ...t, type: t.type || t.type_id, label: t.label || t.title }))
@@ -722,7 +843,7 @@ const App = defineComponent({
           flushNodes()
           storageErr.value = ''
           pausePending.value = false
-          if (run.value) run.value = { ...run.value, status: ev.status, steps_used: ev.steps_used, error: ev.error, pause: null }
+          if (run.value) run.value = { ...run.value, status: ev.status, steps_used: ev.steps_used, error: ev.error, pause: null, result: ev.result }
           refreshRecords(runId)
         },
         version_drift: (ev) => { if (run.value) run.value = { ...run.value, latest_flow_version: ev.latest_version } },
@@ -807,6 +928,7 @@ const App = defineComponent({
             max_steps: stepLimit.value, client_id: CLIENT_ID,
           })
         }
+        preRunShown.value = false
         resetStatus()
         const rid = r.run_id || (r.run && (r.run.run_id || r.run.id))
         const snap = r.run || await get('/api/runs/' + rid)
@@ -818,8 +940,12 @@ const App = defineComponent({
       } catch (e) {
         const detail = (e.body && e.body.detail) || {}
         const named = (detail.errors && detail.errors[0]) || detail
+        const pre = e.code === 'need_one_end' || e.code === 'need_one_start' || e.code === 'end_unreachable' || e.code === 'motion_timeout_cap'
         rejectMsg.value = mapError(e.code, named) || (e.body && e.body.message) || e.message
-        overlay.value = rejectMsg.value
+        if (pre) {
+          preRunShown.value = true
+          await refreshRunCheck()
+        } else overlay.value = rejectMsg.value
       }
     }
 
@@ -880,6 +1006,7 @@ const App = defineComponent({
     }
 
     async function rerunNew() {
+      if (nodeBusy.value) return
       await doRun('all')
     }
 
@@ -985,30 +1112,64 @@ const App = defineComponent({
       rebuildSources()
     }
 
-    function runSingle() {
-      if (!selected.value) return
+    function adapterConfirmText(spec) {
+      if (!spec) return ''
+      const labels = spec.confirm_labels || (spec.action && spec.action.confirm_labels)
+      if (labels && typeof labels === 'object') {
+        const hit = labels[locale.value] || labels.en
+        if (hit) return hit
+      }
+      return spec.confirm_text || ''
+    }
+    function nodeFullTitle(n) {
+      if (n && n.data && n.data.title) return n.data.title
+      const spec = specOf(n)
+      return actionLabel(spec, locale.value) || (n && n.data && n.data.nodeType) || t('node.fallback')
+    }
+    async function runSingle(ev) {
+      if (nodeBusy.value || !selected.value) return
+      const opener = (ev && ev.currentTarget) || document.activeElement
+      const spec = specOf(selectedNode.value)
       const wanted = singleRound.value == null || singleRound.value === '' ? null : Number(singleRound.value)
       const list = records.value.filter(r => r.node_id === selected.value && (wanted == null || r.round === wanted))
       const rec = list.length ? list[list.length - 1] : shownRec.value
-      doRun('single', {
+      const extra = {
         node_id: selected.value,
         source_run_id: rec && rec.run_id,
         step: rec && rec.step,
         source_round: wanted,
-      })
+      }
+      if (spec && spec.side_effect === 'motion') {
+        const text = adapterConfirmText(spec) || t('confirm.default')
+        const ok = await openConfirm({
+          title: t('confirm.title', { name: nodeFullTitle(selectedNode.value) }),
+          body: text,
+          returnTo: opener,
+        })
+        if (!ok) return
+        extra.confirm = true
+      }
+      doRun('single', extra)
     }
     function runFrom() {
-      if (!selected.value || !shownRec.value) return
+      if (nodeBusy.value || !selected.value || !shownRec.value) return
       doRun('from', { node_id: selected.value, source_run_id: shownRec.value.run_id || (run.value && run.value.id), step: shownRec.value.step })
     }
     function runGroup(g) {
+      if (nodeBusy.value) return
       doRun('group', { node_ids: g.node_ids, source_run_id: run.value && run.value.id })
     }
-    async function really() {
-      if (!selected.value) return
+    async function really(ev) {
+      if (nodeBusy.value || !selected.value) return
+      const opener = (ev && ev.currentTarget) || document.activeElement
       const spec = specOf(selectedNode.value)
       const text = (spec && spec.confirm_text) || t('confirm.external')
-      if (!window.confirm(text)) return
+      const ok = await openConfirm({
+        title: t('confirm.external_title'),
+        body: text,
+        returnTo: opener,
+      })
+      if (!ok) return
       doRun('single', { node_id: selected.value, side_effects: 'real', confirm: text, source_run_id: run.value && run.value.id })
     }
     async function decide(decision) {
@@ -1253,11 +1414,11 @@ const App = defineComponent({
     window.__af = {
       nodes, edges, run, adapter, doRun, cmd, toggleBp, vf, nodeStatus, decide, pausePending,
       slot1Label, slot1Disabled, slot2Disabled, banners, mismatch, pauseRun, runWord, runWordKind,
-      runCheck, importErrors, exportFlow, importFlow, reviewEnable, updateParam,
+      runCheck, importErrors, exportFlow, importFlow, reviewEnable, updateParam, scheduleSave, preRunShown,
       jumpToFirst, runLocked, runLockedText, actionGoneCount, missingInputCount, timeoutCapText,
       adapterLost, uiLost, operatorLost, rejectedActions, resolveMotion, theme, themeMode, setThemeMode,
       applyTheme, selected, tab, toggleTheme, locale, localeMode, setLocaleMode, motion, motionMode,
-      setMotionMode, t, leftOpen, rightW, showMini, meta, logFilter,
+      setMotionMode, t, leftOpen, rightW, showMini, meta, groups, logFilter, stopBeat,
     }
 
     return {
@@ -1266,12 +1427,12 @@ const App = defineComponent({
       motion, motionMode, motionOpen, pickMotion, savedViewport, defaultViewport, persistViewportNow, logFilter,
       showMini, showGrid, addMenu, addQ, rejectMsg, overlay, specOf, t, typeLabel, fieldLabel, groupTitle, slot1Key,
       adapterLabel, flowNameLabel, nameEditing, topEl, runLocked, runLockedText, slot1Title,
-      actionGoneCount, missingInputCount, timeoutCapText, timeoutCapIds, jumpToFirst, onNameClick, startNameEdit, finishNameEdit, fitTopBar,
+      actionGoneCount, missingInputCount, timeoutCapText, timeoutCapIds, noCancelTooLongCount, structureText, structureIds, importErrorLine, endPanelText, selectedNoCancelLine, lostLine, uncancellable, jumpToFirst, onNameClick, startNameEdit, finishNameEdit, fitTopBar,
       nodeRecords, logRecords, rounds, shownRec, viewRound, runActive, waitingApproval, confirmNote, versionWarn, stepsClass, stepsText,
       filteredTypes, paletteTypes, paletteGroups, paletteStatus, groupBoxes, portSources, stepLimit, overrides, singleRound, compareA, compareB, compareOut,
       deadlineAdapterOnly, outputImages, isReal, crashRecovery, selectedSpec,
       lodLow, nodeTypes: { agent: FlowNode }, edgeTypes: { loop: LoopEdge },
-      slot1Label, slot1Disabled, slot2Disabled, slot3Disabled, slot1Action, pauseRun,
+      slot1Label, slot1Disabled, slot2Disabled, slot3Disabled, slot1Action, pauseRun, nodeBusy,
       runWord, runWordKind, banners, mismatch, mismatchFade, selectedUnknown, selectedWait, writeTimeoutHint, selectedCancelRejected,
       adapterLost, uiLost, operatorLost, runCheck, importErrors, exportOpen, paramMark, mismatchLines,
       rejectedActions, needsReadback, readback, readingState, showLostReadback, resolveMotion,
@@ -1310,8 +1471,10 @@ const App = defineComponent({
           <span class="run-locked" v-if="runLockedText" data-testid="run-locked">{{ runLockedText }}</span>
           <span class="run-counts" data-testid="count-action-gone" v-if="actionGoneCount" @click="jumpToFirst(runCheck.action_gone)">{{ actionGoneCount }}</span>
           <span class="run-counts missing" data-testid="count-missing-input" v-if="missingInputCount" @click="jumpToFirst(runCheck.missing_input)">{{ missingInputCount }}</span>
-          <span class="run-counts" data-testid="motion-timeout-cap" v-if="timeoutCapText" @click="jumpToFirst(timeoutCapIds)">{{ timeoutCapText }}</span>
+          <span class="run-counts" data-testid="motion-timeout-cap" v-if="noCancelTooLongCount" @click="jumpToFirst(timeoutCapIds)">{{ noCancelTooLongCount }}</span>
+          <span class="run-counts" data-testid="run-refused" v-if="structureText" @click="jumpToFirst(structureIds)">{{ structureText }}</span>
         </div>
+          <p class="lost-line" data-testid="lost-line" v-if="lostLine">{{ lostLine }}</p>
         <div class="mismatch" :class="{ out: mismatchFade }" v-if="mismatch">{{ mismatch }}</div>
       </div>
       <div class="right">
@@ -1359,10 +1522,15 @@ const App = defineComponent({
       </span>
     </div>
     <div class="banners">
-      <div class="banner" v-for="b in banners" :key="b.id" :class="b.kind">
+      <div class="banner" v-for="b in banners" :key="b.id" :class="[b.kind, nodeBusy && b.actions==='version' ? 'banner-busy' : '']">
         <span>{{ b.text }}</span>
         <span class="spacer"></span>
-        <template v-if="b.actions==='version'"><button @click="rerunNew">{{ t('banner.rerun') }}</button></template>
+        <template v-if="b.actions==='version'">
+          <div class="banner-rerun">
+            <button :disabled="nodeBusy" :aria-describedby="nodeBusy ? 'in-busy-banner' : null" @click="rerunNew">{{ t('banner.rerun') }}</button>
+            <p v-if="nodeBusy" id="in-busy-banner" class="in-busy">{{ t('in.busy') }}</p>
+          </div>
+        </template>
         <template v-if="b.actions==='approval'">
           <button @click="decide('reject')">{{ t('banner.reject') }}</button>
           <button class="primary" @click="decide('approve')">{{ t('banner.approve') }}</button>
@@ -1383,7 +1551,7 @@ const App = defineComponent({
       <div class="box">
         <p>{{ t('flow.import_failed') }}</p>
         <ul>
-          <li v-for="(e, i) in importErrors" :key="i">{{ t('flow.import_error', { path: e.path, message: e.message }) }}</li>
+          <li v-for="(e, i) in importErrors" :key="i">{{ importErrorLine(e) }}</li>
         </ul>
         <button @click="importErrors=null">OK</button>
       </div>
@@ -1397,7 +1565,7 @@ const App = defineComponent({
             <h3>{{ groupTitle(g.name) }}</h3>
             <div class="nt" v-for="item in g.items" :key="item.type" draggable="true"
                  @dragstart="onPaletteDrag($event, item.type)" @dblclick="addNode(item.type)">
-              <span class="ic" v-if="item.icon" :style="{ '--ico': 'url(/vendor/icons/' + item.icon + '.svg)' }"></span><span v-else class="ic">▢</span><span>{{ typeLabel(item) }}</span>
+              <span class="ic" v-if="item.icon" :style="{ '--ico': 'url(/vendor/icons/' + item.icon + '.svg)' }"></span><span v-else class="ic">▢</span><span class="nt-name">{{ typeLabel(item) }}</span><span v-if="uncancellable(item)" class="nt-no-cancel" data-testid="palette-no-cancel">{{ t('node.no_cancel') }}</span>
             </div>
           </div>
           <div v-if="rejectedActions.length" class="pal-group">
@@ -1430,6 +1598,7 @@ const App = defineComponent({
       <aside class="right" :style="{width: rightW+'px'}">
         <div class="right-resize" @mousedown.prevent="onRightDown"></div>
         <template v-if="selectedNode">
+          <p class="idem-note" v-if="selectedNoCancelLine" data-testid="panel-no-cancel">{{ selectedNoCancelLine }}</p>
           <div class="confirm-box" v-if="waitingApproval && run.pause && run.pause.node_id===selectedNode.id">
             <input class="note-in" v-model="confirmNote" :placeholder="t('note.placeholder')">
             <div style="display:flex;gap:8px;margin-top:8px">
@@ -1477,11 +1646,12 @@ const App = defineComponent({
               <label>{{ t('in.override') }}</label>
               <textarea v-model="overrides" placeholder='{"value": 1}'></textarea>
               <div style="display:flex;gap:8px;margin-top:8px">
-                <button class="primary" style="height:32px" @click="runSingle">{{ t('in.run_this') }}</button>
+                <button class="primary" style="height:32px" :disabled="nodeBusy" :aria-describedby="nodeBusy ? 'in-busy' : null" @click="runSingle">{{ t('in.run_this') }}</button>
                 <button style="height:32px" @click="pinShown">{{ t('in.pin') }}</button>
               </div>
-              <button style="margin-top:8px" @click="runFrom">{{ t('in.rerun_from') }}</button>
-              <button v-if="selectedNode.data.nodeType==='tool_call' || selectedNode.data.nodeType==='model_call'" style="margin-top:8px" @click="really">{{ t('in.really') }}</button>
+              <button style="margin-top:8px" :disabled="nodeBusy" :aria-describedby="nodeBusy ? 'in-busy' : null" @click="runFrom">{{ t('in.rerun_from') }}</button>
+              <button v-if="selectedNode.data.nodeType==='tool_call' || selectedNode.data.nodeType==='model_call'" style="margin-top:8px" :disabled="nodeBusy" :aria-describedby="nodeBusy ? 'in-busy' : null" @click="really">{{ t('in.really') }}</button>
+              <p v-if="nodeBusy" id="in-busy" class="in-busy">{{ t('in.busy') }}</p>
               <h3 style="margin-top:16px">{{ t('in.current') }}</h3>
               <div class="kv">{{ JSON.stringify(shownRec && shownRec.inputs || {}, null, 2) }}</div>
             </template>
@@ -1490,7 +1660,8 @@ const App = defineComponent({
                 <img :src="img.data || img.url" :alt="name">
                 <p class="img-cap">{{ t('out.cap', { name: name, bytes: img.bytes || '?', w: img.width, h: img.height, at: img.captured_at, round: shownRec && shownRec.round, step: shownRec && shownRec.step }) }}</p>
               </div>
-              <div class="kv">{{ JSON.stringify(shownRec && shownRec.outputs || run && run.output || {}, null, 2) }}</div>
+              <div class="kv" v-if="endPanelText" data-testid="end-panel-result">{{ endPanelText }}</div>
+              <div class="kv" v-else>{{ JSON.stringify(shownRec && shownRec.outputs || run && run.output || {}, null, 2) }}</div>
               <p v-if="shownRec && shownRec.error" style="color:var(--red)">{{ shownRec.error }}</p>
             </template>
             <template v-if="tab==='params'">
@@ -1563,9 +1734,12 @@ const App = defineComponent({
               <div v-if="compareOut" class="kv">{{ compareOut.map(x => x.key + (JSON.stringify((x.a||{}).outputs)===JSON.stringify((x.b||{}).outputs) ? (' ' + t('run.same')) : (' ' + t('run.diff')))).join('\\n') }}</div>
             </template>
             <h3 style="margin-top:16px">{{ t('groups.title') }}</h3>
-            <div v-for="g in groups" :key="g.id" style="margin-bottom:8px">
-              {{ g.name }} ({{ g.node_ids.length }})
-              <button @click="runGroup(g)">{{ t('groups.run') }}</button>
+            <div v-for="g in groups" :key="g.id" class="group-run">
+              <div class="group-run-head">
+                <span>{{ g.name }} ({{ g.node_ids.length }})</span>
+                <button :disabled="nodeBusy" :aria-describedby="nodeBusy ? ('in-busy-group-' + g.id) : null" @click="runGroup(g)">{{ t('groups.run') }}</button>
+              </div>
+              <p v-if="nodeBusy" :id="'in-busy-group-' + g.id" class="in-busy">{{ t('in.busy') }}</p>
             </div>
             <p v-if="!groups.length" style="color:var(--muted)">{{ t('groups.empty') }}</p>
           </div>

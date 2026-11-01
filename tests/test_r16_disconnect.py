@@ -112,8 +112,9 @@ def test_r16_cancel_rejected_runs_to_end_then_pauses(tmp_path):
         st = await wait_status(ex, rid, "paused", timeout=4)
         assert st.pause["reason"] == "operator_lost"
         assert adapter.cancel_calls
-        go_st = (st.node_state.get("go") or {}).get("state")
-        assert go_st == "cancel_rejected", go_st
+        go_node = st.node_state.get("go") or {}
+        assert go_node.get("state") == "done", go_node
+        assert go_node.get("duration_ms") is not None
         go_recs = [r for r in recs(store, rid) if r["node_id"] == "go"]
         assert go_recs and go_recs[-1]["status"] == "done", go_recs
         await hub.stop()
