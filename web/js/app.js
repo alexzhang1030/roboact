@@ -179,7 +179,6 @@ const App = defineComponent({
     const versionWarn = computed(() => runActive.value && run.value.flow_version != null && meta.value.version !== run.value.flow_version)
     const controlsOff = computed(() => conn.value !== 'ok')
     const isRunning = computed(() => !!(run.value && run.value.status === 'running'))
-    const nodeBusy = computed(() => isRunning.value)
     const isPaused = computed(() => !!(run.value && run.value.status === 'paused'))
     const adapterLost = computed(() => !!(isPaused.value && run.value && run.value.pause && run.value.pause.reason === 'adapter_lost'))
     const operatorLost = computed(() => !!(isPaused.value && run.value && run.value.pause && run.value.pause.reason === 'operator_lost'))
@@ -1030,7 +1029,6 @@ const App = defineComponent({
       doRun('from', { node_id: selected.value, source_run_id: shownRec.value.run_id || (run.value && run.value.id), step: shownRec.value.step })
     }
     function runGroup(g) {
-      if (nodeBusy.value) return
       doRun('group', { node_ids: g.node_ids, source_run_id: run.value && run.value.id })
     }
     async function really() {
@@ -1282,7 +1280,6 @@ const App = defineComponent({
     window.__af = {
       nodes, edges, run, adapter, doRun, cmd, toggleBp, vf, nodeStatus, decide, pausePending,
       slot1Label, slot1Disabled, slot2Disabled, banners, mismatch, pauseRun, runWord, runWordKind,
-      nodeBusy,
       runCheck, importErrors, exportFlow, importFlow, reviewEnable, updateParam,
       jumpToFirst, runLocked, runLockedText, actionGoneCount, missingInputCount, timeoutCapText,
       adapterLost, uiLost, operatorLost, rejectedActions, resolveMotion, theme, themeMode, setThemeMode,
@@ -1301,7 +1298,7 @@ const App = defineComponent({
       filteredTypes, paletteTypes, paletteGroups, paletteStatus, groupBoxes, portSources, stepLimit, overrides, singleRound, compareA, compareB, compareOut,
       deadlineAdapterOnly, outputImages, isReal, crashRecovery, selectedSpec,
       lodLow, nodeTypes: { agent: FlowNode }, edgeTypes: { loop: LoopEdge },
-      slot1Label, slot1Disabled, slot2Disabled, slot3Disabled, slot1Action, pauseRun, nodeBusy,
+      slot1Label, slot1Disabled, slot2Disabled, slot3Disabled, slot1Action, pauseRun,
       runWord, runWordKind, banners, mismatch, mismatchFade, selectedUnknown, selectedWait, writeTimeoutHint, selectedCancelRejected,
       adapterLost, uiLost, operatorLost, runCheck, importErrors, exportOpen, paramMark, mismatchLines,
       rejectedActions, needsReadback, readback, readingState, showLostReadback, resolveMotion,
@@ -1596,9 +1593,8 @@ const App = defineComponent({
             <h3 style="margin-top:16px">{{ t('groups.title') }}</h3>
             <div v-for="g in groups" :key="g.id" style="margin-bottom:8px">
               {{ g.name }} ({{ g.node_ids.length }})
-              <button :disabled="nodeBusy" :aria-describedby="nodeBusy ? 'in-busy-group' : null" @click="runGroup(g)">{{ t('groups.run') }}</button>
+              <button @click="runGroup(g)">{{ t('groups.run') }}</button>
             </div>
-            <p v-if="nodeBusy && groups.length" id="in-busy-group" class="in-busy">{{ t('in.busy') }}</p>
             <p v-if="!groups.length" style="color:var(--muted)">{{ t('groups.empty') }}</p>
           </div>
         </template>

@@ -429,13 +429,6 @@ label { display: block; color: var(--muted); font-size: 12px; margin: 8px 0 4px;
 }
 .group-box .gname { position: absolute; top: -20px; left: 0; font-size: 12px; color: var(--muted); pointer-events: all; }
 .group-box .grun { position: absolute; top: -24px; right: 0; pointer-events: all; height: 28px; }
-.in-busy {
-  margin: 8px 0 0;
-  font-size: 12px;
-  line-height: 18px;
-  color: var(--muted);
-  text-align: left;
-}
 
 .collapse {
   position: absolute; left: 8px; top: 8px; z-index: 5; height: 28px;
