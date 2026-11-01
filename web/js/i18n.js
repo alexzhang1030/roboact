@@ -173,7 +173,7 @@ export function statusWord(st) {
   if (status === 'cancel_rejected') return t('status.cancel_rejected')
   if (status === 'action_missing') return t('status.action_missing')
   if (status === 'missing_input') return t('status.missing_input')
-  if (status === 'interrupted_unknown' || status === 'interrupted') return t('status.' + status)
+  if (status === 'interrupted_unknown' || status === 'interrupted') return t('status.interrupted')
   if (status === 'running') {
     if (st.phase === 'waiting_precondition') return t('status.running_wait')
     if (st.feedback) {

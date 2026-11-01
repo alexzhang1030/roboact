@@ -131,6 +131,7 @@ export default markRaw(defineComponent({
         return t(s.summary_key, s.summary_params || {})
       }
       if (isActionMissing.value) return t('error.action_missing')
+      if (status === 'interrupted_unknown') return t('status.summary.result_unknown')
       if (kind.value === 'unknown') {
         const code = s.error_type || s.error
         return (code && mapError(code)) || t('error.may_have_written')
