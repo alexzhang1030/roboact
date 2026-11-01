@@ -120,7 +120,7 @@ Executor
 Loops (§5.1)
 
 - Stop: condition exit, step limit (`run.word.step_limit`), user. No exit: warn on save, refuse run.
-- Step limit default 1000 (Steve, 2026-10-31, temporary). No round limit.
+- Step limit default 1000 (Alex, 2026-11-01). No round limit.
 - Breakpoints every round, or "only round N", or condition comparing existing input fields (no Python); Step over back edge enters next round.
 - Record key run id + global step, plus node and round; no overwrite; unread edge data persisted.
 - Staleness includes the node itself in a loop.
@@ -138,7 +138,7 @@ Hardware
 
 - Robot model and interface specs await a source (Alex or Tedrake).
 - Backend shares the controller with control (inference): normal priority, off control-loop cores, memory cap; control threads never wait on it. ros2_control loops are real-time ([controller_manager](https://control.ros.org/rolling/doc/ros2_control/controller_manager/doc/userdoc.html), [RT Linux](https://docs.ros.org/en/jazzy/Tutorials/Miscellaneous/Building-Realtime-rt_preempt-kernel-for-ROS-2.html)).
-- Canvas Stop is not e-stop; e-stop is the robot's hardware path, never web or HTTP; no UI e-stop button. Proposed: IEC 60204-1 category 2 (hold, motors on; Thompson's suggestion, not certified).
+- Canvas Stop is not e-stop; e-stop is the robot's hardware path, never web or HTTP; no UI e-stop button. After Stop the robot holds in place, no move to a safe pose (Alex, 2026-11-01). Proposed: IEC 60204-1 category 2 (hold, motors on; Thompson's suggestion, not certified).
 - After cancel: robot state and gripper hold read back and shown.
 - Adapter reports `name`, `version`, `target` (sim/real, a field, not name-guessed), action-list version.
 - No per-run sim/real toggle; adapter name right of flow name; red `real_tag` tag when real.
@@ -250,10 +250,10 @@ A6: passing (PR #6). A38: 19.4. A40: 19.9. R1–R6 include two checks; Steps: ac
 - Perf numbers: headless, software rendering, ~60 Hz cap; compare libraries only.
 - React 19 has no UMD (esm.sh per upgrade).
 - Side-effect marks and no-memory data rely on node authors; check in code review. External state may change before single-node reruns.
-- Alex: step limit (1000 temporary); browser location (decides auth, affects v1); Stop = hold or safe pose; JetPack 7 real-time kernel and controller = Thor (not blocking v1).
+- Alex (2026-11-01): v0.1 runs on simulation only; first robot, controller and version not chosen, so heartbeat timing and the 10 s cap stay open. Browser runs on another LAN computer: v0.1 reaches it through SSH forwarding (above); direct LAN access needs `--host`, tokens and a wider A40 `Host` list, not in v0.1 unless Alex asks. JetPack 7 real-time kernel and controller = Thor (not blocking v1).
 - Torvalds: re-measure 19, 19.1; confirm 60 s timeout, 2 s SSE reconnect, 19.2 20 ms; fake-adapter actions.
 - Thompson: exec-model v0.2 keeps v0.1 storage and restart pause, A18, A20; adds action fields, pause/stop/crash under both `return_mode` values, cancel refused, `motion` rules (no mock, no idempotency dedupe, read state before resume).
 - Rams: English status words and buttons in the zh table; verify English fits nodes and top bar.
 - Tedrake: once vendor known, cite stop, controller power-loss and gripper power-loss behavior (adapter acceptance, not blocking v1).
 - Tedrake: confirm control nodes; `node-list-v0.md` obsolete (9 nodes kept for executor tests).
-- Flow file (added 2026-10-31): Alex, whether exported files should be diff-friendly for git (stable key order, no positions).
+- Flow file: export writes keys in a fixed order so git diffs stay small; positions stay in the file (Alex, 2026-11-01).

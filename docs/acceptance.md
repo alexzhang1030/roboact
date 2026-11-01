@@ -225,3 +225,4 @@ Version 1.5 (2026-10-31). Companion to `prd-en-v1.5.md` section 4. exec-model = 
 14. Set an enum param to a value outside its enum, and a nested `motion` param over its limit: Run is blocked and each is named.
 15. Fill in the secret param on a "missing input" node: the mark clears without a reload.
 16. Follow the README offline install on a clean machine: YAML import works.
+17. Build the same flow twice, adding nodes, edges and params in a different order each time; export both as JSON and as YAML. Pass: every object's keys come out in the same fixed order in both files, and `git diff` between them shows only lines whose values differ.
