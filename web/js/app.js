@@ -243,12 +243,22 @@ const App = defineComponent({
       if (s.code === 'end_unreachable') return t('run.end_unreachable')
       return ''
     })
-    function importErrorLine(e) {
+    function importErrorView(e) {
       void locale.value
       if (e && e.message === 'kind "output" is now "end"') {
-        return t('flow.output_renamed', { path: e.path || '' })
+        const raw = String(e.path || '')
+        const matched = /^(.*) \(id (.*)\)$/.exec(raw)
+        if (matched) {
+          const pathId = t('flow.import_path_id', { path: matched[1], id: matched[2] })
+          const marked = t('flow.output_renamed', { path: '\u0000' })
+          const parts = marked.split('\u0000')
+          return { renamed: true, before: parts[0] || '', pathId, after: parts[1] || '' }
+        }
       }
-      return t('flow.import_error', { path: e.path, message: e.message })
+      if (e && e.message === 'kind "output" is now "end"') {
+        return { renamed: false, text: t('flow.output_renamed', { path: e.path || '' }) }
+      }
+      return { renamed: false, text: t('flow.import_error', { path: e.path, message: e.message }) }
     }
     const endPanelText = computed(() => {
       const n = selectedNode.value
@@ -1413,7 +1423,7 @@ const App = defineComponent({
       motion, motionMode, motionOpen, pickMotion, savedViewport, defaultViewport, persistViewportNow, logFilter,
       showMini, showGrid, addMenu, addQ, rejectMsg, overlay, specOf, t, typeLabel, fieldLabel, groupTitle, slot1Key,
       adapterLabel, flowNameLabel, nameEditing, topEl, runLocked, runLockedText, slot1Title,
-      actionGoneCount, missingInputCount, timeoutCapText, timeoutCapIds, noCancelTooLongCount, structureText, structureIds, importErrorLine, endPanelText, selectedNoCancelLine, lostLine, uncancellable, jumpToFirst, onNameClick, startNameEdit, finishNameEdit, fitTopBar,
+      actionGoneCount, missingInputCount, timeoutCapText, timeoutCapIds, noCancelTooLongCount, structureText, structureIds, importErrorView, endPanelText, selectedNoCancelLine, lostLine, uncancellable, jumpToFirst, onNameClick, startNameEdit, finishNameEdit, fitTopBar,
       nodeRecords, logRecords, rounds, shownRec, viewRound, runActive, waitingApproval, confirmNote, versionWarn, stepsClass, stepsText,
       filteredTypes, paletteTypes, paletteGroups, paletteStatus, groupBoxes, portSources, stepLimit, overrides, singleRound, compareA, compareB, compareOut,
       deadlineAdapterOnly, outputImages, isReal, crashRecovery, selectedSpec,
@@ -1537,9 +1547,12 @@ const App = defineComponent({
       <div class="box">
         <p>{{ t('flow.import_failed') }}</p>
         <ul>
-          <li v-for="(e, i) in importErrors" :key="i">{{ importErrorLine(e) }}</li>
+          <li v-for="(e, i) in importErrors" :key="i">
+            <template v-if="importErrorView(e).renamed">{{ importErrorView(e).before }}<span class="import-mono" data-testid="import-path-id">{{ importErrorView(e).pathId }}</span>{{ importErrorView(e).after }}</template>
+            <template v-else>{{ importErrorView(e).text }}</template>
+          </li>
         </ul>
-        <button @click="importErrors=null">OK</button>
+        <button data-testid="import-close" @click="importErrors=null">{{ t('flow.import_close') }}</button>
       </div>
     </div>
     <div class="body">

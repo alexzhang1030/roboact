@@ -193,10 +193,9 @@ export default markRaw(defineComponent({
     <div class="fn-title">
       <span v-if="typeIcon" class="fn-type-ico" :style="{ '--ico': icoUrl(typeIcon) }"></span>
       <span v-if="write" class="fn-side" :style="{ '--ico': icoUrl('mark-write') }" :title="sideTitle"></span>
-      <span class="fn-name" :class="{ full: isActionMissing }">{{ title }}</span>
+      <span class="fn-name">{{ title }}</span>
       <span v-if="noCancel" class="fn-no-cancel" data-testid="node-no-cancel">{{ t('node.no_cancel') }}</span>
-      <span v-if="isActionMissing" class="fn-gone-x" aria-hidden="true">×</span>
-      <span class="fn-st" v-else>
+      <span class="fn-st">
         <span class="ico" :data-kind="kind" :style="{ '--ico': icoUrl(icon) }"></span>
         <span class="fn-st-word">{{ word }}</span>
       </span>
