@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import difflib
 import json
 from typing import Any
 
@@ -14,8 +15,10 @@ from roboact.flow_file import (
     export_flow,
     import_flow,
     parse_and_validate,
+    parse_yaml,
 )
 
+from .http_api import http_json
 from .test_flow_file import sample_doc
 
 
@@ -154,3 +157,172 @@ def test_save_twice_matches() -> None:
     )
     second, _name = export_flow(import_flow(text, "json", adapter), "json", adapter)
     assert second == text
+
+
+def _ordered(values: dict[str, Any], keys: list[str]) -> dict[str, Any]:
+    return {key: values[key] for key in keys}
+
+
+def _node(
+    nid: str, typ: str, x: int, y: int, params: dict[str, Any], *, flip: bool
+) -> dict[str, Any]:
+    body = {"id": nid, "type": typ, "x": x, "y": y, "params": params, "breakpoints": {}}
+    if not flip:
+        return body
+    return {key: body[key] for key in reversed(list(body))}
+
+
+def _edge(
+    eid: str,
+    source: str,
+    source_port: str,
+    target: str,
+    target_port: str,
+    *,
+    flip: bool,
+) -> dict[str, Any]:
+    body = {
+        "id": eid,
+        "source": source,
+        "target": target,
+        "source_port": source_port,
+        "target_port": target_port,
+        "kind": "data",
+    }
+    if not flip:
+        return body
+    return {key: body[key] for key in reversed(list(body))}
+
+
+def _save_graph(
+    base: str,
+    flow_id: str,
+    nodes: list[dict[str, Any]],
+    edges: list[dict[str, Any]],
+    *,
+    flip: bool,
+) -> None:
+    """PUT the graph the way the page does in saveFlow."""
+    body: dict[str, Any] = {
+        "id": flow_id,
+        "name": "order-check",
+        "nodes": nodes,
+        "edges": edges,
+        "groups": [],
+        "step_limit": 200,
+        "bump": True,
+    }
+    if flip:
+        body = {key: body[key] for key in reversed(list(body))}
+    http_json(base, f"/api/flows/{flow_id}", "PUT", body)
+
+
+def _value_only_changes(before: str, after: str) -> list[tuple[str, str]]:
+    """In-place value edits. Inserts, deletes, and permuted blocks are reorders."""
+    left = before.splitlines()
+    right = after.splitlines()
+    changes: list[tuple[str, str]] = []
+    matcher = difflib.SequenceMatcher(a=left, b=right)
+    for tag, i1, i2, j1, j2 in matcher.get_opcodes():
+        if tag == "equal":
+            continue
+        block_a = left[i1:i2]
+        block_b = right[j1:j2]
+        same_len = tag == "replace" and len(block_a) == len(block_b)
+        reordered = block_a != block_b and sorted(block_a) == sorted(block_b)
+        if not same_len or reordered:
+            diff = "\n".join(
+                difflib.unified_diff(left, right, fromfile="build-a", tofile="build-b", lineterm="")
+            )
+            raise AssertionError(f"moved or reordered lines\n{diff}")
+        changes.extend(pair for pair in zip(block_a, block_b, strict=True) if pair[0] != pair[1])
+    return changes
+
+
+def _assert_same_sorted_keys(left: Any, right: Any, path: str = "") -> None:
+    if isinstance(left, dict) and isinstance(right, dict):
+        keys_l = list(left)
+        keys_r = list(right)
+        assert keys_l == keys_r, path
+        assert keys_l == sorted(keys_l), path
+        for key in keys_l:
+            child = f"{path}.{key}" if path else key
+            _assert_same_sorted_keys(left[key], right[key], child)
+        return
+    if isinstance(left, list) and isinstance(right, list):
+        assert len(left) == len(right), path
+        for index, (item_l, item_r) in enumerate(zip(left, right, strict=True)):
+            _assert_same_sorted_keys(item_l, item_r, f"{path}[{index}]")
+
+
+def test_20_17_build_order_export_diff_is_values_only(server: dict[str, Any]) -> None:
+    """Acceptance §20 step 17, through POST /api/flows, PUT /api/flows/{id}, export.
+
+    Node ids are chosen by the page (`n_` plus random in addNode). The server
+    stores those ids; they do not depend on creation order. Both builds use the
+    same ids and only vary the order of nodes, edges, and param keys.
+    """
+    base = server["base"]
+    pose = {"x": 0.4, "y": 0.1, "z": 0.2}
+    data = {"x": 0.4, "y": 0.1, "z": 0.2}
+    note = {"mode": "on", "ver": "1.10", "token": "filled"}
+    nodes_spec = [
+        ("n_start", "start", 40, 160, "data", data),
+        ("n_go", "fake_set_pose", 300, 160, None, pose),
+        ("n_note", "fake_note", 40, 320, None, note),
+        ("n_out", "output", 560, 160, None, {}),
+    ]
+    edges_spec = [
+        ("e_start", "n_start", "data", "n_go", "target"),
+        ("e_go", "n_go", "pose", "n_out", "value"),
+    ]
+
+    def build(flip: bool) -> str:
+        created = http_json(base, "/api/flows", "POST", {"name": "order-check"})
+        flow_id = str(created["flow"]["id"])
+        spec = list(reversed(nodes_spec)) if flip else list(nodes_spec)
+        nodes: list[dict[str, Any]] = []
+        for nid, typ, x, y, nest, params in spec:
+            keys = list(reversed(list(params))) if flip else list(params)
+            built = _ordered(params, keys)
+            if nest:
+                built = {nest: built}
+            nodes.append(_node(nid, typ, x, y, built, flip=flip))
+            _save_graph(base, flow_id, list(nodes), [], flip=flip)
+        edges: list[dict[str, Any]] = []
+        edge_spec = list(reversed(edges_spec)) if flip else list(edges_spec)
+        for eid, source, source_port, target, target_port in edge_spec:
+            edges.append(_edge(eid, source, source_port, target, target_port, flip=flip))
+            _save_graph(base, flow_id, list(nodes), list(edges), flip=flip)
+        return flow_id
+
+    first = build(False)
+    second = build(True)
+    exported: dict[str, tuple[str, str]] = {}
+    for fmt in ("json", "yaml"):
+        left = http_json(base, "/api/flows/export", "POST", {"flow_id": first, "format": fmt})
+        right = http_json(base, "/api/flows/export", "POST", {"flow_id": second, "format": fmt})
+        exported[fmt] = (left["text"], right["text"])
+        changes = _value_only_changes(left["text"], right["text"])
+        diff = "\n".join(
+            difflib.unified_diff(
+                left["text"].splitlines(),
+                right["text"].splitlines(),
+                fromfile=f"build-a.{fmt}",
+                tofile=f"build-b.{fmt}",
+                lineterm="",
+            )
+        )
+        assert len(changes) == 1, diff
+        before, after = changes[0]
+        assert before.split("fl_", 1)[0] == after.split("fl_", 1)[0]
+        assert "fl_" in before and "fl_" in after
+
+    js_left, js_right = exported["json"]
+    _assert_same_sorted_keys(json.loads(js_left), json.loads(js_right))
+    ys_left, ys_right = exported["yaml"]
+    _assert_same_sorted_keys(parse_yaml(ys_left), parse_yaml(ys_right))
+    ids = [node["id"] for node in json.loads(js_left)["nodes"]]
+    assert ids == sorted(ids)
+    assert ids != [row[0] for row in nodes_spec]
+    assert ids != [row[0] for row in reversed(nodes_spec)]
