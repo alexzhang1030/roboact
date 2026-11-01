@@ -35,21 +35,22 @@ export const copy = {
   idle: 'Idle',
   /** status.running */
   statusRunning: 'Running',
+  /** status.done */
+  done: 'Done',
   /** port.data — Start's real out-port */
   initialData: 'Initial data',
 } as const
 
-/** steps.normal — "Steps {used} / limit {limit}". The brief fixes the limit at 50. */
+/** steps.normal — "Steps {used} / limit {limit}". The brief fixes the limit at 1000. */
 export function stepsLabel(used: number): string {
-  return `Steps ${used} / limit 50`
+  return `Steps ${used} / limit 1000`
 }
 
 /**
- * status.done_s — "Done · {s} s".
- * The catalog formats s with one decimal (web/js/i18n.js statusWord).
+ * status.summary.took is not in web/i18n/en.js. The brief's summary line is "Took 0.4 s".
  */
-export function doneSeconds(s: string): string {
-  return `Done · ${s} s`
+export function tookSeconds(s: string): string {
+  return `Took ${s} s`
 }
 
 /**

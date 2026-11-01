@@ -362,8 +362,8 @@ body,
   justify-content: flex-start;
   gap: 4px;
   flex: none;
-  /* Longest status is "Done · 0.4 s". A fixed slot keeps the icon from jumping when the word changes. */
-  width: 112px;
+  /* Longest title-row status is "Running". A fixed slot keeps the word's x still. */
+  width: auto;
   font-size: 12px;
   line-height: 18px;
   font-weight: 400;
@@ -376,13 +376,26 @@ body,
 
 .fn-st-word {
   display: block;
-  width: 92px;
+  width: 7ch;
   flex: none;
   font-family: var(--mono);
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
   overflow: visible;
   transition: color 0.35s linear;
+}
+
+.fn-sum {
+  height: 18px;
+  padding: 0 12px;
+  display: flex;
+  align-items: center;
+  font-family: var(--mono);
+  font-size: 12px;
+  line-height: 18px;
+  font-variant-numeric: tabular-nums;
+  color: var(--muted);
+  white-space: nowrap;
 }
 
 .fn-port {
@@ -525,7 +538,7 @@ body,
 
 .hold {
   left: calc(var(--node-w) / 2 - 5px);
-  top: calc(var(--title-h) + 18px);
+  top: calc(var(--title-h) + 36px);
 }
 
 .pick {

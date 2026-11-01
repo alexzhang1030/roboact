@@ -1,12 +1,13 @@
 import { useEffect, useState } from 'react'
 import { Stage, type Act } from '../kit/stage'
 import { Bar } from '../kit/window'
-import { PORT_POSE, PORT_TARGET, copy, doneSeconds, stepsLabel } from './copy'
+import { PORT_POSE, PORT_TARGET, copy, stepsLabel, tookSeconds } from './copy'
 import doneIcon from '../icons/state-done.svg'
 import idleIcon from '../icons/state-idle.svg'
 import runningIcon from '../icons/state-running.svg'
 import startIcon from '../icons/node-start.svg'
 import toolIcon from '../icons/node-tool.svg'
+import writeIcon from '../icons/mark-write.svg'
 
 type NodeStatus = 'idle' | 'running' | 'done'
 type RunWord = 'off' | 'running' | 'completed'
@@ -84,7 +85,7 @@ const idlePatch: Partial<S> = {
 async function script(a: Act<S>) {
   const g = WIDE
   // Hold below the port row so the lifted card's bottom is not 1px off a resting node.
-  const offset = { x: g.nodeW / 2, y: 1 + g.titleH + 22 }
+  const offset = { x: g.nodeW / 2, y: 1 + g.titleH + SUM_H + 22 }
 
   a.mark('start')
   await a.wait(450)
@@ -193,9 +194,9 @@ function statusIcon(status: NodeStatus): string {
   return idleIcon
 }
 
-function statusWord(status: NodeStatus, seconds: string): string {
+function statusWord(status: NodeStatus): string {
   if (status === 'running') return copy.statusRunning
-  if (status === 'done') return doneSeconds(seconds)
+  if (status === 'done') return copy.done
   return copy.idle
 }
 
@@ -204,6 +205,7 @@ function Node({
   y,
   title,
   icon,
+  write,
   status,
   seconds,
   ports,
@@ -216,6 +218,7 @@ function Node({
   y: number
   title: string
   icon: string
+  write?: boolean
   status: NodeStatus
   seconds: string
   ports: 'start' | 'pose' | 'grip'
@@ -234,12 +237,14 @@ function Node({
     >
       <div className="fn-title">
         <Ico src={icon} />
+        {write ? <Ico src={writeIcon} /> : null}
         <span className="fn-name">{title}</span>
         <span className="fn-st">
           <Ico src={statusIcon(status)} kind={statusKind(status)} />
-          <span className="fn-st-word">{statusWord(status, seconds)}</span>
+          <span className="fn-st-word">{statusWord(status)}</span>
         </span>
       </div>
+      <div className="fn-sum">{status === 'done' ? tookSeconds(seconds) : ''}</div>
       {ports === 'start' ? (
         <div className="fn-port out">
           <span className="fn-port-name">{copy.initialData}</span>
@@ -293,12 +298,14 @@ function curve(a: { x: number; y: number }, b: { x: number; y: number }): string
   return `M ${a.x} ${a.y} C ${a.x + dx} ${a.y}, ${b.x - dx} ${b.y}, ${b.x} ${b.y}`
 }
 
+const SUM_H = 18
+
 function portOut(node: { x: number; y: number }, g: Geom): { x: number; y: number } {
-  return { x: node.x + g.nodeW, y: node.y + 1 + g.titleH + 12 }
+  return { x: node.x + g.nodeW, y: node.y + 1 + g.titleH + SUM_H + 12 }
 }
 
 function portIn(node: { x: number; y: number }, g: Geom): { x: number; y: number } {
-  return { x: node.x, y: node.y + 1 + g.titleH + 12 }
+  return { x: node.x, y: node.y + 1 + g.titleH + SUM_H + 12 }
 }
 
 export default function Hero() {
@@ -407,6 +414,7 @@ export default function Hero() {
               y={g.pose.y}
               title={copy.goToPose}
               icon={toolIcon}
+              write
               status={s.pose}
               seconds="0.4"
               ports="pose"
@@ -417,6 +425,7 @@ export default function Hero() {
                 y={gripAt.y}
                 title={copy.gripper}
                 icon={toolIcon}
+                write
                 status={s.grip}
                 seconds="0.2"
                 ports="grip"
