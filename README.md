@@ -2,7 +2,12 @@
 
 # Roboact
 
-<img src="demo/hero/media/hero.gif" width="1200" height="750" alt="Fake adapter demo. Start. Go to pose. Gripper. Run. Running. Completed.">
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="demo/hero/media/hero-dark.gif">
+  <img src="demo/hero/media/hero-light.gif" width="1200" height="750" alt="Fake adapter demo. Start. Go to pose. Gripper. Run. Running. Completed.">
+</picture>
+
+[Fake adapter demo (MP4)](demo/hero/media/hero.mp4)
 
 Offline robot flow canvas. Wire adapter actions into a loopable flow; debug with breakpoints, step, human confirm, and a run log. v1 ships `FakeAdapter` only (`target=sim`). MIT (`LICENSE`).
 

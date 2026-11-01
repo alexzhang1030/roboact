@@ -53,12 +53,6 @@ export function doneSeconds(s: string): string {
 }
 
 /**
- * Not an en.js key. web/js/app.js renders this kbd beside run.start / run.resume.
- * The brief names the control "Run F5".
- */
-export const RUN_KEY = 'F5'
-
-/**
  * Not en.js keys. Fake-adapter port titles in roboact/adapter.py
  * (OutputSpec pose, ParamSpec target). The brief names these ports.
  */

@@ -2,7 +2,7 @@
 
 A looping fake of the flow canvas for the README. React and the Stageshow kit live only in this folder. `web/` stays build-free.
 
-Design size 1200×750. Below 800px the stage switches to a 390×640 crop: the canvas and Run, with the palette off the top.
+Design size 1200×750. A narrower page scales that whole frame; there is no separate phone crop.
 
 ## Run
 
@@ -33,4 +33,4 @@ CHROME_PATH=/usr/local/bin/google-chrome node scripts/film.mjs \
   --out /tmp/hero-390.png
 ```
 
-`media/hero.gif` and `media/hero.mp4` are the 1200×750 @2× loop already recorded. The kit under `kit/` is the Stageshow slice this demo imports (MIT, `kit/LICENSE`). Icons are the product SVGs. Fonts are the repo's Inter and JetBrains Mono.
+`node scripts/export-loop.mjs` rewrites `media/hero-light.gif`, `media/hero-dark.gif`, and `media/hero.mp4` at 1200×750. The kit under `kit/` is the Stageshow slice this demo imports (MIT, `kit/LICENSE`). Icons are the product SVGs. Fonts are the repo's Inter and JetBrains Mono.

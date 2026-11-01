@@ -119,11 +119,6 @@ body,
   font-family: var(--font);
 }
 
-.ss-stage[data-layout="compact"] .app {
-  width: 560px;
-  height: 900px;
-}
-
 .top {
   position: absolute;
   left: 0;
@@ -135,10 +130,6 @@ body,
   z-index: 4;
 }
 
-.ss-stage[data-layout="compact"] .top {
-  width: 560px;
-}
-
 .top-vis {
   width: 1200px;
   height: var(--top);
@@ -148,12 +139,6 @@ body,
   column-gap: 12px;
   padding: 0 12px;
   white-space: nowrap;
-}
-
-.ss-stage[data-layout="compact"] .top-vis {
-  width: 390px;
-  grid-template-columns: max-content minmax(0, 1fr) max-content;
-  padding: 0 12px;
 }
 
 .top-left,
@@ -250,19 +235,6 @@ body,
   border-color: var(--border);
 }
 
-.kbd {
-  font-family: var(--mono);
-  font-size: 11px; /* --fs-11 */
-  line-height: 16px;
-  font-weight: 400;
-  font-variant-numeric: tabular-nums;
-  margin-left: 6px;
-}
-
-.btn.primary .kbd {
-  color: inherit;
-}
-
 .aim {
   position: absolute;
   right: 3px;
@@ -281,10 +253,6 @@ body,
   border-right: 1px solid var(--border);
   padding: 8px;
   z-index: 3;
-}
-
-.ss-stage[data-layout="compact"] .palette {
-  display: none;
 }
 
 .group {
@@ -321,10 +289,6 @@ body,
   z-index: 0;
 }
 
-.ss-stage[data-layout="compact"] .canvas {
-  left: 0;
-}
-
 .canvas::before {
   content: "";
   position: absolute;
@@ -357,17 +321,12 @@ body,
   z-index: 3;
 }
 
-.ss-stage[data-layout="compact"] .right-panel,
-.ss-stage[data-layout="compact"] .wide-only {
-  display: none;
-}
-
 .fn {
   position: absolute;
   box-sizing: border-box;
   width: var(--node-w);
   border: 1px solid var(--border);
-  border-radius: 4px; /* brief; product .fn is 6px */
+  border-radius: 6px; /* web/css/app.css .fn */
   background: var(--surface);
   box-shadow: var(--shadow);
   z-index: 2;
@@ -416,30 +375,14 @@ body,
 }
 
 .fn-st-word {
-  display: inline-block;
+  display: block;
   width: 92px;
+  flex: none;
   font-family: var(--mono);
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
   overflow: visible;
   transition: color 0.35s linear;
-}
-
-.ss-stage[data-layout="compact"] .fn-title {
-  flex-wrap: wrap;
-  align-content: center;
-  padding-top: 4px;
-  padding-bottom: 4px;
-}
-
-.ss-stage[data-layout="compact"] .fn-name {
-  flex: 1 0 auto;
-}
-
-.ss-stage[data-layout="compact"] .fn-st {
-  flex: 1 0 100%;
-  margin-left: 0;
-  padding-left: 22px;
 }
 
 .fn-port {
@@ -492,11 +435,18 @@ body,
   box-sizing: border-box;
 }
 
+.ico-slot {
+  width: 16px;
+  height: 16px;
+  flex: none;
+  overflow: hidden;
+  display: block;
+}
+
 .ico {
   width: 16px;
   height: 16px;
-  display: inline-block;
-  flex: none;
+  display: block;
   background-color: currentColor;
   color: var(--muted);
   -webkit-mask: var(--ico) center / contain no-repeat;

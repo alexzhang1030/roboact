@@ -1,15 +1,13 @@
 import { useEffect, useState } from 'react'
 import { Stage, type Act } from '../kit/stage'
 import { Bar } from '../kit/window'
-import { PORT_POSE, PORT_TARGET, RUN_KEY, copy, doneSeconds, stepsLabel } from './copy'
+import { PORT_POSE, PORT_TARGET, copy, doneSeconds, stepsLabel } from './copy'
 import doneIcon from '../icons/state-done.svg'
 import idleIcon from '../icons/state-idle.svg'
 import runningIcon from '../icons/state-running.svg'
 import startIcon from '../icons/node-start.svg'
 import toolIcon from '../icons/node-tool.svg'
-import writeIcon from '../icons/mark-write.svg'
 
-type LayoutName = 'wide' | 'compact'
 type NodeStatus = 'idle' | 'running' | 'done'
 type RunWord = 'off' | 'running' | 'completed'
 
@@ -22,26 +20,16 @@ type Geom = {
   rest: { x: number; y: number }
 }
 
+// Node width matches web/css/app.css .fn (240px). The row sits on the canvas
+// vertical centre, a little right of the canvas centre, on the 20px grid.
 const WIDE: Geom = {
-  // Wider than the product's 240px node so "Go to pose" and "Done · 0.4 s" share the title row without clipping.
-  nodeW: 280,
+  nodeW: 240,
   titleH: 32,
-  start: { x: 240, y: 200 },
-  pose: { x: 560, y: 200 },
-  grip: { x: 880, y: 200 },
-  rest: { x: 480, y: 520 },
+  start: { x: 360, y: 360 },
+  pose: { x: 640, y: 360 },
+  grip: { x: 920, y: 360 },
+  rest: { x: 480, y: 560 },
 }
-
-const COMPACT: Geom = {
-  nodeW: 168,
-  titleH: 48,
-  start: { x: -220, y: 100 },
-  pose: { x: 20, y: 100 },
-  grip: { x: 200, y: 100 },
-  rest: { x: 180, y: 420 },
-}
-
-const geomOf = (layout: LayoutName): Geom => (layout === 'compact' ? COMPACT : WIDE)
 
 type S = {
   onCanvas: boolean
@@ -94,7 +82,7 @@ const idlePatch: Partial<S> = {
 }
 
 async function script(a: Act<S>) {
-  const g = geomOf(a.layout === 'compact' ? 'compact' : 'wide')
+  const g = WIDE
   // Hold below the port row so the lifted card's bottom is not 1px off a resting node.
   const offset = { x: g.nodeW / 2, y: 1 + g.titleH + 22 }
 
@@ -131,7 +119,7 @@ async function script(a: Act<S>) {
   await a.move('run', { duration: 420 })
   await a.click()
   await a.set({ run: 'running', steps: 1, start: 'running' })
-  const watch = a.layout === 'compact' ? { x: 186, y: 360 } : { x: 700, y: 460 }
+  const watch = { x: 700, y: 560 }
   await a.move(watch, { duration: 400 })
   await a.wait(280)
   await a.set({ start: 'done', steps: 2, pose: 'running' })
@@ -186,7 +174,11 @@ function useScheme(): 'light' | 'dark' {
 }
 
 function Ico({ src, kind }: { src: string; kind?: string }) {
-  return <span className="ico" data-kind={kind} style={{ ['--ico' as string]: `url("${src}")` }} />
+  return (
+    <span className="ico-slot">
+      <span className="ico" data-kind={kind} style={{ ['--ico' as string]: `url("${src}")` }} />
+    </span>
+  )
 }
 
 function statusKind(status: NodeStatus): string | undefined {
@@ -212,7 +204,6 @@ function Node({
   y,
   title,
   icon,
-  write,
   status,
   seconds,
   ports,
@@ -225,7 +216,6 @@ function Node({
   y: number
   title: string
   icon: string
-  write?: boolean
   status: NodeStatus
   seconds: string
   ports: 'start' | 'pose' | 'grip'
@@ -244,7 +234,6 @@ function Node({
     >
       <div className="fn-title">
         <Ico src={icon} />
-        {write ? <Ico src={writeIcon} /> : null}
         <span className="fn-name">{title}</span>
         <span className="fn-st">
           <Ico src={statusIcon(status)} kind={statusKind(status)} />
@@ -318,7 +307,6 @@ export default function Hero() {
     <Stage<S>
       width={1200}
       height={750}
-      compact={{ below: 800, width: 390, height: 640 }}
       initial={initial}
       poster={poster}
       script={script}
@@ -327,8 +315,8 @@ export default function Hero() {
       cursor={{ at: 'rest', idle: false }}
       className="hero"
     >
-      {(s, _rect, layout) => {
-        const g = geomOf(layout === 'compact' ? 'compact' : 'wide')
+      {(s) => {
+        const g = WIDE
         const live = s.dragging || s.leaving
         const gripAt = live || (s.onCanvas && s.gx !== 0) ? { x: s.gx, y: s.gy } : g.grip
         const showGrip = s.onCanvas || s.dragging || s.leaving
@@ -336,49 +324,39 @@ export default function Hero() {
         const poseIn = portIn(g.pose, g)
         const poseOut = portOut(g.pose, g)
         const gripIn = portIn(gripAt, g)
-        const wide = layout !== 'compact'
         return (
           <div className="app" style={{ ['--node-w' as string]: `${g.nodeW}px`, ['--title-h' as string]: `${g.titleH}px` }}>
             <header className="top">
               <div className="top-vis">
-                {wide ? (
-                  <div className="top-left">
-                    <span className="flow-name">{copy.flowDemo}</span>
-                    <Bar w={52} h={8} />
-                    <Bar w={84} h={8} />
-                  </div>
-                ) : (
-                  <span />
-                )}
+                <div className="top-left">
+                  <span className="flow-name">{copy.flowDemo}</span>
+                  <Bar w={52} h={8} />
+                  <Bar w={84} h={8} />
+                </div>
                 <div className="top-mid">
                   <button type="button" className="btn primary">
-                    {copy.run} <span className="kbd">{RUN_KEY}</span>
+                    {copy.run}
                     <i className="aim" data-target="run" />
                   </button>
-                  {wide ? (
-                    <button type="button" className="btn" disabled>
-                      {copy.step}
-                    </button>
-                  ) : null}
-                  {wide ? (
-                    <button type="button" className="btn" disabled={s.run !== 'running'}>
-                      {copy.stop}
-                    </button>
-                  ) : null}
+                  <button type="button" className="btn" disabled>
+                    {copy.step}
+                  </button>
+                  <button type="button" className="btn" disabled={s.run !== 'running'}>
+                    {copy.stop}
+                  </button>
                   <span className="run-word">
                     {s.run === 'running' ? copy.running : s.run === 'completed' ? copy.completed : ''}
                   </span>
                 </div>
                 <div className="top-right">
-                  {wide ? <span className="sim">{copy.sim}</span> : null}
+                  <span className="sim">{copy.sim}</span>
                   <span className="steps">{stepsLabel(s.steps)}</span>
-                  {wide ? <span className="conn">{copy.connected}</span> : null}
+                  <span className="conn">{copy.connected}</span>
                 </div>
               </div>
             </header>
 
-            {wide ? (
-              <aside className="palette">
+            <aside className="palette">
                 <div className="group">{copy.flowControl}</div>
                 <div className="row">
                   <Ico src={startIcon} />
@@ -403,22 +381,17 @@ export default function Hero() {
                     <Bar w={64 + ((i * 17) % 48)} h={6} />
                   </div>
                 ))}
-              </aside>
-            ) : (
-              <i className="pick" data-target="grip-row" style={{ left: 96, top: -40 }} />
-            )}
+            </aside>
 
             <div className="canvas" />
 
-            {wide ? (
-              <aside className="right-panel" aria-hidden>
+            <aside className="right-panel" aria-hidden>
                 <Bar w={120} h={8} />
                 <Bar w={200} h={6} />
                 <Bar w={160} h={6} />
                 <Bar w={180} h={6} />
                 <Bar w={96} h={6} />
-              </aside>
-            ) : null}
+            </aside>
 
             <Node
               x={g.start.x}
@@ -434,7 +407,6 @@ export default function Hero() {
               y={g.pose.y}
               title={copy.goToPose}
               icon={toolIcon}
-              write
               status={s.pose}
               seconds="0.4"
               ports="pose"
@@ -445,7 +417,6 @@ export default function Hero() {
                 y={gripAt.y}
                 title={copy.gripper}
                 icon={toolIcon}
-                write
                 status={s.grip}
                 seconds="0.2"
                 ports="grip"
