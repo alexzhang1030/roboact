@@ -3,23 +3,30 @@
 from __future__ import annotations
 
 import io
+import os
+import tempfile
 import urllib.parse
 from pathlib import Path
-
-import pytest
 
 try:
     from PIL import Image
 except ImportError:
     Image = None
 
-from tests.conftest import launch_chromium
+from tests.conftest import import_playwright, launch_chromium
 from tests.test_contrast_ui_spec import DARK_CSS, LIGHT_CSS, parse_css_color
 from tests.test_ui import _launch, _png_gray
 
-pw = pytest.importorskip("playwright.sync_api")
+pw = import_playwright()
 
-ART = Path("/opt/cursor/artifacts")
+
+def artifact_dir() -> Path:
+    """Screenshot directory. ROBOACT_ARTIFACT_DIR overrides; default is the temp dir."""
+    raw = os.environ.get("ROBOACT_ARTIFACT_DIR")
+    if raw:
+        return Path(raw)
+    return Path(tempfile.gettempdir())
+
 
 PRD195_STATES = (
     "error",
@@ -181,7 +188,8 @@ def test_prd195_grayscale_six_states_both_themes(server):
         ctx = br.new_context(viewport={"width": 1440, "height": 900}, color_scheme="light")
         page, blocked, seen, _errs = _wired_page(ctx, server["base"])
         _goto_ready(page, server["base"] + "/?gallery=1")
-        ART.mkdir(parents=True, exist_ok=True)
+        art = artifact_dir()
+        art.mkdir(parents=True, exist_ok=True)
         for theme in ("light", "dark"):
             page.evaluate(
                 """(theme) => {
@@ -198,7 +206,7 @@ def test_prd195_grayscale_six_states_both_themes(server):
             strip = page.locator('[data-testid="prd195-states"]')
             strip.wait_for()
             png = strip.screenshot()
-            gray_path = ART / f"prd195-states-{theme}.png"
+            gray_path = art / f"prd195-states-{theme}.png"
             if Image is not None:
                 Image.open(io.BytesIO(png)).convert("L").save(gray_path)
             else:

@@ -552,7 +552,7 @@ const App = defineComponent({
       } catch (e) { overlay.value = mapError(e.code) || e.message }
     }
 
-    function setBpRound() {
+    async function setBpRound() {
       const n = selectedNode.value
       if (!n) return
       const raw = prompt(t('params.bp_prompt'), ((n.data.breakpoints || {}).before || {}).round || '')
@@ -563,6 +563,13 @@ const App = defineComponent({
       bps.before = cur
       n.data = { ...n.data, breakpoints: bps }
       scheduleSave(true)
+      try {
+        await send('/api/flows/' + meta.value.id + '/breakpoints/' + n.id + '/before', 'PUT', {
+          enabled: true,
+          mode: cur.round ? 'round' : 'every',
+          round: cur.round || null,
+        })
+      } catch (e) { overlay.value = mapError(e.code) || e.message }
     }
 
     function removeSelected() {
@@ -606,6 +613,8 @@ const App = defineComponent({
         const r = await send('/api/flows/' + meta.value.id, 'PUT', body)
         meta.value = { ...meta.value, version: r.flow.version, name: r.flow.name }
         await refreshRunCheck()
+        const rid = run.value && (run.value.run_id || run.value.id)
+        if (rid) await refreshRecords(rid)
       } catch (e) { overlay.value = mapError(e.code) || e.message }
     }
 
@@ -794,6 +803,7 @@ const App = defineComponent({
           run.value = normalizeRun(ev)
           applyNodeStates(ev.nodes)
           applyPauseReason(ev.pause)
+          refreshRecords(runId)
           if (window.__afPauseTimes && ev.status === 'paused' && ev.paused_at_ms) {
             window.__afPauseTimes.push({
               at: performance.now(),
@@ -928,8 +938,10 @@ const App = defineComponent({
         records.value = []
         listen(rid)
       } catch (e) {
+        const detail = (e.body && e.body.detail) || {}
+        const named = (detail.errors && detail.errors[0]) || detail
         const pre = e.code === 'need_one_end' || e.code === 'need_one_start' || e.code === 'end_unreachable' || e.code === 'motion_timeout_cap'
-        rejectMsg.value = mapError(e.code, (e.body && e.body.detail) || {}) || e.message
+        rejectMsg.value = mapError(e.code, named) || (e.body && e.body.message) || e.message
         if (pre) {
           preRunShown.value = true
           await refreshRunCheck()
@@ -1118,12 +1130,14 @@ const App = defineComponent({
       if (nodeBusy.value || !selected.value) return
       const opener = (ev && ev.currentTarget) || document.activeElement
       const spec = specOf(selectedNode.value)
-      const rec = shownRec.value
+      const wanted = singleRound.value == null || singleRound.value === '' ? null : Number(singleRound.value)
+      const list = records.value.filter(r => r.node_id === selected.value && (wanted == null || r.round === wanted))
+      const rec = list.length ? list[list.length - 1] : shownRec.value
       const extra = {
         node_id: selected.value,
         source_run_id: rec && rec.run_id,
         step: rec && rec.step,
-        source_round: singleRound.value,
+        source_round: wanted,
       }
       if (spec && spec.side_effect === 'motion') {
         const text = adapterConfirmText(spec) || t('confirm.default')
