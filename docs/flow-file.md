@@ -84,7 +84,7 @@ Secret params: written as `null`; import marks the node "missing input"; Run dis
 An exported file is for git. Open a file that is already in this spelling, export it again with no edits, and the bytes are the same. One edit changes only the lines of that edit. JSON and YAML are two spellings of one document; each spelling has one byte sequence. `export_flow` is the only writer. The browser posts `{flow_id, format}` to `POST /api/flows/export` and saves the returned `text`.
 
 1. Key order. Every object's keys are written in Unicode code point order (`sorted`, case-sensitive: `A` before `a` before `b`), not in the order they arrived from the browser or from the file. Absent keys are omitted. A key the schema does not name is still refused on import (§5). If a dump is asked to write one anyway, it is included in that same alphabetical order.
-2. `nodes` are sorted by `id`. `edges` are sorted by `(from.node, from.port, to.node, to.port)`. Any other array, including arrays inside `params`, keeps its order.
+2. Lists. Only the top-level `nodes` list is sorted, by `id`, and only the top-level `edges` list is sorted, by `(from.node, from.port, to.node, to.port)`. Every list inside `params` keeps its original order. That includes waypoints, loop body steps, and any list nested under them. JSON and YAML export do not sort those lists.
 3. Numbers.
    - An integer is written as an integer. `1` stays `1`.
    - A float is written with Python's shortest round-trip spelling (`repr`, the spelling `json.dumps` uses). `0.1` is `0.1`, never `0.10000000000000001`. When that spelling uses an exponent it has two exponent digits: `1e-7` is `1e-07`. `1.0` stays `1.0`, so it does not become the integer `1`. Signed zero stays `-0.0`.

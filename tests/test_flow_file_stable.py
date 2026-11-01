@@ -255,8 +255,8 @@ def _assert_same_sorted_keys(left: Any, right: Any, path: str = "") -> None:
             _assert_same_sorted_keys(item_l, item_r, f"{path}[{index}]")
 
 
-def test_20_17_build_order_export_diff_is_values_only(server: dict[str, Any]) -> None:
-    """Acceptance §20 step 17, through POST /api/flows, PUT /api/flows/{id}, export.
+def test_build_order_export_diff_is_values_only(server: dict[str, Any]) -> None:
+    """Same flow saved twice through PUT /api/flows/{id}, nodes and params in opposite order.
 
     Node ids are chosen by the page (`n_` plus random in addNode). The server
     stores those ids; they do not depend on creation order. Both builds use the
@@ -326,3 +326,113 @@ def test_20_17_build_order_export_diff_is_values_only(server: dict[str, Any]) ->
     assert ids == sorted(ids)
     assert ids != [row[0] for row in nodes_spec]
     assert ids != [row[0] for row in reversed(nodes_spec)]
+
+
+def test_param_lists_keep_given_order(server: dict[str, Any]) -> None:
+    """Waypoints and loop steps are not sorted on JSON or YAML export."""
+    base = server["base"]
+    waypoints = [
+        {"y": 0.9, "x": 0.2},
+        {"y": 0.0, "x": 0.1},
+        {"y": 0.3, "x": 0.5},
+    ]
+    steps = ["third", "first", "second"]
+    created = http_json(base, "/api/flows", "POST", {"name": "waypoints"})
+    flow_id = str(created["flow"]["id"])
+    _save_graph(
+        base,
+        flow_id,
+        [
+            _node(
+                "n_go",
+                "fake_set_pose",
+                40,
+                80,
+                {"z": 0.2, "waypoints": waypoints, "steps": steps, "x": 0.4, "y": 0.1},
+                flip=False,
+            )
+        ],
+        [],
+        flip=False,
+    )
+    exported = {
+        fmt: http_json(base, "/api/flows/export", "POST", {"flow_id": flow_id, "format": fmt})[
+            "text"
+        ]
+        for fmt in ("json", "yaml")
+    }
+    parsed = {
+        "json": json.loads(exported["json"]),
+        "yaml": parse_yaml(exported["yaml"]),
+    }
+    expect_xy = [{"x": 0.2, "y": 0.9}, {"x": 0.1, "y": 0.0}, {"x": 0.5, "y": 0.3}]
+    assert [point["x"] for point in expect_xy] != sorted(point["x"] for point in expect_xy)
+    assert steps != sorted(steps)
+    for fmt, tree in parsed.items():
+        params = tree["nodes"][0]["params"]
+        assert params["waypoints"] == expect_xy, fmt
+        assert params["steps"] == steps, fmt
+
+
+def test_20_17_param_change_and_node_move(server: dict[str, Any]) -> None:
+    """Acceptance §20 step 17: one param edit and one move, then export again.
+
+    The diff is only those lines. Save uses PUT /api/flows/{id} and export uses
+    POST /api/flows/export, the same calls as the page.
+    """
+    base = server["base"]
+    created = http_json(base, "/api/flows", "POST", {"name": "order-check"})
+    flow_id = str(created["flow"]["id"])
+    nodes = [
+        _node("n_go", "fake_set_pose", 300, 160, {"x": 0.4, "y": 0.1, "z": 0.2}, flip=False),
+        _node("n_out", "output", 560, 160, {}, flip=False),
+        _node("n_start", "start", 40, 160, {"data": {"x": 0.4, "y": 0.1, "z": 0.2}}, flip=False),
+    ]
+    edges = [
+        _edge("e_start", "n_start", "data", "n_go", "target", flip=False),
+        _edge("e_go", "n_go", "pose", "n_out", "value", flip=False),
+    ]
+    _save_graph(base, flow_id, nodes, edges, flip=False)
+
+    def _export(fmt: str) -> str:
+        body = http_json(base, "/api/flows/export", "POST", {"flow_id": flow_id, "format": fmt})
+        return str(body["text"])
+
+    before = {fmt: _export(fmt) for fmt in ("json", "yaml")}
+    go = next(node for node in nodes if node["id"] == "n_go")
+    go["x"] = 480
+    go["params"] = {**go["params"], "z": 0.9}
+    # bump false keeps revision unchanged, so the diff is the param and the move.
+    http_json(
+        base,
+        f"/api/flows/{flow_id}",
+        "PUT",
+        {
+            "id": flow_id,
+            "name": "order-check",
+            "nodes": nodes,
+            "edges": edges,
+            "groups": [],
+            "step_limit": 200,
+            "bump": False,
+        },
+    )
+    after = {fmt: _export(fmt) for fmt in ("json", "yaml")}
+    for fmt in ("json", "yaml"):
+        changes = _value_only_changes(before[fmt], after[fmt])
+        diff = "\n".join(
+            difflib.unified_diff(
+                before[fmt].splitlines(),
+                after[fmt].splitlines(),
+                fromfile=f"before.{fmt}",
+                tofile=f"after.{fmt}",
+                lineterm="",
+            )
+        )
+        assert len(changes) == 2, diff
+        old_lines = [pair[0] for pair in changes]
+        new_lines = [pair[1] for pair in changes]
+        assert any("0.2" in line and "0.9" not in line for line in old_lines), diff
+        assert any("0.9" in line for line in new_lines), diff
+        assert any("300" in line for line in old_lines), diff
+        assert any("480" in line for line in new_lines), diff
