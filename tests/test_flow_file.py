@@ -1064,7 +1064,7 @@ def test_c12_counts_banner_lock_and_no_overlap(server, tmp_path):
         assert need_count == "1 node needs input"
         gone = page.locator('.fn[data-status="missing"]')
         assert "Gone" in gone.inner_text()
-        assert "Action no longer exists" in gone.inner_text()
+        assert "Action gone" in gone.inner_text()
         assert "This action is no longer provided by the adapter." in gone.inner_text()
         assert page.locator(".fn-gone-x").count() == 0
         assert "state-unknown" in (gone.locator(".fn-st .ico").get_attribute("style") or "")

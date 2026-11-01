@@ -59,7 +59,10 @@ export default markRaw(defineComponent({
     })
     const kind = computed(() => KIND[st.value.status] || st.value.status || 'idle')
     const icon = computed(() => ICONS[st.value.status] || 'state-idle')
-    const typeIcon = computed(() => (spec.value && spec.value.icon) || '')
+    const typeIcon = computed(() => {
+      if (kind.value === 'missing') return 'node-tool'
+      return (spec.value && spec.value.icon) || ''
+    })
     const title = computed(() => {
       const custom = props.data && props.data.title
       if (custom) return custom

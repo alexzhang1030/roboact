@@ -13,8 +13,8 @@ from tests.test_flow_file import _gone_missing_doc, _open_ui, _ui_import
 pw = pytest.importorskip("playwright.sync_api")
 
 ROOT = Path(__file__).resolve().parents[1]
-EN_LINE = "nodes[2] (id out): `output` is now `end`."
-EN_PATH = "nodes[2] (id out)"
+EN_LINE = "nodes[2] (id out): output is now end."
+CODE_VALUES = ["nodes[2]", "out", "output", "end"]
 
 
 def _catalog(name: str) -> dict[str, str]:
@@ -69,10 +69,19 @@ def _title_row(page) -> dict:
           const card = document.querySelector('.fn[data-status="missing"]')
           const word = card && card.querySelector('.fn-st-word')
           const ico = card && card.querySelector('.fn-st .ico')
+          const typeIco = card && card.querySelector('.fn-type-ico')
           const summary = card && card.querySelector('[data-testid="node-summary"]')
+          const probe = document.createElement('span')
+          probe.style.color = 'var(--red)'
+          document.body.appendChild(probe)
+          const red = getComputedStyle(probe).color
+          probe.remove()
           return {
             word: word ? word.textContent : '',
             icon: ico ? (ico.getAttribute('style') || '') : '',
+            typeIcon: typeIco ? (typeIco.getAttribute('style') || '') : '',
+            wordColor: word ? getComputedStyle(word).color : '',
+            red,
             crosses: document.querySelectorAll('.fn-gone-x').length,
             summary: summary ? summary.textContent : '',
           }
@@ -95,8 +104,10 @@ def test_action_missing_title_row_icon_and_word(server, tmp_path: Path) -> None:
         )
         page.evaluate("() => window.__af.setLocaleMode('en')")
         en = _title_row(page)
-        assert en["word"] == "Action no longer exists", en
+        assert en["word"] == "Action gone", en
         assert "state-unknown" in en["icon"], en
+        assert "node-tool" in en["typeIcon"], en
+        assert en["wordColor"] == en["red"], en
         assert en["crosses"] == 0, en
         assert en["summary"] == "This action is no longer provided by the adapter.", en
 
@@ -105,6 +116,8 @@ def test_action_missing_title_row_icon_and_word(server, tmp_path: Path) -> None:
         zh = _title_row(page)
         assert zh["word"] == zh_cat["status.action_missing"], zh
         assert "state-unknown" in zh["icon"], zh
+        assert "node-tool" in zh["typeIcon"], zh
+        assert zh["wordColor"] == zh["red"], zh
         assert zh["crosses"] == 0, zh
         assert zh["summary"] == zh_cat["error.action_missing"], zh
     finally:
@@ -113,9 +126,22 @@ def test_action_missing_title_row_icon_and_word(server, tmp_path: Path) -> None:
         playwright.stop()
 
 
-def _mono(page) -> str:
-    return page.locator("[data-testid=import-path-id]").evaluate(
-        "el => getComputedStyle(el).fontFamily"
+def _line_dom(page) -> dict:
+    return page.evaluate(
+        """() => {
+          const li = document.querySelector('[data-testid=import-errors] li')
+          const codes = [...li.querySelectorAll('code')].map(el => el.textContent)
+          const codeFont = getComputedStyle(li.querySelector('code')).fontFamily
+          const liStyle = getComputedStyle(li)
+          return {
+            text: li.textContent,
+            codes,
+            backticks: li.textContent.includes('`'),
+            liFont: liStyle.fontFamily,
+            liSize: liStyle.fontSize,
+            codeFont,
+          }
+        }"""
     )
 
 
@@ -128,21 +154,26 @@ def test_import_failure_dialog_close_and_path(server, tmp_path: Path) -> None:
         page.wait_for_selector("[data-testid=import-errors]", timeout=10000)
         page.evaluate("() => window.__af.setLocaleMode('en')")
         assert page.locator("[data-testid=import-close]").inner_text() == "Close"
-        assert page.locator("[data-testid=import-errors] li").inner_text() == EN_LINE
-        assert page.locator("[data-testid=import-path-id]").inner_text() == EN_PATH
-        assert "monospace" in _mono(page).lower() or "JetBrains Mono" in _mono(page)
+        en_dom = _line_dom(page)
+        assert en_dom["text"] == EN_LINE, en_dom
+        assert en_dom["codes"] == CODE_VALUES, en_dom
+        assert en_dom["backticks"] is False, en_dom
+        assert en_dom["liSize"] == "13px", en_dom
+        assert "Inter" in en_dom["liFont"], en_dom
+        assert "monospace" in en_dom["codeFont"].lower() or "JetBrains Mono" in en_dom["codeFont"]
 
         zh = _catalog("zh-CN.js")
         zh_path = _fill(zh["flow.import_path_id"], path="nodes[2]", id="out")
-        zh_line = _fill(zh["flow.output_renamed"], path=zh_path)
+        zh_line = _fill(zh["flow.output_renamed"], path=zh_path, old="output", new="end")
         page.evaluate("() => window.__af.setLocaleMode('zh-CN')")
         assert page.locator("[data-testid=import-close]").inner_text() == zh["flow.import_close"]
-        assert page.locator("[data-testid=import-errors] li").inner_text() == zh_line
-        path = page.locator("[data-testid=import-path-id]").inner_text()
-        assert path == zh_path, path
-        assert "nodes[2]" in path and "id" in path and path.endswith("out）"), path
-        font = _mono(page)
-        assert "monospace" in font.lower() or "JetBrains Mono" in font, font
+        zh_dom = _line_dom(page)
+        assert zh_dom["text"] == zh_line, zh_dom
+        assert zh_dom["codes"] == CODE_VALUES, zh_dom
+        assert zh_dom["backticks"] is False, zh_dom
+        assert zh_dom["liSize"] == "13px", zh_dom
+        assert "Inter" in zh_dom["liFont"], zh_dom
+        assert "monospace" in zh_dom["codeFont"].lower() or "JetBrains Mono" in zh_dom["codeFont"]
     finally:
         ctx.close()
         browser.close()

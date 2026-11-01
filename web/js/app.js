@@ -243,22 +243,41 @@ const App = defineComponent({
       if (s.code === 'end_unreachable') return t('run.end_unreachable')
       return ''
     })
+    function templateParts(key, slots) {
+      const catalog = CATALOGS[locale.value] || CATALOGS.en
+      const template = (catalog && catalog[key]) || CATALOGS.en[key] || ''
+      const out = []
+      const re = /\{(\w+)\}/g
+      let last = 0
+      let match = re.exec(template)
+      while (match) {
+        if (match.index > last) out.push({ code: false, text: template.slice(last, match.index) })
+        const slot = slots[match[1]]
+        if (Array.isArray(slot)) out.push(...slot)
+        else out.push({ code: true, text: slot == null ? '' : String(slot) })
+        last = match.index + match[0].length
+        match = re.exec(template)
+      }
+      if (last < template.length) out.push({ code: false, text: template.slice(last) })
+      return out
+    }
     function importErrorView(e) {
       void locale.value
       if (e && e.message === 'kind "output" is now "end"') {
         const raw = String(e.path || '')
         const matched = /^(.*) \(id (.*)\)$/.exec(raw)
-        if (matched) {
-          const pathId = t('flow.import_path_id', { path: matched[1], id: matched[2] })
-          const marked = t('flow.output_renamed', { path: '\u0000' })
-          const parts = marked.split('\u0000')
-          return { renamed: true, before: parts[0] || '', pathId, after: parts[1] || '' }
+        const pathSlot = matched
+          ? templateParts('flow.import_path_id', { path: matched[1], id: matched[2] })
+          : (e.path || '')
+        return {
+          parts: templateParts('flow.output_renamed', {
+            path: pathSlot,
+            old: 'output',
+            new: 'end',
+          }),
         }
       }
-      if (e && e.message === 'kind "output" is now "end"') {
-        return { renamed: false, text: t('flow.output_renamed', { path: e.path || '' }) }
-      }
-      return { renamed: false, text: t('flow.import_error', { path: e.path, message: e.message }) }
+      return { text: t('flow.import_error', { path: e.path, message: e.message }) }
     }
     const endPanelText = computed(() => {
       const n = selectedNode.value
@@ -1548,7 +1567,12 @@ const App = defineComponent({
         <p>{{ t('flow.import_failed') }}</p>
         <ul>
           <li v-for="(e, i) in importErrors" :key="i">
-            <template v-if="importErrorView(e).renamed">{{ importErrorView(e).before }}<span class="import-mono" data-testid="import-path-id">{{ importErrorView(e).pathId }}</span>{{ importErrorView(e).after }}</template>
+            <template v-if="importErrorView(e).parts">
+              <template v-for="(part, j) in importErrorView(e).parts" :key="j">
+                <code v-if="part.code">{{ part.text }}</code>
+                <template v-else>{{ part.text }}</template>
+              </template>
+            </template>
             <template v-else>{{ importErrorView(e).text }}</template>
           </li>
         </ul>

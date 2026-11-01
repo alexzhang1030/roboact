@@ -183,6 +183,7 @@ label { display: block; color: var(--muted); font-size: 12px; margin: 8px 0 4px;
 .fn[data-status="blocked"] { border: 1px dashed var(--red); background: var(--surface); box-shadow: var(--shadow); }
 [data-theme="dark"] .fn[data-status="blocked"] { box-shadow: none; }
 .fn[data-status="blocked"] .fn-st { color: var(--red); }
+.fn[data-status="missing"] .fn-st-word { color: var(--red); }
 .fn[data-status="missing_input"] { border: 1px dashed var(--amber); background: var(--surface); }
 .param-bad { outline: 1px solid var(--amber); }
 .param-missing label { color: var(--amber); }
@@ -196,8 +197,8 @@ label { display: block; color: var(--muted); font-size: 12px; margin: 8px 0 4px;
   background: var(--surface); color: var(--text); border: 1px solid var(--border);
   border-radius: 8px; padding: 16px; max-width: 520px; max-height: 70vh; overflow: auto;
 }
-.import-dialog li { font-family: var(--mono); font-size: 12px; margin: 6px 0; }
-.import-mono { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+.import-dialog li { font-family: var(--font); font-size: var(--fs-13); line-height: var(--lh-13); margin: 6px 0; }
+.import-dialog li code { font-family: var(--mono); font-size: var(--fs-12); font-variant-numeric: tabular-nums; }
 .run-counts { font-size: 12px; color: var(--red); margin-left: 8px; white-space: nowrap; cursor: pointer; }
 .run-counts.missing { color: var(--amber); }
 .run-locked { font-size: 12px; color: var(--amber); margin-left: 8px; white-space: nowrap; flex: none; }

@@ -87,7 +87,7 @@ export default {
   'status.interrupted': 'Interrupted',
   'status.interrupted_unknown': 'Interrupted · result unknown',
   'status.cancel_rejected': 'Cancel rejected',
-  'status.action_missing': 'Action no longer exists',
+  'status.action_missing': 'Action gone',
 
   'error.timeout': 'Timed out',
   'error.timeout_s': 'Timed out ({s} s)',
@@ -305,5 +305,5 @@ export default {
   'status.summary.extra_end': '{n} Ends. Keep one.',
   'status.summary.end_unreachable': 'Not reachable from Start',
   'status.summary.no_cancel_too_long': 'Can\'t cancel. Runs up to {s} s.',
-  'flow.output_renamed': '{path}: `output` is now `end`.',
+  'flow.output_renamed': '{path}: {old} is now {new}.',
 }

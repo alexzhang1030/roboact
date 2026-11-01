@@ -305,5 +305,5 @@ export default {
   'status.summary.extra_end': '有 {n} 个结束，只留一个。',
   'status.summary.end_unreachable': '从开始走不到这里',
   'status.summary.no_cancel_too_long': '不能取消，最长跑 {s} 秒。',
-  'flow.output_renamed': '{path}：`output` 已改名为 `end`。',
+  'flow.output_renamed': '{path}：{old} 已改名为 {new}。',
 }
