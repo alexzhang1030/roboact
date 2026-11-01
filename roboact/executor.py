@@ -22,6 +22,7 @@ from .adapter import (
     WaitAborted,
     image_summary,
 )
+from .catalog import en
 from .errors import ApiError
 from .flow_file import inspect_run, inspect_values, is_imported, unlock_valid
 from .graph import (
@@ -270,11 +271,10 @@ class Executor:
         if node_id not in nodes:
             raise ApiError(400, "invalid_graph", f"node not found: {node_id}")
         node = nodes[node_id]
-        if side_effects == "real" or (
-            known_type(node["type"])
-            and get_type(node["type"]).side_effect == SideEffect.motion
-            and getattr(self.adapter, "target", "sim") == "real"
-        ):
+        motion = (
+            known_type(node["type"]) and get_type(node["type"]).side_effect == SideEffect.motion
+        )
+        if side_effects == "real" or motion:
             self._check_confirm(node, confirm)
         inputs, source = self._resolve_node_input(flow_id, node, input_spec)
         seed = [
@@ -547,13 +547,10 @@ class Executor:
 
     def _check_confirm(self, node: dict[str, Any], confirm: str | None) -> None:
         cls = get_type(node["type"])
-        if (
-            cls.side_effect == SideEffect.motion
-            and getattr(self.adapter, "target", "sim") == "real"
-        ):
-            text = cls.confirm_text or "this will run the action on the robot"
+        if cls.side_effect == SideEffect.motion:
+            text = cls.confirm_text or en("confirm.default")
             if confirm != text:
-                raise ApiError(422, "confirm_required", "real motion rerun needs confirmation")
+                raise ApiError(422, "confirm_required", "motion rerun needs confirmation")
             return
         text = cls.confirm_text
         if not text:
@@ -746,11 +743,13 @@ class Executor:
                 return {"status": "stopped"}
             inst = ctrl.current_inst
             desc = getattr(type(inst), "action_desc", None) if inst is not None else None
-            blocking = bool(desc and desc.return_mode == "blocking")
             cancellable = True if desc is None else bool(desc.cancel.cancellable)
-            if inst is not None and desc is not None and blocking and not cancellable:
+            # Non-cancellable is decided from the loaded descriptor, not from
+            # whether this adapter's cancel() agrees to stop.
+            if inst is not None and desc is not None and not cancellable:
                 ctrl.stop_flag = True
                 self._record_not_cancelled(ctrl, ctrl.current_nid)
+                await self.adapter.hold_other_goals(getattr(inst, "_handle", None))
                 return {"status": "stopping"}
             if inst is not None:
                 result = await inst.cancel()
@@ -766,14 +765,19 @@ class Executor:
                             ctrl.steps_used,
                             error_summary="cancel_rejected",
                         )
+                    await self.adapter.hold_other_goals(getattr(inst, "_handle", None))
                     return {"status": "running", "cancel": "rejected"}
+                await self.adapter.hold_other_goals(getattr(inst, "_handle", None))
                 ctrl.stop_flag = True
+                body: dict[str, Any] = {"status": "stopping"}
+                if desc is not None and desc.side_effect == "motion" and desc.read_state:
+                    body["readback"] = await self._read_robot(ctrl, ctrl.current_nid)
                 if desc is None and ctrl.task:
                     ctrl.task.cancel()
                 elif desc is not None and desc.return_mode == "blocking" and ctrl.task:
                     # blocking already returning; loop will see stop_flag
                     pass
-                return {"status": "stopping"}
+                return body
             ctrl.stop_flag = True
             self._finish(ctrl, "stopped")
             if ctrl.task and not ctrl.task.done():

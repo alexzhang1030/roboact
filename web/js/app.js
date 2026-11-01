@@ -975,8 +975,20 @@ const App = defineComponent({
 
     function runSingle() {
       if (!selected.value) return
+      const spec = specOf(selectedNode.value)
       const rec = shownRec.value
-      doRun('single', { node_id: selected.value, source_run_id: rec && rec.run_id, step: rec && rec.step, source_round: singleRound.value })
+      const extra = {
+        node_id: selected.value,
+        source_run_id: rec && rec.run_id,
+        step: rec && rec.step,
+        source_round: singleRound.value,
+      }
+      if (spec && spec.side_effect === 'motion') {
+        const text = spec.confirm_text || CATALOGS.en['confirm.default']
+        if (!window.confirm(text)) return
+        extra.confirm = text
+      }
+      doRun('single', extra)
     }
     function runFrom() {
       if (!selected.value || !shownRec.value) return

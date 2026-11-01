@@ -563,6 +563,48 @@ def _as_action_dict(raw: Any) -> dict[str, Any]:
     return data
 
 
+def _settle_cancel(data: dict[str, Any]) -> dict[str, Any] | None:
+    """Hold, or non-cancellable (runs to the end, then holds).
+
+    `finish_step` means non-cancellable. `safe_pose` is refused and the
+    reason names the action. Called at load, before the action is registered.
+    """
+    cancel = data.get("cancel")
+    if not isinstance(cancel, dict):
+        return None
+    cancel = dict(cancel)
+    data["cancel"] = cancel
+    aid = str(data.get("id") or "")
+    title = str(data.get("title") or data.get("name") or aid or "?")
+    named = aid or title
+    for key in ("post_cancel", "after"):
+        if cancel.get(key) == "safe_pose":
+            return {
+                "id": aid,
+                "title": title,
+                "missing": [f"cancel.{key}"],
+                "reason": f"{named}: safe_pose is refused",
+            }
+    if cancel.get("post_cancel") == "finish_step" or cancel.get("after") == "finish_step":
+        cancel["cancellable"] = False
+        cancel["post_cancel"] = "hold"
+        cancel["after"] = "hold"
+    for key in ("post_cancel", "after"):
+        val = cancel.get(key)
+        if val not in (None, "hold"):
+            return {
+                "id": aid,
+                "title": title,
+                "missing": [f"cancel.{key}"],
+                "reason": (
+                    f"{named}: post_cancel must be hold, or the action must be non-cancellable"
+                ),
+            }
+    if cancel.get("cancellable") is False and cancel.get("post_cancel") in (None, "hold"):
+        cancel["post_cancel"] = "hold"
+    return None
+
+
 def ingest_action(
     raw: Any, adapter: Adapter
 ) -> tuple[type[NodeType] | None, dict[str, Any] | None]:
@@ -572,6 +614,9 @@ def ingest_action(
     write is reserved for hand-written test nodes and is rejected here.
     """
     data = _as_action_dict(raw)
+    refused = _settle_cancel(data)
+    if refused:
+        return None, refused
     aid = data.get("id") or ""
     title = data.get("title") or aid or "?"
     se = data.get("side_effect")
@@ -713,6 +758,8 @@ def make_action_node(desc: ActionDescriptor, adapter: Adapter) -> type[NodeType]
             handle = self._handle
             if handle is None and hasattr(bound, "handle_by_idem"):
                 handle = bound.handle_by_idem(self.idem)
+            if handle is not None:
+                self._handle = handle
             return await bound.cancel(handle)
 
     ActionNode.__name__ = f"Action_{desc.id}"

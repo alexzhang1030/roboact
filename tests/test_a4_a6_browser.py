@@ -6,6 +6,7 @@ import time
 
 import pytest
 from roboact import A5_MAX_MS, A5_P95_MS
+from roboact.adapter import FAKE_ACTIONS
 from roboact.catalog import zh
 
 from tests.conftest import launch_chromium
@@ -621,3 +622,33 @@ def test_r16_cancel_rejected_then_pause(server):
     finally:
         p.stop()
         proxy.close()
+
+
+def test_motion_single_run_confirm_cancel_sends_nothing(server) -> None:
+    """Acceptance 8.3: confirm is shown; dismissing it sends no action."""
+    put_flow(server["base"], motion_graph("motion confirm"))
+    text = next(a.confirm_text for a in FAKE_ACTIONS if a.id == "fake_set_pose")
+    assert text
+    p, _path = _launch()
+    try:
+        br = _browser(p)
+        page, _blocked, _errs = _open(br, server["base"])
+        page.evaluate("() => { window.__af.selected.value = 'go'; window.__af.tab.value = 'in' }")
+        seen: list[str] = []
+
+        def _on_dialog(dialog) -> None:
+            seen.append(dialog.message)
+            dialog.dismiss()
+
+        page.on("dialog", _on_dialog)
+        page.get_by_role("button", name="Run this only").click()
+        page.wait_for_timeout(400)
+        assert seen == [text], seen
+        assert page.evaluate("() => window.__af.run.value") in (None, False)
+        runs = http_json(server["base"], "/api/runs")
+        assert runs["runs"] == []
+        probe = http_json(server["base"], "/api/test/adapter")
+        assert probe.get("goals_sent") == []
+        br.close()
+    finally:
+        p.stop()
