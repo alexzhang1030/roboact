@@ -195,14 +195,15 @@ const App = defineComponent({
       return 'run.start'
     })
     const slot1Label = computed(() => { void locale.value; return t(slot1Key.value) })
+    const preRunShown = ref(false)
     const flowBlocked = computed(() => {
       const c = runCheck.value || {}
-      if (c.can_run === false) return true
       if ((c.action_gone || []).length || (c.missing_input || []).length) return true
       if ((c.type_errors || []).length || (c.limit_errors || []).length) return true
+      if ((c.mismatches || []).length && !c.mismatch_unlocked) return true
+      if (!preRunShown.value) return false
       if ((c.timeout_errors || []).length) return true
       if (c.structure && c.structure.code) return true
-      if ((c.mismatches || []).length && !c.mismatch_unlocked) return true
       return false
     })
     const slot1Disabled = computed(() => controlsOff.value || pausePending.value || waitingApproval.value || needsReadback.value || (adapterLost.value && adapterDown.value) || (!isRunning.value && !isPaused.value && flowBlocked.value))
@@ -232,6 +233,7 @@ const App = defineComponent({
     })
     const structureText = computed(() => {
       void locale.value
+      if (!preRunShown.value) return ''
       const s = (runCheck.value && runCheck.value.structure) || null
       if (!s || !s.code) return ''
       if (s.code === 'need_one_end') return t('run.need_one_end', { n: s.n })
@@ -251,6 +253,13 @@ const App = defineComponent({
       if (!n || !n.data || n.data.nodeType !== 'end') return ''
       return endResultText(run.value, nodeStatus[n.id])
     })
+    const selectedNoCancelLine = computed(() => {
+      void locale.value
+      const id = selected.value
+      const s = id && nodeStatus[id]
+      if (!s || !s.no_cancel_too_long) return ''
+      return t('run.no_cancel_too_long', { node: s.node_label || id, s: s.timeout_s })
+    })
     const timeoutCapText = computed(() => {
       void locale.value
       const errs = (runCheck.value && runCheck.value.timeout_errors) || []
@@ -260,6 +269,7 @@ const App = defineComponent({
     const timeoutCapIds = computed(() => ((runCheck.value && runCheck.value.timeout_errors) || []).map(e => e.node_id).filter(Boolean))
     const noCancelTooLongCount = computed(() => {
       void locale.value
+      if (!preRunShown.value) return ''
       const n = ((runCheck.value && runCheck.value.timeout_errors) || []).length
       return n ? countLabel('run.no_cancel_too_long_count', n) : ''
     })
@@ -623,7 +633,20 @@ const App = defineComponent({
             type_errors: [], limit_errors: [], timeout_errors: [], structure: null, can_run: false,
           }
       }
+      if (preRunShown.value) {
+        const c = runCheck.value || {}
+        const still = !!((c.structure && c.structure.code) || (c.timeout_errors || []).length)
+        if (!still) preRunShown.value = false
+      }
       applyImportMarks()
+    }
+
+    function structureSummary(s) {
+      if (!s) return { key: '', params: {} }
+      if (s.code === 'need_one_start') return { key: 'status.summary.extra_start', params: { n: s.n } }
+      if (s.code === 'need_one_end') return { key: 'status.summary.extra_end', params: { n: s.n } }
+      if (s.code === 'end_unreachable') return { key: 'status.summary.end_unreachable', params: {} }
+      return { key: '', params: {} }
     }
 
     function applyImportMarks() {
@@ -634,21 +657,28 @@ const App = defineComponent({
         if (e && e.node_id) tooLong.set(e.node_id, e)
       }
       const live = !!(run.value && (run.value.status === 'running' || run.value.status === 'paused'))
+      const showPre = preRunShown.value && !live
+      const summary = structureSummary((runCheck.value && runCheck.value.structure) || null)
       for (const n of nodes.value) {
         const cur = nodeStatus[n.id] || {}
         if (gone.has(n.id)) nodeStatus[n.id] = { status: 'action_missing', state: 'action_missing' }
         else if (missing.has(n.id)) nodeStatus[n.id] = { status: 'missing_input', state: 'missing_input' }
-        else if (!live && tooLong.has(n.id)) {
+        else if (showPre && tooLong.has(n.id)) {
           const e = tooLong.get(n.id)
           nodeStatus[n.id] = {
-            status: 'error', state: 'error', no_cancel_too_long: true,
+            status: 'blocked', state: 'blocked', no_cancel_too_long: true,
             timeout_s: e.timeout_s, node_label: e.node,
+            summary_key: 'status.summary.no_cancel_too_long',
+            summary_params: { s: e.timeout_s },
           }
         }
-        else if (!live && structureIds.value.includes(n.id)) {
-          nodeStatus[n.id] = { status: 'error', state: 'error', structure_mark: true }
+        else if (showPre && structureIds.value.includes(n.id)) {
+          nodeStatus[n.id] = {
+            status: 'blocked', state: 'blocked', structure_mark: true,
+            summary_key: summary.key, summary_params: summary.params,
+          }
         }
-        else if (cur.status === 'action_missing' || cur.status === 'missing_input' || cur.no_cancel_too_long || cur.structure_mark) {
+        else if (cur.status === 'action_missing' || cur.status === 'missing_input' || cur.no_cancel_too_long || cur.structure_mark || cur.status === 'blocked') {
           nodeStatus[n.id] = { status: 'idle', state: 'idle' }
         }
       }
@@ -670,6 +700,8 @@ const App = defineComponent({
     }
 
     async function loadAll(flowId) {
+      preRunShown.value = false
+      resetStatus()
       const q = flowId ? ('?flow_id=' + encodeURIComponent(flowId)) : ''
       const b = await get('/api/bootstrap' + q)
       nodeTypesList.value = (b.node_types || []).map(t => ({ ...t, type: t.type || t.type_id, label: t.label || t.title }))
@@ -884,6 +916,7 @@ const App = defineComponent({
             max_steps: stepLimit.value, client_id: CLIENT_ID,
           })
         }
+        preRunShown.value = false
         resetStatus()
         const rid = r.run_id || (r.run && (r.run.run_id || r.run.id))
         const snap = r.run || await get('/api/runs/' + rid)
@@ -893,8 +926,12 @@ const App = defineComponent({
         records.value = []
         listen(rid)
       } catch (e) {
+        const pre = e.code === 'need_one_end' || e.code === 'need_one_start' || e.code === 'end_unreachable' || e.code === 'motion_timeout_cap'
         rejectMsg.value = mapError(e.code, (e.body && e.body.detail) || {}) || e.message
-        overlay.value = rejectMsg.value
+        if (pre) {
+          preRunShown.value = true
+          await refreshRunCheck()
+        } else overlay.value = rejectMsg.value
       }
     }
 
@@ -1321,7 +1358,7 @@ const App = defineComponent({
     window.__af = {
       nodes, edges, run, adapter, doRun, cmd, toggleBp, vf, nodeStatus, decide, pausePending,
       slot1Label, slot1Disabled, slot2Disabled, banners, mismatch, pauseRun, runWord, runWordKind,
-      runCheck, importErrors, exportFlow, importFlow, reviewEnable, updateParam,
+      runCheck, importErrors, exportFlow, importFlow, reviewEnable, updateParam, scheduleSave, preRunShown,
       jumpToFirst, runLocked, runLockedText, actionGoneCount, missingInputCount, timeoutCapText,
       adapterLost, uiLost, operatorLost, rejectedActions, resolveMotion, theme, themeMode, setThemeMode,
       applyTheme, selected, tab, toggleTheme, locale, localeMode, setLocaleMode, motion, motionMode,
@@ -1334,7 +1371,7 @@ const App = defineComponent({
       motion, motionMode, motionOpen, pickMotion, savedViewport, defaultViewport, persistViewportNow, logFilter,
       showMini, showGrid, addMenu, addQ, rejectMsg, overlay, specOf, t, typeLabel, fieldLabel, groupTitle, slot1Key,
       adapterLabel, flowNameLabel, nameEditing, topEl, runLocked, runLockedText, slot1Title,
-      actionGoneCount, missingInputCount, timeoutCapText, timeoutCapIds, noCancelTooLongCount, structureText, structureIds, importErrorLine, endPanelText, lostLine, uncancellable, jumpToFirst, onNameClick, startNameEdit, finishNameEdit, fitTopBar,
+      actionGoneCount, missingInputCount, timeoutCapText, timeoutCapIds, noCancelTooLongCount, structureText, structureIds, importErrorLine, endPanelText, selectedNoCancelLine, lostLine, uncancellable, jumpToFirst, onNameClick, startNameEdit, finishNameEdit, fitTopBar,
       nodeRecords, logRecords, rounds, shownRec, viewRound, runActive, waitingApproval, confirmNote, versionWarn, stepsClass, stepsText,
       filteredTypes, paletteTypes, paletteGroups, paletteStatus, groupBoxes, portSources, stepLimit, overrides, singleRound, compareA, compareB, compareOut,
       deadlineAdapterOnly, outputImages, isReal, crashRecovery, selectedSpec,
@@ -1500,6 +1537,7 @@ const App = defineComponent({
       <aside class="right" :style="{width: rightW+'px'}">
         <div class="right-resize" @mousedown.prevent="onRightDown"></div>
         <template v-if="selectedNode">
+          <p class="idem-note" v-if="selectedNoCancelLine" data-testid="panel-no-cancel">{{ selectedNoCancelLine }}</p>
           <div class="confirm-box" v-if="waitingApproval && run.pause && run.pause.node_id===selectedNode.id">
             <input class="note-in" v-model="confirmNote" :placeholder="t('note.placeholder')">
             <div style="display:flex;gap:8px;margin-top:8px">

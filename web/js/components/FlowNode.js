@@ -21,6 +21,7 @@ const ICONS = {
   cancel_rejected: 'state-running',
   action_missing: 'state-unknown',
   missing_input: 'state-unknown',
+  blocked: 'state-unknown',
 }
 
 const KIND = {
@@ -34,6 +35,7 @@ const KIND = {
   cancel_rejected: 'cancel_rejected',
   action_missing: 'missing',
   missing_input: 'missing_input',
+  blocked: 'blocked',
 }
 
 export default markRaw(defineComponent({
@@ -121,11 +123,12 @@ export default markRaw(defineComponent({
     const summary = computed(() => {
       void locale.value
       const s = st.value
-      if (s.no_cancel_too_long) {
-        return t('run.no_cancel_too_long', {
-          node: s.node_label || title.value,
-          s: formatSeconds(s.timeout_s),
-        })
+      const status = s.state || s.status
+      if (status === 'blocked' && (s.no_cancel_too_long || s.summary_key === 'status.summary.no_cancel_too_long')) {
+        return t('status.summary.no_cancel_too_long', { s: formatSeconds(s.timeout_s) })
+      }
+      if (status === 'blocked' && s.summary_key) {
+        return t(s.summary_key, s.summary_params || {})
       }
       if (isActionMissing.value) return t('error.action_missing')
       if (kind.value === 'unknown') {

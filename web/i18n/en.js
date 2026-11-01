@@ -291,5 +291,10 @@ export default {
   'run.need_one_start': 'This flow needs exactly one Start. Found {n}.',
   'run.need_one_end': 'This flow needs exactly one End. Found {n}.',
   'run.end_unreachable': 'End can\'t be reached from Start.',
+  'status.blocked': 'Can\'t run',
+  'status.summary.extra_start': '{n} Starts. Keep one.',
+  'status.summary.extra_end': '{n} Ends. Keep one.',
+  'status.summary.end_unreachable': 'Not reachable from Start',
+  'status.summary.no_cancel_too_long': 'Can\'t cancel. Runs up to {s} s.',
   'flow.output_renamed': '{path}: `output` is now `end`.',
 }

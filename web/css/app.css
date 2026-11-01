@@ -175,6 +175,9 @@ label { display: block; color: var(--muted); font-size: 12px; margin: 8px 0 4px;
 .left h3 { font-size: var(--fs-12); line-height: var(--lh-12); color: var(--muted); font-weight: 500; margin: 12px 8px 4px; }
 .pal-err { font-size: var(--fs-12); line-height: var(--lh-12); color: var(--red); margin: 0 8px 6px; }
 .fn[data-status="missing"] { border: 1px dashed var(--red); background: var(--surface); }
+.fn[data-status="blocked"] { border: 1px dashed var(--red); background: var(--surface); box-shadow: var(--shadow); }
+[data-theme="dark"] .fn[data-status="blocked"] { box-shadow: none; }
+.fn[data-status="blocked"] .fn-st { color: var(--red); }
 .fn[data-status="missing_input"] { border: 1px dashed var(--amber); background: var(--surface); }
 .param-bad { outline: 1px solid var(--amber); }
 .param-missing label { color: var(--amber); }

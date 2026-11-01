@@ -291,5 +291,10 @@ export default {
   'run.need_one_start': '这个流程必须正好有一个开始节点。找到 {n} 个。',
   'run.need_one_end': '这个流程必须正好有一个结束节点。找到 {n} 个。',
   'run.end_unreachable': '从开始节点到不了结束节点。',
+  'status.blocked': '不能运行',
+  'status.summary.extra_start': '有 {n} 个开始，只留一个。',
+  'status.summary.extra_end': '有 {n} 个结束，只留一个。',
+  'status.summary.end_unreachable': '从开始走不到这里',
+  'status.summary.no_cancel_too_long': '不能取消，最长跑 {s} 秒。',
   'flow.output_renamed': '{path}：`output` 现在是 `end`。',
 }

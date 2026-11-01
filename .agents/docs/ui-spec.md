@@ -63,6 +63,7 @@ Icon + word + border; icons alone must separate states in greyscale. Each `statu
 - Amber, emphasis: `status.paused_before`, `status.paused_after`, `status.paused` (after restart), `status.interrupted_unknown` (`state-unknown`), `status.awaiting`.
 - Red, emphasis: `status.error` plus summary.
 - 1px red dashed, no fill: `status.action_missing` (`state-unknown`).
+- 1px red dashed, no fill: `status.blocked` (`state-unknown`), for a node a pre-run check refused (§17). Never `status.error`: error means the node ran and failed; blocked means nothing ran. The reason goes in the summary row.
 - 1px amber dashed, no fill: `status.missing_input` (`state-unknown`), same treatment as action missing but amber.
 
 Rules:
@@ -208,8 +209,9 @@ Measured with HarfBuzz, `InterVariable.woff2`, weight 400, current `en.js`.
 - Robot, adapter, action-list version or unit mismatch: an amber banner at the top lists each one (`flow.mismatch_robot`, `flow.mismatch_adapter`, `flow.mismatch_actions`, `flow.mismatch_units`) with one button `flow.review_enable`. Run is disabled (`flow.run_locked`) until it is pressed.
 - Param types are not checked at import. Before each run every param is checked against its action's JSON Schema type (e.g. unquoted `1.10` in a string param reads as 1.1); a mismatch blocks Run and marks the node and param (`run.param_type_mismatch`).
 - `motion` param limits are checked before each run against the connected robot, not at import. The failing node and param are marked (`run.param_out_of_limit`).
-- A non-cancellable `motion` action with `timeout_s` > 10 s blocks Run, checked before every run (PRD, Run blocked rule). The node gets the red treatment of `status.error` and the line `run.no_cancel_too_long`; the count sits next to Run with the other counts and jumps to the first node.
-- Start and End, checked before every full run, not for a run of selected nodes (PRD). The reason goes in the same line next to Run, red, one at a time: `run.need_one_start` ("This flow needs exactly one Start. Found {n}."), `run.need_one_end` ("This flow needs exactly one End. Found {n}."), `run.end_unreachable` ("End can't be reached from Start."). For two or more, all of them get the red `status.error` treatment; for unreachable, only End does. Clicking the line jumps to the first marked node; with none found, it does nothing. A flow that fails this can still be saved, exported and imported.
+- A non-cancellable `motion` action with `timeout_s` > 10 s blocks Run, checked before every run (PRD, Run blocked rule). The node gets `status.blocked` (§3) with `status.summary.no_cancel_too_long` in the summary row, and the panel shows `run.no_cancel_too_long`; the count sits next to Run with the other counts and jumps to the first node.
+- Start and End, checked before every full run, not for a run of selected nodes (PRD). The reason goes in the same line next to Run, red, one at a time: `run.need_one_start` ("This flow needs exactly one Start. Found {n}."), `run.need_one_end` ("This flow needs exactly one End. Found {n}."), `run.end_unreachable` ("End can't be reached from Start."). For two or more, all of them get `status.blocked` (§3), with `status.summary.extra_start` or `status.summary.extra_end` in the summary row; for unreachable, only End does, with `status.summary.end_unreachable`. The title row never shows `status.error` for these. Clicking the line jumps to the first marked node; with none found, it does nothing. A flow that fails this can still be saved, exported and imported.
+- When pre-run marks show and clear (this and the line above): they appear only after Run or F5 is pressed and refused, never while the user is still editing. While they show, the check reruns on every edit; a node's mark and the line next to Run go away as soon as that check passes, or when the node is deleted. Starting a run, opening or importing another flow, or reloading clears them too.
 - Import: a node with `kind: output` rejects the whole file with `flow.output_renamed` ("{path}: `output` is now `end`."), in the same list as the other import errors.
 - File format and versioning are defined elsewhere.
 
@@ -327,6 +329,11 @@ run.no_cancel_too_long_count: "{n} nodes can't be cancelled and run too long"
 run.need_one_start: "This flow needs exactly one Start. Found {n}."
 run.need_one_end: "This flow needs exactly one End. Found {n}."
 run.end_unreachable: "End can't be reached from Start."
+status.blocked: "Can't run"
+status.summary.extra_start: "{n} Starts. Keep one."
+status.summary.extra_end: "{n} Ends. Keep one."
+status.summary.end_unreachable: "Not reachable from Start"
+status.summary.no_cancel_too_long: "Can't cancel. Runs up to {s} s."
 flow.output_renamed: "{path}: `output` is now `end`."
 node.end: "End"
 auth.title: "Sign in"
