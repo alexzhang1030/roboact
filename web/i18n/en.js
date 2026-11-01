@@ -132,6 +132,7 @@ export default {
   'in.pin': 'Pin this input',
   'in.rerun_from': 'Rerun from here',
   'in.really': 'Run for real',
+  'in.busy': 'The flow is running. Pause it, stop it, or wait for it to finish.',
   'in.current': 'Current input',
   'out.cap': '{name} · {bytes} B · {w}×{h} · {at} · round {round} · step {step}',
   'params.step_limit': 'Step limit',

@@ -132,6 +132,7 @@ export default {
   'in.pin': '固定这份输入',
   'in.rerun_from': '从这里重跑',
   'in.really': '真执行',
+  'in.busy': '流程正在运行。暂停、停止或等它跑完后再运行。',
   'in.current': '当前输入',
   'out.cap': '{name} · {bytes} B · {w}×{h} · {at} · 第 {round} 轮 · 步 {step}',
   'params.step_limit': '总步数上限',

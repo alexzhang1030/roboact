@@ -92,12 +92,15 @@ def _settle(base: str, rid: str) -> dict:
     return _wait(base, rid, {"paused", "completed", "stopped", "error", "step_limit"})
 
 
-def _assert_busy(base: str, path: str, body: dict) -> None:
+def _assert_busy(base: str, fid: str, before: list[str], path: str, body: dict) -> None:
     code, payload = http_status(base, path, "POST", body)
     assert code == 409, payload
     assert payload["error"] == "run_in_progress"
     assert payload["message"] == BUSY
-    assert payload["detail"]["run_id"]
+    assert "run_id" not in payload
+    blocker = payload["detail"]["run_id"]
+    assert blocker in before
+    assert _ids(base, fid) == before
 
 
 def _hold_running(base: str) -> tuple[str, int, str]:
@@ -116,14 +119,18 @@ def test_running_refuses_every_new_run(server):
     pose = _pose(base)
     ids = _ids(base, fid)
     confirm = _confirm(base, "fake_set_pose")
-    _assert_busy(base, "/api/runs", {"flow_id": fid, "flow_version": ver})
+    _assert_busy(base, fid, ids, "/api/runs", {"flow_id": fid, "flow_version": ver})
     _assert_busy(
         base,
+        fid,
+        ids,
         "/api/single-runs/node",
         {"flow_id": fid, "flow_version": ver, "node_id": "echo"},
     )
     _assert_busy(
         base,
+        fid,
+        ids,
         "/api/single-runs/node",
         {
             "flow_id": fid,
@@ -135,14 +142,71 @@ def test_running_refuses_every_new_run(server):
     )
     _assert_busy(
         base,
+        fid,
+        ids,
         "/api/single-runs/group",
         {"flow_id": fid, "flow_version": ver, "node_ids": ["echo", "tool"]},
     )
-    _assert_busy(base, f"/api/runs/{rid}/rerun-from", {"step": 1})
+    _assert_busy(base, fid, ids, f"/api/runs/{rid}/rerun-from", {"step": 1})
     assert _ids(base, fid) == ids
     assert _pose(base) == pose
     snap = http_json(base, f"/api/runs/{rid}")
     assert (snap.get("run") or snap)["status"] == "running"
+
+
+def test_group_run_refused_while_running_allowed_when_paused_or_finished(server):
+    """Group start writes no run while a node is executing, and works once paused or finished."""
+    base = server["base"]
+    fid, ver, rid = _hold_running(base)
+    before = _ids(base, fid)
+    pose = _pose(base)
+    _assert_busy(
+        base,
+        fid,
+        before,
+        "/api/single-runs/group",
+        {"flow_id": fid, "flow_version": ver, "node_ids": ["echo", "tool"]},
+    )
+    assert _pose(base) == pose
+    assert _ids(base, fid) == before
+
+    http_json(base, f"/api/runs/{rid}/stop", "POST", {})
+    _settle(base, rid)
+    http_json(
+        base,
+        f"/api/flows/{fid}/breakpoints/go/before",
+        "PUT",
+        {"enabled": True, "mode": "every"},
+    )
+    http_json(base, "/api/test/adapter", "POST", {"async_steps": 1, "async_sleep_s": 0.01})
+    paused = http_json(base, "/api/runs", "POST", {"flow_id": fid, "flow_version": ver})
+    snap = _wait(base, paused["run_id"], {"paused"})
+    assert (snap.get("run") or snap)["pause"]["reason"] == "breakpoint"
+    code, payload = http_status(
+        base,
+        "/api/single-runs/group",
+        "POST",
+        {"flow_id": fid, "flow_version": ver, "node_ids": ["echo"]},
+    )
+    assert code == 201, payload
+    _settle(base, payload["run_id"])
+
+    http_json(base, f"/api/flows/{fid}/breakpoints/go/before", "DELETE")
+    done = http_json(
+        base, "/api/runs", "POST", {"flow_id": fid, "flow_version": ver, "max_steps": 20}
+    )
+    finished = _wait(base, done["run_id"], {"completed", "error", "paused"})
+    assert (finished.get("run") or finished)["status"] == "completed"
+    recorded = _ids(base, fid)
+    code, payload = http_status(
+        base,
+        "/api/single-runs/group",
+        "POST",
+        {"flow_id": fid, "flow_version": ver, "node_ids": ["echo"]},
+    )
+    assert code == 201, payload
+    assert payload["run_id"] not in recorded
+    _settle(base, payload["run_id"])
 
 
 def test_concurrent_full_starts_one_wins(server):
