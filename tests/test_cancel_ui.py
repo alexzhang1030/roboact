@@ -183,14 +183,23 @@ def test_pre_run_no_cancel_too_long_blocks_and_marks(server) -> None:
             }""",
             timeout=15000,
         )
+        assert page.evaluate("() => window.__af.slot1Disabled.value") is False
+        assert page.locator("[data-testid=motion-timeout-cap]").count() == 0
+        assert page.locator('.fn[data-status="blocked"]').count() == 0
+        page.locator("button.slot-1").click()
+        page.wait_for_selector("[data-testid=motion-timeout-cap]", timeout=10000)
         assert page.evaluate("() => window.__af.slot1Disabled.value") is True
         count = page.locator("[data-testid=motion-timeout-cap]").inner_text()
         assert count == "1 node can't be cancelled and runs too long", count
-        summary = page.locator('.fn[data-status="error"] [data-testid="node-summary"]').inner_text()
-        assert "Go to pose" in summary, summary
-        assert "11" in summary and "10" in summary, summary
+        summary = page.locator(
+            '.fn[data-status="blocked"] [data-testid="node-summary"]'
+        ).inner_text()
+        assert summary == "Can't cancel. Runs up to 11 s.", summary
+        assert page.locator('.fn[data-status="error"]').count() == 0
         page.locator("[data-testid=motion-timeout-cap]").click()
         page.wait_for_function("() => window.__af.selected.value === 'go'", timeout=5000)
+        panel = page.locator("[data-testid=panel-no-cancel]").inner_text()
+        assert "Go to pose" in panel and "11" in panel and "10" in panel, panel
         br.close()
     finally:
         p.stop()

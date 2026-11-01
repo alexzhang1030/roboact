@@ -63,6 +63,7 @@ Icon + word + border; icons alone must separate states in greyscale. Each `statu
 - Amber, emphasis: `status.paused_before`, `status.paused_after`, `status.paused` (after restart), `status.interrupted_unknown` (`state-unknown`), `status.awaiting`.
 - Red, emphasis: `status.error` plus summary.
 - 1px red dashed, no fill: `status.action_missing` (`state-unknown`).
+- 1px red dashed, no fill: `status.blocked` (`state-unknown`), for a node a pre-run check refused (§17). Never `status.error`: error means the node ran and failed; blocked means nothing ran. The reason goes in the summary row.
 - 1px amber dashed, no fill: `status.missing_input` (`state-unknown`), same treatment as action missing but amber.
 
 Rules:
@@ -120,7 +121,7 @@ Nodes show the latest round. Panel top: `round.nav`. Stepping over a back edge i
 ## 10. Palette and params
 
 - Header `palette.source`, refresh button. States `palette.loading` (grey, no skeleton), `palette.disconnected` (Run grey, `run.disabled_no_controller`), `palette.empty`.
-- `palette.control` group: `node.start`, `node.output`, `node.constant`, `node.condition` (`port.yes`, `port.no`), `node.merge`, `node.human_confirm`.
+- `palette.control` group: `node.start`, `node.end` ("End": one input, no output; the run result shows on it), `node.constant`, `node.condition` (`port.yes`, `port.no`), `node.merge`, `node.human_confirm`.
 - Forms come from the adapter. Units sit in the input. No range: `params.no_range`; never invent one.
 - Camera: no thumbnail. Port `port.image_size`; output tab shows the image at panel width with `out.cap`; edge hover `edge.image_preview`.
 
@@ -175,7 +176,8 @@ Spacing: 4, 8, 12, 16, 24. Buttons: 28px (top bar), 32px (panel primary), radius
 
 `icons/`: 21 SVGs, 16×16, stroke 1.5, `currentColor`.
 
-- Node types (`--muted`): `node-start`, `node-output`, `node-constant`, `node-template`, `node-model`, `node-tool`, `node-condition`, `node-merge`, `node-approval`.
+- Node types (`--muted`): `node-start`, `node-end`, `node-constant`, `node-template`, `node-model`, `node-tool`, `node-condition`, `node-merge`, `node-approval`.
+- `node-end` is the old `node-output` glyph (arrow into a bar), renamed. Every adapter action, read or write, uses `node-tool` (Read pose too); read vs write is told by `mark-write` (§8), not by the icon.
 - States as in §3, plus `mark-write`. Done `--green`, error `--red`, paused `--amber`, running `--blue` (1 s linear spin), others `--muted`.
 - Reduced motion: no spin, no edge flow, no transitions.
 
@@ -207,7 +209,10 @@ Measured with HarfBuzz, `InterVariable.woff2`, weight 400, current `en.js`.
 - Robot, adapter, action-list version or unit mismatch: an amber banner at the top lists each one (`flow.mismatch_robot`, `flow.mismatch_adapter`, `flow.mismatch_actions`, `flow.mismatch_units`) with one button `flow.review_enable`. Run is disabled (`flow.run_locked`) until it is pressed.
 - Param types are not checked at import. Before each run every param is checked against its action's JSON Schema type (e.g. unquoted `1.10` in a string param reads as 1.1); a mismatch blocks Run and marks the node and param (`run.param_type_mismatch`).
 - `motion` param limits are checked before each run against the connected robot, not at import. The failing node and param are marked (`run.param_out_of_limit`).
-- A non-cancellable `motion` action with `timeout_s` > 10 s blocks Run, checked before every run (PRD, Run blocked rule). The node gets the red treatment of `status.error` and the line `run.no_cancel_too_long`; the count sits next to Run with the other counts and jumps to the first node.
+- A non-cancellable `motion` action with `timeout_s` > 10 s blocks Run, checked before every run (PRD, Run blocked rule). The node gets `status.blocked` (§3) with `status.summary.no_cancel_too_long` in the summary row, and the panel shows `run.no_cancel_too_long`; the count sits next to Run with the other counts and jumps to the first node.
+- Start and End, checked before every full run, not for a run of selected nodes (PRD). The reason goes in the same line next to Run, red, one at a time: `run.need_one_start` ("This flow needs exactly one Start. Found {n}."), `run.need_one_end` ("This flow needs exactly one End. Found {n}."), `run.end_unreachable` ("End can't be reached from Start."). For two or more, all of them get `status.blocked` (§3), with `status.summary.extra_start` or `status.summary.extra_end` in the summary row; for unreachable, only End does, with `status.summary.end_unreachable`. The title row never shows `status.error` for these. Clicking the line jumps to the first marked node; with none found, it does nothing. A flow that fails this can still be saved, exported and imported.
+- When pre-run marks show and clear (this and the line above): they appear only after Run or F5 is pressed and refused, never while the user is still editing. While they show, the check reruns on every edit; a node's mark and the line next to Run go away as soon as that check passes, or when the node is deleted. Starting a run, opening or importing another flow, or reloading clears them too.
+- Import: a node with `kind: output` rejects the whole file with `flow.output_renamed` ("{path}: `output` is now `end`."), in the same list as the other import errors.
 - File format and versioning are defined elsewhere.
 
 ## 18. Forbidden
@@ -223,8 +228,58 @@ Glow, gradients, frosted glass, layered shadows (one node shadow `0 1px 2px rgb(
 
 ## 20. Deferred
 
-- Auth: the token screen (`r-token`) is not built and has no keys yet.
 - The post-restart display follows §1 and §3 until the execution model settles.
+
+## 21. Sign-in (`r-token`)
+
+Applies only when the server is started with `--host` (LAN). Started on `127.0.0.1` there is no sign-in and none of this shows. Mechanism: `/workspace/se/lan-auth-v1.md`.
+
+The usual path shows no screen: the operator opens the link the server prints (`…/#token=…`), the page shows `auth.checking` centred for the length of the request, then the app. The screen below appears only when that fails or there is no session.
+
+### Screen
+
+- Replaces the whole app, not a dialog over it. Page background `--bg`; nothing else from the app (no top bar, palette or canvas).
+- One card, centred, 360px wide, padding 24px, 1px `--border`, radius 8px (same as the import dialog), `--shadow` in light, none in dark.
+- Inside, top to bottom, 12px gaps:
+  1. Title `auth.title` ("Sign in"), 16/600/24.
+  2. `auth.help` ("The server prints a sign-in link in its terminal each time it starts. Open that link, or paste the token from it."), 13/400/20, `--muted`.
+  3. Label `auth.token_label` ("Token"), 12/500, then the input: full width, 32px, mono 12px, `type=password`, `autocomplete=off`, `spellcheck=false`, focused on load. Paste trims spaces and a leading `#token=`.
+  4. Message line, 12/400/18, reserved height 18px so the button never moves. Empty by default.
+  5. `auth.submit` ("Sign in"), primary, 32px, right-aligned. Enter submits. Grey while the input is empty.
+- Language and theme follow §12 and §16 (stored preference or system). No switchers on this screen.
+
+### States
+
+| State | What changes |
+|---|---|
+| Empty (no session, no token in URL) | Default card. |
+| Checking | Button grey, label `auth.checking` ("Signing in…"); input read-only. |
+| Wrong token | Message line `auth.wrong` ("That token doesn't match. It changes every time the server restarts."), `--red`; input keeps the value, selected, so a new paste replaces it. Input border `--red` until the next edit. |
+| Too many tries (server says wait) | Message line `auth.wait` ("Too many tries. Try again in {s} s."), `--amber`, `{s}` mono, counts down each second; button grey until 0, then the line clears. |
+| Session expired (server reports expiry) | Message line `auth.expired` ("Signed out after 12 hours without activity."), `--muted`. |
+| Session unknown mid-use (401 with no reason, e.g. server restart) | Message line `auth.signed_out` ("You're signed out. If the server restarted, open the new link from its terminal."), `--muted`. Don't claim it restarted; the page can't know. |
+| Token in URL rejected | Same as Wrong token, input empty. The fragment is already cleared. |
+
+### Losing the session while the app is open
+
+- Any 401 on an HTTP call, or the server closing the socket for a dropped session, swaps to this screen at once. Don't show "Reconnecting" first: that line means the network, not the session.
+- Unsaved canvas edits stay in the tab and are back after sign-in. If the server can't keep them, that's a fault, not a design choice; tell me before building.
+- After sign-in, the page reloads state from the server; a run that was paused shows its own status word (§1).
+
+### Top bar when signed in
+
+- `auth.sign_out` ("Sign out") is the last item in the far-right menu, after a divider. Only with `--host`.
+- With `--insecure-http`: tag `net.insecure` ("Not encrypted") right after `run.target_sim`, same size as `real_tag` (22px, 12px text, 1px border) but `--amber`. Tooltip `net.insecure_title` ("Plain HTTP. Anyone on this network can read the traffic. Allowed only with the simulator."). Never hidden or dismissible.
+
+### Not here
+
+- No "remember me", no password, no username, no show/hide eye icon. The certificate warning is the browser's; we don't draw or explain it in the app.
+
+### Check
+
+- Shots, light and dark: empty, checking, wrong token, wait at 30 s, expired, signed out; top bar with Not encrypted; menu with Sign out.
+- 390px wide: the card shrinks to the viewport minus 16px each side; nothing truncates.
+- Keyboard only: load, paste, Enter, reach the app. Screen reader reads the message line (`role=alert`, `aria-live=assertive`).
 
 ## Keys to add (both catalogs)
 
@@ -271,6 +326,28 @@ lost.ran_to_end: "Page disconnected. {node} can't be cancelled; it ran {s} s mor
 lost.cancel_rejected: "Page disconnected. The robot refused to cancel {node}; it ran to end, then the run paused."
 run.no_cancel_too_long: "{node} can't be cancelled and may run {s} s. The limit is 10 s."
 run.no_cancel_too_long_count: "{n} nodes can't be cancelled and run too long"
+run.need_one_start: "This flow needs exactly one Start. Found {n}."
+run.need_one_end: "This flow needs exactly one End. Found {n}."
+run.end_unreachable: "End can't be reached from Start."
+status.blocked: "Can't run"
+status.summary.extra_start: "{n} Starts. Keep one."
+status.summary.extra_end: "{n} Ends. Keep one."
+status.summary.end_unreachable: "Not reachable from Start"
+status.summary.no_cancel_too_long: "Can't cancel. Runs up to {s} s."
+flow.output_renamed: "{path}: `output` is now `end`."
+node.end: "End"
+auth.title: "Sign in"
+auth.help: "The server prints a sign-in link in its terminal each time it starts. Open that link, or paste the token from it."
+auth.token_label: "Token"
+auth.submit: "Sign in"
+auth.checking: "Signing in…"
+auth.wrong: "That token doesn't match. It changes every time the server restarts."
+auth.wait: "Too many tries. Try again in {s} s."
+auth.expired: "Signed out after 12 hours without activity."
+auth.signed_out: "You're signed out. If the server restarted, open the new link from its terminal."
+auth.sign_out: "Sign out"
+net.insecure: "Not encrypted"
+net.insecure_title: "Plain HTTP. Anyone on this network can read the traffic. Allowed only with the simulator."
 status.summary.took: "Took {s} s"
 status.summary.took_ms: "Took {ms} ms"
 ```

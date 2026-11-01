@@ -589,10 +589,16 @@ def test_r16_timeout_cap_blocks_run_browser(server):
             }""",
             timeout=15000,
         )
+        assert page.evaluate("() => window.__af.slot1Disabled.value") is False
+        assert page.locator("[data-testid=motion-timeout-cap]").count() == 0
+        page.locator("button.slot-1").click()
+        page.wait_for_selector("[data-testid=motion-timeout-cap]", timeout=10000)
         assert page.evaluate("() => window.__af.slot1Disabled.value") is True
         text = page.evaluate("() => window.__af.timeoutCapText.value")
         assert node in (text or ""), (node, text)
         assert page.locator("[data-testid=motion-timeout-cap]").inner_text()
+        assert page.locator('.fn[data-status="blocked"]').count() >= 1
+        assert page.locator('.fn[data-status="error"]').count() == 0
         br.close()
     finally:
         p.stop()

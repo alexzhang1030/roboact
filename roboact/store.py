@@ -6,7 +6,7 @@ from typing import Any, Protocol
 
 from . import FORMAT_VERSION
 from .catalog import en
-from .flow_meta import assemble_graph, default_start_node, persist_unlock_record
+from .flow_meta import assemble_graph, default_new_flow, persist_unlock_record
 from .store_sqlite import SqliteStore
 from .util import new_id, now_iso
 
@@ -154,8 +154,14 @@ class MemoryStore:
     ) -> dict[str, Any]:
         name = name or en("flow.untitled")
         flow_id = flow_id or new_id("fl_")
-        nodes = (body or {}).get("nodes") or [default_start_node()]
-        graph = assemble_graph(flow_id, name, 1, body, nodes)
+        src = dict(body or {})
+        if src.get("nodes"):
+            nodes = src["nodes"]
+        else:
+            nodes, edges = default_new_flow()
+            src["nodes"] = nodes
+            src["edges"] = edges
+        graph = assemble_graph(flow_id, name, 1, src, nodes)
         self._write()
         self._flows[flow_id] = {
             "flow_id": flow_id,

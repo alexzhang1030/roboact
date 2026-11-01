@@ -4,7 +4,7 @@ import { MiniMap } from '@vue-flow/minimap'
 import FlowNode from './components/FlowNode.js'
 import LoopEdge from './components/LoopEdge.js'
 import { nodeStatus, resetStatus, applyNodeStates } from './status-store.js'
-import { isBackEdge, typesOk, portType, toFlow, fromFlow } from './graph-utils.js'
+import { isBackEdge, typesOk, portType, toFlow, fromFlow, endResultText } from './graph-utils.js'
 import { get, send, openEvents } from './api.js'
 import { createHistory } from './history.js'
 import {
@@ -146,6 +146,7 @@ const App = defineComponent({
     provide('toggleBp', (...a) => toggleBp(...a))
     provide('tools', tools)
     provide('iconBase', '/vendor/icons')
+    provide('runState', run)
 
     const lodLow = ref(false)
     watch(() => vf.viewport.value.zoom < 0.6, v => { lodLow.value = v })
@@ -196,13 +197,15 @@ const App = defineComponent({
       return 'run.start'
     })
     const slot1Label = computed(() => { void locale.value; return t(slot1Key.value) })
+    const preRunShown = ref(false)
     const flowBlocked = computed(() => {
       const c = runCheck.value || {}
-      if (c.can_run === false) return true
       if ((c.action_gone || []).length || (c.missing_input || []).length) return true
       if ((c.type_errors || []).length || (c.limit_errors || []).length) return true
-      if ((c.timeout_errors || []).length) return true
       if ((c.mismatches || []).length && !c.mismatch_unlocked) return true
+      if (!preRunShown.value) return false
+      if ((c.timeout_errors || []).length) return true
+      if (c.structure && c.structure.code) return true
       return false
     })
     const slot1Disabled = computed(() => controlsOff.value || pausePending.value || waitingApproval.value || needsReadback.value || (adapterLost.value && adapterDown.value) || (!isRunning.value && !isPaused.value && flowBlocked.value))
@@ -225,6 +228,40 @@ const App = defineComponent({
       const n = ((runCheck.value && runCheck.value.missing_input) || []).length
       return n ? countLabel('run.missing_input_count', n) : ''
     })
+    const structureIds = computed(() => {
+      const s = (runCheck.value && runCheck.value.structure) || null
+      if (!s || !s.code) return []
+      return (s.node_ids || []).filter(Boolean)
+    })
+    const structureText = computed(() => {
+      void locale.value
+      if (!preRunShown.value) return ''
+      const s = (runCheck.value && runCheck.value.structure) || null
+      if (!s || !s.code) return ''
+      if (s.code === 'need_one_end') return t('run.need_one_end', { n: s.n })
+      if (s.code === 'need_one_start') return t('run.need_one_start', { n: s.n })
+      if (s.code === 'end_unreachable') return t('run.end_unreachable')
+      return ''
+    })
+    function importErrorLine(e) {
+      void locale.value
+      if (e && e.message === 'kind "output" is now "end"') {
+        return t('flow.output_renamed', { path: e.path || '' })
+      }
+      return t('flow.import_error', { path: e.path, message: e.message })
+    }
+    const endPanelText = computed(() => {
+      const n = selectedNode.value
+      if (!n || !n.data || n.data.nodeType !== 'end') return ''
+      return endResultText(run.value, nodeStatus[n.id])
+    })
+    const selectedNoCancelLine = computed(() => {
+      void locale.value
+      const id = selected.value
+      const s = id && nodeStatus[id]
+      if (!s || !s.no_cancel_too_long) return ''
+      return t('run.no_cancel_too_long', { node: s.node_label || id, s: s.timeout_s })
+    })
     const timeoutCapText = computed(() => {
       void locale.value
       const errs = (runCheck.value && runCheck.value.timeout_errors) || []
@@ -234,6 +271,7 @@ const App = defineComponent({
     const timeoutCapIds = computed(() => ((runCheck.value && runCheck.value.timeout_errors) || []).map(e => e.node_id).filter(Boolean))
     const noCancelTooLongCount = computed(() => {
       void locale.value
+      if (!preRunShown.value) return ''
       const n = ((runCheck.value && runCheck.value.timeout_errors) || []).length
       return n ? countLabel('run.no_cancel_too_long_count', n) : ''
     })
@@ -341,13 +379,23 @@ const App = defineComponent({
       return t(key, { used: s, limit: lim })
     })
     const paletteTypes = computed(() => nodeTypesList.value.filter(t => t.palette !== false))
+    const CONTROL_ORDER = ['start', 'end', 'constant', 'condition', 'merge', 'human_confirm']
     const paletteGroups = computed(() => {
       const map = {}
       for (const t of paletteTypes.value) {
         const g = t.group || (t.from_adapter ? (adapter.value.name || adapter.value.id || 'adapter') : 'control')
         ;(map[g] = map[g] || []).push(t)
       }
-      return Object.entries(map).map(([name, items]) => ({ name, items }))
+      return Object.entries(map).map(([name, items]) => {
+        if (name === 'control') {
+          items.sort((a, b) => {
+            const ia = CONTROL_ORDER.indexOf(a.type)
+            const ib = CONTROL_ORDER.indexOf(b.type)
+            return (ia < 0 ? CONTROL_ORDER.length : ia) - (ib < 0 ? CONTROL_ORDER.length : ib)
+          })
+        }
+        return { name, items }
+      })
     })
     const paletteStatus = computed(() => {
       void locale.value
@@ -584,10 +632,23 @@ const App = defineComponent({
       } catch (_) {
           runCheck.value = {
             action_gone: [], missing_input: [], mismatches: [], mismatch_unlocked: false,
-            type_errors: [], limit_errors: [], timeout_errors: [], can_run: false,
+            type_errors: [], limit_errors: [], timeout_errors: [], structure: null, can_run: false,
           }
       }
+      if (preRunShown.value) {
+        const c = runCheck.value || {}
+        const still = !!((c.structure && c.structure.code) || (c.timeout_errors || []).length)
+        if (!still) preRunShown.value = false
+      }
       applyImportMarks()
+    }
+
+    function structureSummary(s) {
+      if (!s) return { key: '', params: {} }
+      if (s.code === 'need_one_start') return { key: 'status.summary.extra_start', params: { n: s.n } }
+      if (s.code === 'need_one_end') return { key: 'status.summary.extra_end', params: { n: s.n } }
+      if (s.code === 'end_unreachable') return { key: 'status.summary.end_unreachable', params: {} }
+      return { key: '', params: {} }
     }
 
     function applyImportMarks() {
@@ -598,18 +659,28 @@ const App = defineComponent({
         if (e && e.node_id) tooLong.set(e.node_id, e)
       }
       const live = !!(run.value && (run.value.status === 'running' || run.value.status === 'paused'))
+      const showPre = preRunShown.value && !live
+      const summary = structureSummary((runCheck.value && runCheck.value.structure) || null)
       for (const n of nodes.value) {
         const cur = nodeStatus[n.id] || {}
         if (gone.has(n.id)) nodeStatus[n.id] = { status: 'action_missing', state: 'action_missing' }
         else if (missing.has(n.id)) nodeStatus[n.id] = { status: 'missing_input', state: 'missing_input' }
-        else if (!live && tooLong.has(n.id)) {
+        else if (showPre && tooLong.has(n.id)) {
           const e = tooLong.get(n.id)
           nodeStatus[n.id] = {
-            status: 'error', state: 'error', no_cancel_too_long: true,
+            status: 'blocked', state: 'blocked', no_cancel_too_long: true,
             timeout_s: e.timeout_s, node_label: e.node,
+            summary_key: 'status.summary.no_cancel_too_long',
+            summary_params: { s: e.timeout_s },
           }
         }
-        else if (cur.status === 'action_missing' || cur.status === 'missing_input' || cur.no_cancel_too_long) {
+        else if (showPre && structureIds.value.includes(n.id)) {
+          nodeStatus[n.id] = {
+            status: 'blocked', state: 'blocked', structure_mark: true,
+            summary_key: summary.key, summary_params: summary.params,
+          }
+        }
+        else if (cur.status === 'action_missing' || cur.status === 'missing_input' || cur.no_cancel_too_long || cur.structure_mark || cur.status === 'blocked') {
           nodeStatus[n.id] = { status: 'idle', state: 'idle' }
         }
       }
@@ -631,6 +702,8 @@ const App = defineComponent({
     }
 
     async function loadAll(flowId) {
+      preRunShown.value = false
+      resetStatus()
       const q = flowId ? ('?flow_id=' + encodeURIComponent(flowId)) : ''
       const b = await get('/api/bootstrap' + q)
       nodeTypesList.value = (b.node_types || []).map(t => ({ ...t, type: t.type || t.type_id, label: t.label || t.title }))
@@ -760,7 +833,7 @@ const App = defineComponent({
           flushNodes()
           storageErr.value = ''
           pausePending.value = false
-          if (run.value) run.value = { ...run.value, status: ev.status, steps_used: ev.steps_used, error: ev.error, pause: null }
+          if (run.value) run.value = { ...run.value, status: ev.status, steps_used: ev.steps_used, error: ev.error, pause: null, result: ev.result }
           refreshRecords(runId)
         },
         version_drift: (ev) => { if (run.value) run.value = { ...run.value, latest_flow_version: ev.latest_version } },
@@ -845,6 +918,7 @@ const App = defineComponent({
             max_steps: stepLimit.value, client_id: CLIENT_ID,
           })
         }
+        preRunShown.value = false
         resetStatus()
         const rid = r.run_id || (r.run && (r.run.run_id || r.run.id))
         const snap = r.run || await get('/api/runs/' + rid)
@@ -854,8 +928,12 @@ const App = defineComponent({
         records.value = []
         listen(rid)
       } catch (e) {
+        const pre = e.code === 'need_one_end' || e.code === 'need_one_start' || e.code === 'end_unreachable' || e.code === 'motion_timeout_cap'
         rejectMsg.value = mapError(e.code, (e.body && e.body.detail) || {}) || e.message
-        overlay.value = rejectMsg.value
+        if (pre) {
+          preRunShown.value = true
+          await refreshRunCheck()
+        } else overlay.value = rejectMsg.value
       }
     }
 
@@ -1322,7 +1400,7 @@ const App = defineComponent({
     window.__af = {
       nodes, edges, run, adapter, doRun, cmd, toggleBp, vf, nodeStatus, decide, pausePending,
       slot1Label, slot1Disabled, slot2Disabled, banners, mismatch, pauseRun, runWord, runWordKind,
-      runCheck, importErrors, exportFlow, importFlow, reviewEnable, updateParam,
+      runCheck, importErrors, exportFlow, importFlow, reviewEnable, updateParam, scheduleSave, preRunShown,
       jumpToFirst, runLocked, runLockedText, actionGoneCount, missingInputCount, timeoutCapText,
       adapterLost, uiLost, operatorLost, rejectedActions, resolveMotion, theme, themeMode, setThemeMode,
       applyTheme, selected, tab, toggleTheme, locale, localeMode, setLocaleMode, motion, motionMode,
@@ -1335,7 +1413,7 @@ const App = defineComponent({
       motion, motionMode, motionOpen, pickMotion, savedViewport, defaultViewport, persistViewportNow, logFilter,
       showMini, showGrid, addMenu, addQ, rejectMsg, overlay, specOf, t, typeLabel, fieldLabel, groupTitle, slot1Key,
       adapterLabel, flowNameLabel, nameEditing, topEl, runLocked, runLockedText, slot1Title,
-      actionGoneCount, missingInputCount, timeoutCapText, timeoutCapIds, noCancelTooLongCount, lostLine, uncancellable, jumpToFirst, onNameClick, startNameEdit, finishNameEdit, fitTopBar,
+      actionGoneCount, missingInputCount, timeoutCapText, timeoutCapIds, noCancelTooLongCount, structureText, structureIds, importErrorLine, endPanelText, selectedNoCancelLine, lostLine, uncancellable, jumpToFirst, onNameClick, startNameEdit, finishNameEdit, fitTopBar,
       nodeRecords, logRecords, rounds, shownRec, viewRound, runActive, waitingApproval, confirmNote, versionWarn, stepsClass, stepsText,
       filteredTypes, paletteTypes, paletteGroups, paletteStatus, groupBoxes, portSources, stepLimit, overrides, singleRound, compareA, compareB, compareOut,
       deadlineAdapterOnly, outputImages, isReal, crashRecovery, selectedSpec,
@@ -1380,8 +1458,9 @@ const App = defineComponent({
           <span class="run-counts" data-testid="count-action-gone" v-if="actionGoneCount" @click="jumpToFirst(runCheck.action_gone)">{{ actionGoneCount }}</span>
           <span class="run-counts missing" data-testid="count-missing-input" v-if="missingInputCount" @click="jumpToFirst(runCheck.missing_input)">{{ missingInputCount }}</span>
           <span class="run-counts" data-testid="motion-timeout-cap" v-if="noCancelTooLongCount" @click="jumpToFirst(timeoutCapIds)">{{ noCancelTooLongCount }}</span>
+          <span class="run-counts" data-testid="run-refused" v-if="structureText" @click="jumpToFirst(structureIds)">{{ structureText }}</span>
         </div>
-        <p class="lost-line" data-testid="lost-line" v-if="lostLine">{{ lostLine }}</p>
+          <p class="lost-line" data-testid="lost-line" v-if="lostLine">{{ lostLine }}</p>
         <div class="mismatch" :class="{ out: mismatchFade }" v-if="mismatch">{{ mismatch }}</div>
       </div>
       <div class="right">
@@ -1458,7 +1537,7 @@ const App = defineComponent({
       <div class="box">
         <p>{{ t('flow.import_failed') }}</p>
         <ul>
-          <li v-for="(e, i) in importErrors" :key="i">{{ t('flow.import_error', { path: e.path, message: e.message }) }}</li>
+          <li v-for="(e, i) in importErrors" :key="i">{{ importErrorLine(e) }}</li>
         </ul>
         <button @click="importErrors=null">OK</button>
       </div>
@@ -1505,6 +1584,7 @@ const App = defineComponent({
       <aside class="right" :style="{width: rightW+'px'}">
         <div class="right-resize" @mousedown.prevent="onRightDown"></div>
         <template v-if="selectedNode">
+          <p class="idem-note" v-if="selectedNoCancelLine" data-testid="panel-no-cancel">{{ selectedNoCancelLine }}</p>
           <div class="confirm-box" v-if="waitingApproval && run.pause && run.pause.node_id===selectedNode.id">
             <input class="note-in" v-model="confirmNote" :placeholder="t('note.placeholder')">
             <div style="display:flex;gap:8px;margin-top:8px">
@@ -1566,7 +1646,8 @@ const App = defineComponent({
                 <img :src="img.data || img.url" :alt="name">
                 <p class="img-cap">{{ t('out.cap', { name: name, bytes: img.bytes || '?', w: img.width, h: img.height, at: img.captured_at, round: shownRec && shownRec.round, step: shownRec && shownRec.step }) }}</p>
               </div>
-              <div class="kv">{{ JSON.stringify(shownRec && shownRec.outputs || run && run.output || {}, null, 2) }}</div>
+              <div class="kv" v-if="endPanelText" data-testid="end-panel-result">{{ endPanelText }}</div>
+              <div class="kv" v-else>{{ JSON.stringify(shownRec && shownRec.outputs || run && run.output || {}, null, 2) }}</div>
               <p v-if="shownRec && shownRec.error" style="color:var(--red)">{{ shownRec.error }}</p>
             </template>
             <template v-if="tab==='params'">

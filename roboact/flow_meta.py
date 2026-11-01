@@ -18,6 +18,25 @@ def default_start_node() -> dict:
     return {"id": "start", "type": "start", "x": 240, "y": 200, "params": {"data": {}}}
 
 
+def default_new_flow() -> tuple[list[dict], list[dict]]:
+    """A fresh flow can run: one Start, one End, and a path between them."""
+    nodes = [
+        default_start_node(),
+        {"id": "end", "type": "end", "x": 520, "y": 200, "params": {}},
+    ]
+    edges = [
+        {
+            "id": "e_start_end",
+            "kind": "data",
+            "source": "start",
+            "source_port": "data",
+            "target": "end",
+            "target_port": "value",
+        }
+    ]
+    return nodes, edges
+
+
 def assemble_graph(flow_id: str, name: str, version: int, body: dict | None, nodes: list) -> dict:
     src = body or {}
     graph = {

@@ -270,7 +270,7 @@ def test_build_order_export_diff_is_values_only(server: dict[str, Any]) -> None:
         ("n_start", "start", 40, 160, "data", data),
         ("n_go", "fake_set_pose", 300, 160, None, pose),
         ("n_note", "fake_note", 40, 320, None, note),
-        ("n_out", "output", 560, 160, None, {}),
+        ("n_out", "end", 560, 160, None, {}),
     ]
     edges_spec = [
         ("e_start", "n_start", "data", "n_go", "target"),
@@ -385,7 +385,7 @@ def test_20_17_param_change_and_node_move(server: dict[str, Any]) -> None:
     flow_id = str(created["flow"]["id"])
     nodes = [
         _node("n_go", "fake_set_pose", 300, 160, {"x": 0.4, "y": 0.1, "z": 0.2}, flip=False),
-        _node("n_out", "output", 560, 160, {}, flip=False),
+        _node("n_out", "end", 560, 160, {}, flip=False),
         _node("n_start", "start", 40, 160, {"data": {"x": 0.4, "y": 0.1, "z": 0.2}}, flip=False),
     ]
     edges = [

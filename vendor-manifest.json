@@ -257,10 +257,10 @@
       "license_file": "vendor/licenses/LicenseRef-Original-icons.txt"
     },
     {
-      "file": "web/vendor/icons/node-output.svg",
+      "file": "web/vendor/icons/node-end.svg",
       "package": "actflow-icons",
       "version": "0",
-      "source_url": "bundled:web/vendor/icons/node-output.svg",
+      "source_url": "bundled:web/vendor/icons/node-end.svg",
       "conversion": "none (Rams 16x16 currentColor SVG, unmodified)",
       "bytes": 260,
       "sha256": "604b022024b494cdf44f3fc198a0ece9a6f8fcfaaf243b06640e0a0bc7bf105d",

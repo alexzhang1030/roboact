@@ -30,8 +30,12 @@ def _pose_flow():
         [
             n("start", "start", data={"x": 0.4, "y": 0.1, "z": 0.2}),
             n("go", "fake_set_pose"),
+            n("end", "end"),
         ],
-        [e("e0", "start", "data", "go", "target")],
+        [
+            e("e0", "start", "data", "go", "target"),
+            e("e1", "go", "pose", "end", "value"),
+        ],
     )
 
 
