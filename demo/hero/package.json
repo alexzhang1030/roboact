@@ -5,9 +5,7 @@
   "description": "Looping homepage hero for Roboact. React stays in this folder; web/ is build-free.",
   "scripts": {
     "dev": "vite --host 127.0.0.1 --port 5179 --strictPort",
-    "film": "node scripts/film.mjs",
-    "jumps": "node scripts/jumps.mjs",
-    "layout": "node scripts/layout.mjs"
+    "film": "node scripts/film.mjs"
   },
   "dependencies": {
     "react": "^18.3.1",

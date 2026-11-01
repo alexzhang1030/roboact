@@ -17,7 +17,7 @@ CHROME_PATH=/usr/local/bin/google-chrome npm run dev
 
 ## Re-film
 
-From `demo/hero`, with the dev server up. `scripts/film.mjs` is the Stageshow contact sheet. `scripts/export-loop.mjs` writes `media/hero.mp4` and `media/hero.gif` at 1200×750 @2× (2400×1500).
+From `demo/hero`, with the dev server up. `scripts/film.mjs` writes the contact sheet. It pulls in `browser.mjs`, `film-checks.mjs`, `jumps-core.mjs`, `layout-core.mjs`, `motion-watch.mjs`, and `verification.mjs`.
 
 ```bash
 CHROME_PATH=/usr/local/bin/google-chrome node scripts/film.mjs \
@@ -31,15 +31,6 @@ CHROME_PATH=/usr/local/bin/google-chrome node scripts/film.mjs \
 CHROME_PATH=/usr/local/bin/google-chrome node scripts/film.mjs \
   http://127.0.0.1:5179/ --width 390 --at hold --delay 500 --still --pad 0 \
   --out /tmp/hero-390.png
-
-CHROME_PATH=/usr/local/bin/google-chrome node scripts/jumps.mjs \
-  http://127.0.0.1:5179/ --ms 14000 --width 1200
-
-CHROME_PATH=/usr/local/bin/google-chrome node scripts/layout.mjs \
-  http://127.0.0.1:5179/ --width 1200 --delay 7000 --select .ss-stage
-
-CHROME_PATH=/usr/local/bin/google-chrome node scripts/export-loop.mjs \
-  http://127.0.0.1:5179/
 ```
 
-The kit is Stageshow (MIT), copied under `kit/`. Icons are the product SVGs. Fonts are the repo's Inter and JetBrains Mono.
+`media/hero.gif` and `media/hero.mp4` are the 1200×750 @2× loop already recorded. The kit under `kit/` is the Stageshow slice this demo imports (MIT, `kit/LICENSE`). Icons are the product SVGs. Fonts are the repo's Inter and JetBrains Mono.
