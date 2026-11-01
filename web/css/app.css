@@ -477,6 +477,7 @@ label { display: block; color: var(--muted); font-size: 12px; margin: 8px 0 4px;
 
 dialog.confirm-dialog {
   width: 400px;
+  max-height: calc(100vh - 48px);
   padding: 20px;
   border: 1px solid var(--border);
   border-radius: 8px;
@@ -485,31 +486,43 @@ dialog.confirm-dialog {
   box-shadow: var(--shadow);
   font: inherit;
 }
+dialog.confirm-dialog[open] {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
 dialog.confirm-dialog::backdrop {
   background: color-mix(in srgb, var(--bg) 40%, transparent);
 }
 dialog.confirm-dialog h2 {
+  flex: none;
   margin: 0 0 8px;
   font-size: var(--fs-14);
   line-height: var(--lh-14);
   font-weight: 600;
 }
 dialog.confirm-dialog p {
+  flex: 1 1 auto;
+  min-height: 0;
   margin: 0;
   font-size: var(--fs-13);
   line-height: var(--lh-13);
   font-weight: 400;
-  display: -webkit-box;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 3;
-  line-clamp: 3;
-  overflow: hidden;
+  overflow-y: auto;
 }
 dialog.confirm-dialog .confirm-actions {
+  flex: none;
   display: flex;
   justify-content: flex-end;
   gap: 8px;
   margin-top: 16px;
+}
+.in-busy {
+  margin: 8px 0 0;
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--muted);
+  text-align: left;
 }
 
 @media (max-width: 800px) {

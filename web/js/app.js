@@ -180,6 +180,7 @@ const App = defineComponent({
     const versionWarn = computed(() => runActive.value && run.value.flow_version != null && meta.value.version !== run.value.flow_version)
     const controlsOff = computed(() => conn.value !== 'ok')
     const isRunning = computed(() => !!(run.value && run.value.status === 'running'))
+    const nodeBusy = computed(() => isRunning.value)
     const isPaused = computed(() => !!(run.value && run.value.status === 'paused'))
     const adapterLost = computed(() => !!(isPaused.value && run.value && run.value.pause && run.value.pause.reason === 'adapter_lost'))
     const operatorLost = computed(() => !!(isPaused.value && run.value && run.value.pause && run.value.pause.reason === 'operator_lost'))
@@ -869,6 +870,7 @@ const App = defineComponent({
     }
 
     async function rerunNew() {
+      if (nodeBusy.value) return
       await doRun('all')
     }
 
@@ -989,7 +991,7 @@ const App = defineComponent({
       return actionLabel(spec, locale.value) || (n && n.data && n.data.nodeType) || t('node.fallback')
     }
     async function runSingle(ev) {
-      if (!selected.value) return
+      if (nodeBusy.value || !selected.value) return
       const opener = (ev && ev.currentTarget) || document.activeElement
       const spec = specOf(selectedNode.value)
       const rec = shownRec.value
@@ -1012,14 +1014,15 @@ const App = defineComponent({
       doRun('single', extra)
     }
     function runFrom() {
-      if (!selected.value || !shownRec.value) return
+      if (nodeBusy.value || !selected.value || !shownRec.value) return
       doRun('from', { node_id: selected.value, source_run_id: shownRec.value.run_id || (run.value && run.value.id), step: shownRec.value.step })
     }
     function runGroup(g) {
+      if (nodeBusy.value) return
       doRun('group', { node_ids: g.node_ids, source_run_id: run.value && run.value.id })
     }
     async function really(ev) {
-      if (!selected.value) return
+      if (nodeBusy.value || !selected.value) return
       const opener = (ev && ev.currentTarget) || document.activeElement
       const spec = specOf(selectedNode.value)
       const text = (spec && spec.confirm_text) || t('confirm.external')
@@ -1291,7 +1294,7 @@ const App = defineComponent({
       filteredTypes, paletteTypes, paletteGroups, paletteStatus, groupBoxes, portSources, stepLimit, overrides, singleRound, compareA, compareB, compareOut,
       deadlineAdapterOnly, outputImages, isReal, crashRecovery, selectedSpec,
       lodLow, nodeTypes: { agent: FlowNode }, edgeTypes: { loop: LoopEdge },
-      slot1Label, slot1Disabled, slot2Disabled, slot3Disabled, slot1Action, pauseRun,
+      slot1Label, slot1Disabled, slot2Disabled, slot3Disabled, slot1Action, pauseRun, nodeBusy,
       runWord, runWordKind, banners, mismatch, mismatchFade, selectedUnknown, selectedWait, writeTimeoutHint, selectedCancelRejected,
       adapterLost, uiLost, operatorLost, runCheck, importErrors, exportOpen, paramMark, mismatchLines,
       rejectedActions, needsReadback, readback, readingState, showLostReadback, resolveMotion,
@@ -1382,7 +1385,7 @@ const App = defineComponent({
       <div class="banner" v-for="b in banners" :key="b.id" :class="b.kind">
         <span>{{ b.text }}</span>
         <span class="spacer"></span>
-        <template v-if="b.actions==='version'"><button @click="rerunNew">{{ t('banner.rerun') }}</button></template>
+        <template v-if="b.actions==='version'"><button :disabled="nodeBusy" :aria-describedby="nodeBusy ? (selectedNode ? 'in-busy' : 'in-busy-group') : null" @click="rerunNew">{{ t('banner.rerun') }}</button></template>
         <template v-if="b.actions==='approval'">
           <button @click="decide('reject')">{{ t('banner.reject') }}</button>
           <button class="primary" @click="decide('approve')">{{ t('banner.approve') }}</button>
@@ -1497,11 +1500,12 @@ const App = defineComponent({
               <label>{{ t('in.override') }}</label>
               <textarea v-model="overrides" placeholder='{"value": 1}'></textarea>
               <div style="display:flex;gap:8px;margin-top:8px">
-                <button class="primary" style="height:32px" @click="runSingle">{{ t('in.run_this') }}</button>
+                <button class="primary" style="height:32px" :disabled="nodeBusy" :aria-describedby="nodeBusy ? 'in-busy' : null" @click="runSingle">{{ t('in.run_this') }}</button>
                 <button style="height:32px" @click="pinShown">{{ t('in.pin') }}</button>
               </div>
-              <button style="margin-top:8px" @click="runFrom">{{ t('in.rerun_from') }}</button>
-              <button v-if="selectedNode.data.nodeType==='tool_call' || selectedNode.data.nodeType==='model_call'" style="margin-top:8px" @click="really">{{ t('in.really') }}</button>
+              <button style="margin-top:8px" :disabled="nodeBusy" :aria-describedby="nodeBusy ? 'in-busy' : null" @click="runFrom">{{ t('in.rerun_from') }}</button>
+              <button v-if="selectedNode.data.nodeType==='tool_call' || selectedNode.data.nodeType==='model_call'" style="margin-top:8px" :disabled="nodeBusy" :aria-describedby="nodeBusy ? 'in-busy' : null" @click="really">{{ t('in.really') }}</button>
+              <p v-if="nodeBusy" id="in-busy" class="in-busy">{{ t('in.busy') }}</p>
               <h3 style="margin-top:16px">{{ t('in.current') }}</h3>
               <div class="kv">{{ JSON.stringify(shownRec && shownRec.inputs || {}, null, 2) }}</div>
             </template>
@@ -1585,8 +1589,9 @@ const App = defineComponent({
             <h3 style="margin-top:16px">{{ t('groups.title') }}</h3>
             <div v-for="g in groups" :key="g.id" style="margin-bottom:8px">
               {{ g.name }} ({{ g.node_ids.length }})
-              <button @click="runGroup(g)">{{ t('groups.run') }}</button>
+              <button :disabled="nodeBusy" :aria-describedby="nodeBusy ? 'in-busy-group' : null" @click="runGroup(g)">{{ t('groups.run') }}</button>
             </div>
+            <p v-if="nodeBusy && groups.length" id="in-busy-group" class="in-busy">{{ t('in.busy') }}</p>
             <p v-if="!groups.length" style="color:var(--muted)">{{ t('groups.empty') }}</p>
           </div>
         </template>
