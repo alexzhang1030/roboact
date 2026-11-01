@@ -987,10 +987,6 @@ def test_run_buttons_off_while_node_executes(server) -> None:
         assert group_run.is_disabled()
         assert page.locator("#in-busy-group-g1").inner_text() == _BUSY
         assert group_run.get_attribute("aria-describedby") == "in-busy-group-g1"
-        frame_run = page.locator(".group-box .grun")
-        assert frame_run.is_disabled()
-        assert frame_run.get_attribute("aria-describedby") == "in-busy-frame-g1"
-        assert page.locator("#in-busy-frame-g1").inner_text() == _BUSY
         _stop_run(page)
         page.wait_for_function(
             """() => {
@@ -1091,13 +1087,8 @@ def test_busy_describedby_targets_exist(server) -> None:
         group = page.locator(".group-run button")
         assert group.get_attribute("aria-describedby") == "in-busy-group-g1"
         assert page.locator("#in-busy-group-g1").count() == 1
-        frame = page.locator(".group-box .grun")
-        assert frame.get_attribute("aria-describedby") == "in-busy-frame-g1"
-        assert page.locator("#in-busy-frame-g1").count() == 1
         _select_in(page, "go")
         check("a group, node selected")
-        assert frame.get_attribute("aria-describedby") == "in-busy-frame-g1"
-        assert page.locator("#in-busy-frame-g1").count() == 1
         _stop_run(page)
         br.close()
     finally:

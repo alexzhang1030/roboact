@@ -502,14 +502,6 @@ const App = defineComponent({
       scheduleSave(true)
     }
 
-    const groupLayerStyle = computed(() => {
-      const v = vf.viewport.value || {}
-      const x = v.x || 0
-      const y = v.y || 0
-      const z = v.zoom || 1
-      return { transform: `translate(${x}px, ${y}px) scale(${z})` }
-    })
-
     const groupBoxes = computed(() => groups.value.map(g => {
       const ns = nodes.value.filter(n => g.node_ids.includes(n.id))
       if (!ns.length) return null
@@ -1299,7 +1291,7 @@ const App = defineComponent({
       adapterLabel, flowNameLabel, nameEditing, topEl, runLocked, runLockedText, slot1Title,
       actionGoneCount, missingInputCount, timeoutCapText, timeoutCapIds, jumpToFirst, onNameClick, startNameEdit, finishNameEdit, fitTopBar,
       nodeRecords, logRecords, rounds, shownRec, viewRound, runActive, waitingApproval, confirmNote, versionWarn, stepsClass, stepsText,
-      filteredTypes, paletteTypes, paletteGroups, paletteStatus, groupBoxes, groupLayerStyle, portSources, stepLimit, overrides, singleRound, compareA, compareB, compareOut,
+      filteredTypes, paletteTypes, paletteGroups, paletteStatus, groupBoxes, portSources, stepLimit, overrides, singleRound, compareA, compareB, compareOut,
       deadlineAdapterOnly, outputImages, isReal, crashRecovery, selectedSpec,
       lodLow, nodeTypes: { agent: FlowNode }, edgeTypes: { loop: LoopEdge },
       slot1Label, slot1Disabled, slot2Disabled, slot3Disabled, slot1Action, pauseRun, nodeBusy,
@@ -1455,15 +1447,8 @@ const App = defineComponent({
                  @move-end="persistViewportNow">
           <MiniMap v-if="showMini" pannable zoomable position="bottom-right" />
         </VueFlow>
-        <div class="group-layer" :style="groupLayerStyle">
-          <div class="group-box" v-for="g in groupBoxes" :key="g.id"
-               :style="{left: g.x+'px', top: g.y+'px', width: g.w+'px', height: g.h+'px'}">
-            <span class="gname">{{ g.name }}</span>
-            <button type="button" class="grun" :disabled="nodeBusy"
-                    :aria-describedby="nodeBusy ? ('in-busy-frame-' + g.id) : null"
-                    @click="runGroup(g)">{{ t('groups.run') }}</button>
-            <p v-if="nodeBusy" class="gbusy in-busy" :id="'in-busy-frame-' + g.id">{{ t('in.busy') }}</p>
-          </div>
+        <div class="group-box" v-for="g in groupBoxes" :key="g.id"
+             :style="{left: g.x+'px', top: g.y+'px', width: g.w+'px', height: g.h+'px', display:'none'}">
         </div>
         <div class="menu" v-if="addMenu" :style="{left: addMenu.x+'px', top: addMenu.y+'px'}">
           <input v-model="addQ" :placeholder="t('search_nodes')" autofocus>
