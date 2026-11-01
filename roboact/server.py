@@ -8,6 +8,7 @@ import json
 import mimetypes
 import os
 import sys
+import time
 from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, unquote, urlparse
@@ -657,6 +658,21 @@ class App:
         if self.test_mode and route == "/api/test/crash-before-t2" and method == "POST":
             self.ex.hooks["crash_before_t2"] = True
             await self._json(writer, 200, {"ok": True})
+            return
+        if self.test_mode and route == "/api/test/ui-seen" and method == "POST":
+            ago = float((data or {}).get("ago_s") or 0)
+            rid = str((data or {}).get("run_id") or "")
+            ctrl = self.ex.runs.get(rid) if rid else None
+            if ctrl is None:
+                for candidate in self.ex.runs.values():
+                    if candidate.status == "running":
+                        ctrl = candidate
+                        break
+            if ctrl is None:
+                raise ApiError(404, "not_found", "no running run")
+            ctrl.saw_ui = True
+            ctrl.last_ui_at = time.monotonic() - ago
+            await self._json(writer, 200, {"ok": True, "ago_s": ago})
             return
         if self.test_mode and route == "/api/test/ui-lost" and method == "POST":
             raw = (data or {}).get("seconds")

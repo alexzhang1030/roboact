@@ -8,7 +8,7 @@ Version 1.5 (2026-10-31). Companion to `prd-en-v1.5.md` section 4. exec-model = 
 2. `pip install`, start the server, open the browser.
 3. Pass: the app works.
 4. Check the repo: no build script; no `.ts` source compiled by any tool outside the browser.
-5. Browser network panel: every request goes to the backend address; none go to the internet.
+5. Browser network panel: every request goes to the backend (127.0.0.1); none go to the internet.
 
 <a id="1.1"></a>
 ## 1.1 Traceable dependencies
@@ -187,9 +187,6 @@ Version 1.5 (2026-10-31). Companion to `prd-en-v1.5.md` section 4. exec-model = 
 ## 19.9 Block other pages (A40)
 1. With `curl`, send: a request with `Host: evil.example`; a command with `Content-Type: text/plain`; a WebSocket handshake from another origin.
 2. Pass: all three rejected; the fake adapter receives no action.
-3. Start the server on its LAN address. From a second computer on the LAN, open the page without the token. Pass: the token screen shows; Run, import and every write return 401; a WebSocket handshake without the token is refused; the fake adapter receives no action.
-4. Enter the token. Pass: the page works as on the server machine.
-5. Send a write and a WebSocket handshake with a wrong or old token. Pass: both refused. Token issue, storage, rotation and TLS checks follow Thompson's LAN auth spec once it is written.
 
 <a id="19.10"></a>
 ## 19.10 Dev toolchain
@@ -197,9 +194,9 @@ Version 1.5 (2026-10-31). Companion to `prd-en-v1.5.md` section 4. exec-model = 
 2. Pyright: strict mode for the `roboact` package, basic mode for tests, no file-wide ignores. Every remaining `# type: ignore` has a one-line reason.
 3. GitHub CI runs the same script. Pass: any failure blocks merge (except 19).
 4. CI linux/aarch64 job (`ubuntu-24.04-arm`) runs `uv sync --frozen` and pytest (Jetson Thor is aarch64).
-5. Check `rclpy` is absent from `pyproject.toml`, including optional groups; it is imported only in adapter modules, from system Python via `--system-site-packages`; type checking ignores its missing import only there.
+5. (Before real robot, not v0.1.) Check `rclpy` is absent from `pyproject.toml`, including optional groups; it is imported only in adapter modules, from system Python via `--system-site-packages`; type checking ignores its missing import only there.
 6. Check Python is 3.12 (Jazzy, Ubuntu 24.04, REP 2000).
-7. Real robot: on aarch64 Ubuntu with ROS 2, a clean checkout passes `uv sync --frozen` and pytest; the adapter can `import rclpy`. No frontend build step.
+7. (Before real robot, not v0.1.) Real robot: on aarch64 Ubuntu with ROS 2, a clean checkout passes `uv sync --frozen` and pytest; the adapter can `import rclpy`. No frontend build step.
 
 <a id="r1-r6"></a>
 ## Pre-real-robot checks (part of R1–R6)
@@ -208,7 +205,7 @@ Version 1.5 (2026-10-31). Companion to `prd-en-v1.5.md` section 4. exec-model = 
 3. Set a non-cancellable `motion` action's `timeout_s` to 11. Pass: Run is blocked and names the node.
 4. Make the adapter refuse the cancel. Pass: node shows `status.cancel_rejected`, runs to end, then pauses.
 5. Confirm "stable" is detectable: blocking actions return only once stable, or `read_state` has a stable field; at least one, with a cited source. Neither: do not connect a real robot.
-6. Press Stop while a cancellable fake `motion` action and a fake gripper action are running. Pass: the adapter is asked to hold, the robot state read back is unchanged from the moment of Stop, the gripper keeps its grip, and nothing moves to a safe pose. Load an adapter with an action that declares `safe_pose`: it is refused and the action is named.
+6. Press Stop while a cancellable fake `motion` action and a fake gripper action are running. Pass: the adapter is asked to hold; after the robot stops, state is read several times at a fixed interval and every change between reads is within the controller's goal tolerance; the gripper keeps its grip; nothing moves to a safe pose. Do not compare with the state at the moment of Stop: a real or MuJoCo JTC decelerates first, so the stop position differs by the braking distance (Tedrake, [JTC docs](https://control.ros.org/jazzy/doc/ros2_controllers/joint_trajectory_controller/doc/userdoc.html)). Press Stop while a fake `finish_step` action is running: it runs to its end, then holds; it never runs past 10 s. Load an adapter with an action that declares `safe_pose`: it is refused and the action is named.
 
 <a id="20"></a>
 ## 20 Flow file import / export

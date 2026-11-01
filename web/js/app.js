@@ -1282,7 +1282,7 @@ const App = defineComponent({
       jumpToFirst, runLocked, runLockedText, actionGoneCount, missingInputCount, timeoutCapText,
       adapterLost, uiLost, operatorLost, rejectedActions, resolveMotion, theme, themeMode, setThemeMode,
       applyTheme, selected, tab, toggleTheme, locale, localeMode, setLocaleMode, motion, motionMode,
-      setMotionMode, t, leftOpen, rightW, showMini, meta, logFilter,
+      setMotionMode, t, leftOpen, rightW, showMini, meta, logFilter, stopBeat,
     }
 
     return {
