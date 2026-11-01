@@ -105,7 +105,7 @@ class RunCtrl:
     not_cancelled: list[str] = field(default_factory=list)
     recovery: dict[str, Any] | None = None
     adapter_lost_flag: bool = False
-    confirm: str | None = None
+    confirm: bool | str | None = None
     done_counts: dict[str, int] = field(default_factory=dict)
     influencing: dict[str, set[str]] | None = None
     hash_cache: dict[str, str] = field(default_factory=dict)
@@ -194,7 +194,7 @@ class Executor:
         parent_run_id: str | None = None,
         base_step: int = 0,
         seed_pending: list[dict] | None = None,
-        confirm: str | None = None,
+        confirm: bool | str | None = None,
         input_source_hint: str | None = None,
         entry_sources: dict | None = None,
         base_rounds: dict | None = None,
@@ -341,7 +341,7 @@ class Executor:
         node_id: str,
         input_spec: dict | None = None,
         side_effects: str = "default",
-        confirm: str | None = None,
+        confirm: bool | str | None = None,
         client_id: str = "",
         request_id: str | None = None,
         max_steps: int | None = None,
@@ -380,11 +380,10 @@ class Executor:
         if node_id not in nodes:
             raise ApiError(400, "invalid_graph", f"node not found: {node_id}")
         node = nodes[node_id]
-        if side_effects == "real" or (
-            known_type(node["type"])
-            and get_type(node["type"]).side_effect == SideEffect.motion
-            and getattr(self.adapter, "target", "sim") == "real"
-        ):
+        motion = (
+            known_type(node["type"]) and get_type(node["type"]).side_effect == SideEffect.motion
+        )
+        if side_effects == "real" or motion:
             self._check_confirm(node, confirm)
         inputs, source = self._resolve_node_input(flow_id, node, input_spec)
         seed = [
@@ -412,7 +411,7 @@ class Executor:
         node_ids: list[str],
         entries: dict | None = None,
         side_effects: str = "default",
-        confirm: str | None = None,
+        confirm: bool | str | None = None,
         client_id: str = "",
         request_id: str | None = None,
         max_steps: int | None = None,
@@ -493,7 +492,7 @@ class Executor:
         parent_id: str,
         step: int,
         side_effects: str = "default",
-        confirm: str | None = None,
+        confirm: bool | str | None = None,
         client_id: str = "",
     ) -> str:
         async with self._admitted():
@@ -699,15 +698,17 @@ class Executor:
             if not types_compatible(src_t, dst_t):
                 raise ApiError(400, "invalid_graph", "edge port types do not match", {"edge": e})
 
-    def _check_confirm(self, node: dict[str, Any], confirm: str | None) -> None:
+    def _motion_confirmed(self, node: dict[str, Any], confirm: bool | str | None) -> bool:
+        """Explicit confirm. Not the displayed sentence, so any locale is accepted."""
+        if confirm is True:
+            return True
+        return isinstance(confirm, str) and confirm.strip() == str(node.get("type") or "")
+
+    def _check_confirm(self, node: dict[str, Any], confirm: bool | str | None) -> None:
         cls = get_type(node["type"])
-        if (
-            cls.side_effect == SideEffect.motion
-            and getattr(self.adapter, "target", "sim") == "real"
-        ):
-            text = cls.confirm_text or "this will run the action on the robot"
-            if confirm != text:
-                raise ApiError(422, "confirm_required", "real motion rerun needs confirmation")
+        if cls.side_effect == SideEffect.motion:
+            if not self._motion_confirmed(node, confirm):
+                raise ApiError(422, "confirm_required", "motion rerun needs confirmation")
             return
         text = cls.confirm_text
         if not text:
@@ -909,11 +910,13 @@ class Executor:
                 return {"status": "stopped"}
             inst = ctrl.current_inst
             desc = getattr(type(inst), "action_desc", None) if inst is not None else None
-            blocking = bool(desc and desc.return_mode == "blocking")
             cancellable = True if desc is None else bool(desc.cancel.cancellable)
-            if inst is not None and desc is not None and blocking and not cancellable:
+            # Non-cancellable is decided from the loaded descriptor, not from
+            # whether this adapter's cancel() agrees to stop.
+            if inst is not None and desc is not None and not cancellable:
                 ctrl.stop_flag = True
                 self._record_not_cancelled(ctrl, ctrl.current_nid)
+                await self.adapter.hold_other_goals(getattr(inst, "_handle", None))
                 return {"status": "stopping"}
             if inst is not None:
                 result = await inst.cancel()
@@ -929,14 +932,19 @@ class Executor:
                             ctrl.steps_used,
                             error_summary="cancel_rejected",
                         )
+                    await self.adapter.hold_other_goals(getattr(inst, "_handle", None))
                     return {"status": "running", "cancel": "rejected"}
+                await self.adapter.hold_other_goals(getattr(inst, "_handle", None))
                 ctrl.stop_flag = True
+                body: dict[str, Any] = {"status": "stopping"}
+                if desc is not None and desc.side_effect == "motion" and desc.read_state:
+                    body["readback"] = await self._read_robot(ctrl, ctrl.current_nid)
                 if desc is None and ctrl.task:
                     ctrl.task.cancel()
                 elif desc is not None and desc.return_mode == "blocking" and ctrl.task:
                     # blocking already returning; loop will see stop_flag
                     pass
-                return {"status": "stopping"}
+                return body
             ctrl.stop_flag = True
             self._finish(ctrl, "stopped")
             if ctrl.task and not ctrl.task.done():

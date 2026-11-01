@@ -38,11 +38,16 @@ class OutputSpec(BaseModel):
     title: str | None = None
 
 
+# Stop holds. `finish_step` is not a pose: ingest treats it as non-cancellable.
+# `safe_pose` is refused at load.
+PostCancel = Literal["hold"]
+
+
 class CancelSpec(BaseModel):
     model_config = ConfigDict(extra="forbid")
     cancellable: bool = True
-    post_cancel: Literal["hold", "safe_pose", "finish_step"] = "hold"
-    after: Literal["hold", "safe_pose", "finish_step"] | None = None
+    post_cancel: PostCancel = "hold"
+    after: PostCancel | None = None
     method: str = ""
 
 
@@ -74,6 +79,7 @@ class ActionDescriptor(BaseModel):
     name: str | None = None
     side_effect_note: str = ""
     confirm_text: str = ""
+    confirm_labels: dict[str, str] = Field(default_factory=dict)
     icon: str = ""
 
 
@@ -94,7 +100,7 @@ class ActionResult(BaseModel):
 class CancelResult(BaseModel):
     accepted: bool
     reason: str = ""
-    post_cancel: Literal["hold", "safe_pose", "finish_step"] = "hold"
+    post_cancel: PostCancel = "hold"
 
 
 class ExecuteHandle:
@@ -103,13 +109,13 @@ class ExecuteHandle:
         action_id: str,
         idem_key: str | None,
         cancellable: bool,
-        post_cancel: Literal["hold", "safe_pose", "finish_step"],
+        post_cancel: PostCancel,
     ) -> None:
         self.id = f"{action_id}:{idem_key or id(self)}"
         self.action_id = action_id
         self.idem_key = idem_key
         self.cancellable = cancellable
-        self.post_cancel: Literal["hold", "safe_pose", "finish_step"] = post_cancel
+        self.post_cancel: PostCancel = post_cancel
         self.cancelled = False
         self.cancelled_by_lost_heartbeat = False
         self.done = False
@@ -435,22 +441,42 @@ class Adapter:
     ) -> ActionResult:
         raise NotImplementedError
 
+    def note_hold(self, handle: ExecuteHandle) -> None:
+        """Accepted cancel holds. Adapters record the state at this instant."""
+        del handle
+
+    async def hold_other_goals(self, except_handle: ExecuteHandle | None = None) -> None:
+        """Hold every other in-flight cancellable goal.
+
+        Non-cancellable goals are left to finish; load time already required
+        that they hold afterwards. The current goal is the caller's.
+        """
+        skip = except_handle.id if except_handle is not None else None
+        for handle in list(self._handles.values()):
+            if skip is not None and handle.id == skip:
+                continue
+            if handle.done or handle.cancelled or not handle.cancellable:
+                continue
+            await self.cancel(handle)
+
     async def cancel(self, handle: ExecuteHandle | None) -> CancelResult:
-        self.cancel_calls.append(
-            {
-                "action_id": handle.action_id if handle else None,
-                "at": time.monotonic(),
-            }
-        )
+        action_id = handle.action_id if handle else None
         if self.reject_next_cancel:
             self.reject_next_cancel = False
+            self.cancel_calls.append({"action_id": action_id, "at": time.monotonic()})
             return CancelResult(accepted=False, reason="cancel rejected")
         if handle is None:
+            self.cancel_calls.append({"action_id": action_id, "at": time.monotonic()})
             return CancelResult(accepted=False, reason="nothing to cancel")
         if self.force_uncancellable or not handle.cancellable:
+            self.cancel_calls.append({"action_id": action_id, "at": time.monotonic()})
             return CancelResult(accepted=False, reason="this action cannot be cancelled")
         handle.cancelled = True
-        return CancelResult(accepted=True, post_cancel=handle.post_cancel)
+        self.note_hold(handle)
+        self.cancel_calls.append(
+            {"action_id": action_id, "at": time.monotonic(), "post_cancel": "hold"}
+        )
+        return CancelResult(accepted=True, post_cancel="hold")
 
     async def read_state(self, action_id: str) -> dict[str, Any]:
         raise NotImplementedError
@@ -609,7 +635,8 @@ FAKE_ACTIONS: list[ActionDescriptor] = [
         read_state=True,
         expiry="controller",
         side_effect_note="moves sim joints to the target",
-        confirm_text="Move the sim end-effector to the target pose.",
+        confirm_text=en("confirm.set_pose"),
+        confirm_labels={"en": en("confirm.set_pose"), "zh-CN": zh("confirm.set_pose")},
         icon="node-tool",
     ),
     ActionDescriptor(
@@ -627,14 +654,13 @@ FAKE_ACTIONS: list[ActionDescriptor] = [
         return_mode="blocking",
         timeout_s=8,
         typical_s=0.2,
-        cancel=CancelSpec(
-            cancellable=True, post_cancel="safe_pose", after="safe_pose", method="cancel_goal"
-        ),
+        cancel=CancelSpec(cancellable=True, post_cancel="hold", after="hold", method="cancel_goal"),
         preconditions=[Precondition(text="gripper not locked")],
         read_state=True,
         expiry="controller",
         side_effect_note="drives the sim gripper",
-        confirm_text="Open or close the sim gripper.",
+        confirm_text=en("confirm.gripper"),
+        confirm_labels={"en": en("confirm.gripper"), "zh-CN": zh("confirm.gripper")},
         icon="node-tool",
     ),
     ActionDescriptor(
@@ -649,7 +675,7 @@ FAKE_ACTIONS: list[ActionDescriptor] = [
         return_mode="blocking",
         timeout_s=5,
         typical_s=0.01,
-        cancel=CancelSpec(cancellable=True, post_cancel="finish_step"),
+        cancel=CancelSpec(cancellable=False, post_cancel="hold"),
         preconditions=[],
         read_state=False,
         expiry="adapter_only",
@@ -707,7 +733,7 @@ FAKE_NOTE_ACTION = ActionDescriptor(
     return_mode="blocking",
     timeout_s=5,
     typical_s=0.01,
-    cancel=CancelSpec(cancellable=True, post_cancel="finish_step"),
+    cancel=CancelSpec(cancellable=False, post_cancel="hold"),
     preconditions=[],
     read_state=False,
     expiry="adapter_only",
@@ -758,9 +784,36 @@ class FakeAdapter(Adapter):
         self.goals_sent: list[dict[str, Any]] = []
         self.goal_sent_at: float | None = None
         self.precondition_poll_s = 0.05
+        self.state_at_hold: dict[str, Any] | None = None
+        # Controller goal tolerance (m). After the brake, hold may drift by at most this.
+        self.goal_tolerance = 1e-4
+        # Coast after cancel (m), before the hold. A real joint-trajectory
+        # controller decelerates, so this is not the pose at the Stop instant.
+        self.brake_distance = 0.02
+        # Where a safe_pose cancel would have gone. Hold must not command it.
+        self.safe_pose_target = {"x": 0.0, "y": 0.0, "z": 0.0}
+
+    def note_hold(self, handle: ExecuteHandle) -> None:
+        # First accepted cancel is the moment Stop took effect.
+        if self.state_at_hold is None:
+            self.state_at_hold = {"pose": dict(self.pose), "open": self.gripper_open}
+        del handle
 
     def precondition_poll_interval(self, desc: ActionDescriptor) -> float:
         return float(self.precondition_poll_s)
+
+    def descriptor(self, action_id: str) -> ActionDescriptor:
+        try:
+            return super().descriptor(action_id)
+        except AttributeError:
+            # extra_raw_actions may still be dicts. The registered node holds the
+            # loaded descriptor. Inline import: nodes imports this module.
+            from .nodes import get_type
+
+            desc = getattr(get_type(action_id), "action_desc", None)
+            if isinstance(desc, ActionDescriptor):
+                return desc
+            raise KeyError(f"unknown action: {action_id}") from None
 
     def list_actions(self) -> list[Any]:
         out: list[Any] = []
@@ -791,6 +844,22 @@ class FakeAdapter(Adapter):
             state["pose"] = dict(self.pose)
         return state
 
+    def _brake_toward(self, goal: dict[str, float]) -> None:
+        """Decelerate along the current command, then the pose holds."""
+        dx = float(goal["x"]) - float(self.pose["x"])
+        dy = float(goal["y"]) - float(self.pose["y"])
+        dz = float(goal["z"]) - float(self.pose["z"])
+        dist = (dx * dx + dy * dy + dz * dz) ** 0.5
+        if dist <= 0:
+            return
+        step = min(float(self.brake_distance), dist)
+        scale = step / dist
+        self.pose = {
+            "x": float(self.pose["x"]) + dx * scale,
+            "y": float(self.pose["y"]) + dy * scale,
+            "z": float(self.pose["z"]) + dz * scale,
+        }
+
     def _note_goal_sent(self, action_id: str, inputs: dict[str, Any], idem_key: str | None) -> None:
         self.goal_sent_at = time.monotonic()
         self.goals_sent.append(
@@ -802,12 +871,16 @@ class FakeAdapter(Adapter):
     ) -> ActionResult:
         self._note_goal_sent(action_id, inputs, handle.idem_key)
         self.calls.append({"action": action_id, "inputs": inputs, "idem_key": handle.idem_key})
+        if handle.cancelled:
+            return ActionResult(success=False, message="cancelled")
         if self.block_s:
             t0 = time.monotonic()
             while time.monotonic() - t0 < self.block_s:
                 if handle.cancelled:
                     return ActionResult(success=False, message="cancelled")
                 await asyncio.sleep(0.02)
+        if handle.cancelled:
+            return ActionResult(success=False, message="cancelled")
         if action_id == "fake_note":
             return ActionResult(success=True, outputs={"ok": True})
         if action_id == "fake_read_pose":
@@ -838,37 +911,61 @@ class FakeAdapter(Adapter):
         if action_id != "fake_set_pose":
             raise KeyError(action_id)
         pose = _as_pose(inputs)
+        start_pose = {
+            "x": float(self.pose.get("x") or 0),
+            "y": float(self.pose.get("y") or 0),
+            "z": float(self.pose.get("z") or 0),
+        }
+
+        def _lerp(frac: float) -> None:
+            if handle.cancelled:
+                return
+            clamped = min(1.0, max(0.0, frac))
+            self.pose = {
+                "x": start_pose["x"] + (pose["x"] - start_pose["x"]) * clamped,
+                "y": start_pose["y"] + (pose["y"] - start_pose["y"]) * clamped,
+                "z": start_pose["z"] + (pose["z"] - start_pose["z"]) * clamped,
+            }
+
+        def _cancelled() -> None:
+            self._brake_toward(pose)
+            handle.result = ActionResult(success=False, message="cancelled")
+            handle.done = True
 
         async def job() -> None:
             try:
                 step_s = float(getattr(self, "async_sleep_s", 0.04) or 0.04)
-                for i in range(self.async_steps):
+                steps = self.async_steps
+                for i in range(steps):
                     if handle.cancelled:
-                        handle.result = ActionResult(success=False, message="cancelled")
-                        handle.done = True
+                        _cancelled()
                         return
                     if handle.deadline is not None and time.time() >= handle.deadline:
                         handle.result = ActionResult(success=False, message="timeout")
                         handle.done = True
                         return
                     handle.progress = Progress(
-                        percent=round((i + 1) / self.async_steps * 100),
+                        percent=round((i + 1) / steps * 100),
                         text="adapter.pose_progress",
-                        params={"i": i + 1, "n": self.async_steps},
+                        params={"i": i + 1, "n": steps},
                     )
                     slept = 0.0
                     while slept < step_s:
                         if handle.cancelled:
-                            handle.result = ActionResult(success=False, message="cancelled")
-                            handle.done = True
+                            _cancelled()
                             return
                         if handle.deadline is not None and time.time() >= handle.deadline:
                             handle.result = ActionResult(success=False, message="timeout")
                             handle.done = True
                             return
+                        if step_s > 0 and steps:
+                            _lerp((i + slept / step_s) / steps)
                         chunk = min(0.05, step_s - slept)
                         await asyncio.sleep(chunk)
                         slept += chunk
+                if handle.cancelled:
+                    _cancelled()
+                    return
                 handle.result = self._commit_write(
                     handle.idem_key, {"kind": "pose", **pose}, {"pose": pose}
                 )
