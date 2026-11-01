@@ -195,6 +195,7 @@ Measured with HarfBuzz, `InterVariable.woff2`, weight 400, current `en.js`.
 1. The title row has about 188px. Show icon + one word (`status.interrupted`, `status.waiting`, `status.running`). The qualifier goes to the 216px summary row (`status.summary.result_unknown`, `status.summary.waiting_precondition`). Both languages follow this. At 12px, `status.interrupted_unknown` ("Interrupted · result unknown") is 160px and `status.running_wait` ("Running · waiting for precondition") is 191px.
 2. The top bar must fit on one line at 1280px. The longest string is `run.word.paused_storage` ("Paused · could not write the run record"), 239px at 13px. Never push out connection, language or theme; collapse the adapter name, then the version.
 3. Buttons size to their text. The right panel wraps.
+4. Done states: the title row shows `status.done` ("Done") only. The duration goes to the summary row as `status.summary.took` ("Took {s} s" / "Took {ms} ms", mono). Reason: at 240px, type icon + `mark-write` + "Go to pose" + "Done · 0.4 s" truncates the name, and the motion mark must never be dropped to make room. `status.done_mock` stays in the title row (it says what happened, not how long).
 
 ## 17. Flow import / export (UI)
 
@@ -270,4 +271,6 @@ lost.ran_to_end: "Page disconnected. {node} can't be cancelled; it ran {s} s mor
 lost.cancel_rejected: "Page disconnected. The robot refused to cancel {node}; it ran to end, then the run paused."
 run.no_cancel_too_long: "{node} can't be cancelled and may run {s} s. The limit is 10 s."
 run.no_cancel_too_long_count: "{n} nodes can't be cancelled and run too long"
+status.summary.took: "Took {s} s"
+status.summary.took_ms: "Took {ms} ms"
 ```
