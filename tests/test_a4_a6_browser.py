@@ -1031,8 +1031,7 @@ def _show_version_banner(page) -> None:
     )
     page.wait_for_function(
         """() => [...document.querySelectorAll('button')].some(
-          b => (b.textContent || '').includes('Rerun from the new version')
-            || (b.textContent || '').includes('从新版本重跑')
+          (b) => (b.textContent || '').includes('Rerun from the new version')
         )"""
     )
 
