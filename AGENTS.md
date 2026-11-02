@@ -5,6 +5,7 @@
 These bind every session. They stay **outside** the PCR markers.
 
 - After the first GitHub push of `main`, every further change is a branch + pull request. Do not merge. Do not force-push.
+- A commit pushed to GitHub has author `alexzhang1030 <mail4alexzzz@gmail.com>`. Set `GIT_AUTHOR_NAME`, `GIT_AUTHOR_EMAIL`, and the matching committer variables before `git commit`. Do not push a commit authored as the machine user.
 - Alex verifies the UI. A screenshot or a passing Playwright run is evidence, not a substitute for his look.
 - Bind is `127.0.0.1` only. There is no `--host` flag. Remote use is SSH port forwarding (`ssh -L 17465:127.0.0.1:17465 <controller>`). Do not add a LAN bind.
 - Authentication is deferred (A39, Alex 2026-10-31). Do not add access tokens, login, or a token-gate screen. Do not add r-token catalog keys. Ignore exec-model token rules and PRD token rows until he reopens it.
