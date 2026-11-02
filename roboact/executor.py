@@ -1354,8 +1354,13 @@ class Executor:
                     await self._pause(ctrl, "user", nn, "before", None, 0)
         except asyncio.CancelledError:
             self._on_cancel(ctrl)
-        except ApiError:
-            raise
+        except ApiError as err:
+            # The loop is a background task. Leaving this uncaught keeps the
+            # run in `running` and blocks every later start of the flow.
+            ctrl.error = {"type": err.error, "message": err.error}
+            if err.detail:
+                ctrl.error["detail"] = err.detail
+            self._finish(ctrl, "error")
         except Exception as e:
             ctrl.error = {"type": type(e).__name__, "message": str(e)}
             self._finish(ctrl, "error")
@@ -1375,7 +1380,7 @@ class Executor:
         retry_of = ctrl.retry_of.pop(nid, None)
         idem = ctrl.retry_keys.pop(nid, None) or f"{ctrl.run_id}:{step}"
         mode = "real"
-        cached = None
+        cached: dict | None = None
         if ctrl.kind != "full" and side == "write" and ctrl.side_effects != "real":
             mode = "mock"
         elif ctrl.kind != "full" and side == "read" and ctrl.side_effects != "real":
@@ -1386,8 +1391,8 @@ class Executor:
         if ctrl.edits and ctrl.edits.get("used"):
             source = "manual"
         nmap = node_map(ctrl.flow)
-        cached = ctrl.influencing
-        inf = None if cached is None else cached.get(nid)
+        inf_map = ctrl.influencing
+        inf = None if inf_map is None else inf_map.get(nid)
         if inf is None:
             inf = influencing_map(ctrl.flow).get(nid, set())
         fps = {}
@@ -2214,6 +2219,13 @@ class Executor:
             keep = reason == "operator_lost" and ctrl.operator_lost_keep_node
             if not keep and cur != "cancel_rejected":
                 self._set_node(ctrl, node_id, state, rnd, ctrl.steps_used)
+        if reason == "operator_lost":
+            # The pause body already has this disconnect's outcome.
+            # The next gap must not repeat it.
+            ctrl.operator_lost_outcome = None
+            ctrl.operator_lost_extra_s = None
+            ctrl.operator_lost_keep_node = False
+            ctrl.operator_lost_cancel_rejected = False
         self.store.update_run(ctrl.run_id, status="paused", pause=ctrl.pause)
         payload = {
             **ctrl.pause,

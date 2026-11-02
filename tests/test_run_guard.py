@@ -574,3 +574,75 @@ def test_resume_refused_while_another_run_is_executing(tmp_path):
         await hub.stop()
 
     asyncio.run(go())
+
+
+def test_cached_read_keeps_the_pose(tmp_path):
+    """A second single-node read stores the cached pose, not the influencing map."""
+
+    async def go():
+        ex, store, adapter, hub = adapter_ctx(tmp_path)
+        adapter.pose = {"x": 0.2, "y": -0.3, "z": 0.4}
+        flow = make_flow(
+            [n("s", "start", data={}), n("r", "fake_read_pose"), n("out", "end")],
+            [e("e1", "r", "pose", "out", "value")],
+        )
+        fid, ver = boot(store, flow)
+        spec = {"kind": "manual", "value": {}}
+        pose = {"pose": {"x": 0.2, "y": -0.3, "z": 0.4}}
+        first = await ex.start_node(fid, ver, "r", input_spec=spec)
+        st = await wait_status(ex, first, "completed", "error")
+        assert st.status == "completed", st.error
+        assert store.list_steps(first)[0]["output"] == pose
+        assert len(adapter.calls) == 1
+        second = await ex.start_node(fid, ver, "r", input_spec=spec)
+        st = await wait_status(ex, second, "completed", "error")
+        assert st.status == "completed", st.error
+        step = store.list_steps(second)[0]
+        assert step["side_effect_mode"] == "cache"
+        assert step["output"] == pose
+        assert len(adapter.calls) == 1
+        await hub.stop()
+
+    asyncio.run(go())
+
+
+def test_live_limit_error_finishes_the_run(tmp_path):
+    """A linked value outside the robot limits ends the run instead of leaving it running."""
+
+    async def go():
+        ex, store, _adapter, hub = adapter_ctx(tmp_path)
+        flow = make_flow(
+            [
+                n("s", "start", data={}),
+                n("c", "constant", value="9", value_type="number"),
+                n("m", "fake_set_pose"),
+                n("out", "end"),
+            ],
+            [
+                e("es", "s", "data", "m", "target"),
+                e("e0", "c", "value", "m", "x"),
+                e("e1", "m", "pose", "out", "value"),
+            ],
+        )
+        fid, ver = boot(store, flow)
+        rid = await ex.start_full(fid, ver)
+        deadline = time.monotonic() + 2
+        st = ex.get(rid)
+        while time.monotonic() < deadline:
+            st = ex.get(rid)
+            if st and st.task and st.task.done():
+                break
+            await asyncio.sleep(0.01)
+        assert st is not None and st.task is not None and st.task.done()
+        assert st.task.exception() is None
+        assert st.status == "error"
+        assert st.error is not None
+        assert st.error["type"] == "param_out_of_limit"
+        assert st.error["message"] == "param_out_of_limit"
+        assert st.error["detail"]["errors"][0]["param"] == "x"
+        assert store.get_run(rid)["status"] == "error"
+        again = await ex.start_full(fid, ver)
+        assert again != rid
+        await hub.stop()
+
+    asyncio.run(go())
