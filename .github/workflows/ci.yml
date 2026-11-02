@@ -39,28 +39,23 @@ jobs:
           fi
           mv /tmp/vf-css.bak "$f"
           python3 scripts/check_manifest.py
-      - name: Install
-        run: uv sync --locked
-      - name: Install Chromium for Playwright
-        run: uv run python -m playwright install --with-deps chromium
-      - name: Ruff
-        run: uv run ruff check
-      - name: Ruff format
-        run: uv run ruff format --check
-      - name: Pyright
-        run: uv run pyright
-      - name: Pytest
-        env:
-          ROBOACT_TEST: "1"
-        run: uv run pytest -q --tb=short
-      - name: Private IPv4 scan (git ls-files only)
-        run: python3 scripts/check_private_ip.py
-      - name: Gitleaks
+      - name: Install gitleaks
         run: |
-          curl -sSfL https://github.com/gitleaks/gitleaks/releases/download/v8.24.3/gitleaks_8.24.3_linux_x64.tar.gz | tar -xz -C /tmp gitleaks
-          /tmp/gitleaks detect --source . --no-banner --redact --exit-code 1
+          set -euo pipefail
+          mkdir -p "$HOME/.local/bin"
+          curl -sSfL https://github.com/gitleaks/gitleaks/releases/download/v8.24.3/gitleaks_8.24.3_linux_x64.tar.gz | tar -xz -C "$HOME/.local/bin" gitleaks
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+      - name: Install Chromium for Playwright
+        run: |
+          set -euo pipefail
+          uv sync --locked
+          uv run python -m playwright install --with-deps chromium
+          uv run python -c "from playwright.sync_api import sync_playwright; p=sync_playwright().start(); b=p.chromium.launch(args=['--no-sandbox']); b.close(); p.stop()"
+      - name: Check
+        run: bash scripts/check.sh
 
   test-aarch64:
+    # Browser tests run here too: Chromium is installed, and a missing browser fails pytest.
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 40
     steps:
@@ -84,6 +79,13 @@ jobs:
           "$OFF/bin/python" -c "import ruamel.yaml; print(ruamel.yaml.__version__)"
       - name: Install (frozen, aarch64 wheels)
         run: uv sync --frozen
+      - name: Install Chromium for Playwright
+        run: |
+          set -euo pipefail
+          if ! uv run python -m playwright install --with-deps chromium; then
+            uv run python -m playwright install chromium
+          fi
+          uv run python -c "from playwright.sync_api import sync_playwright; p=sync_playwright().start(); b=p.chromium.launch(args=['--no-sandbox']); b.close(); p.stop()"
       - name: Pytest
         env:
           ROBOACT_TEST: "1"

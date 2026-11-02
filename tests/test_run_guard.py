@@ -503,6 +503,7 @@ def test_resume_refused_while_another_run_is_executing(tmp_path):
         fid, ver = boot(store, graph)
         paused_id = await ex.start_full(fid, ver)
         paused = await wait_status(ex, paused_id, "paused")
+        assert paused.pause is not None
         assert paused.pause["reason"] == "breakpoint"
         pause_id = paused.pause["pause_id"]
         pause_before = dict(paused.pause)
