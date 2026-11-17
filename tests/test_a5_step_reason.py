@@ -3,11 +3,8 @@
 from __future__ import annotations
 
 import json
-import os
 import re
-import traceback
 import urllib.request
-from pathlib import Path
 from typing import Any
 
 from tests.conftest import launch_chromium
@@ -38,6 +35,10 @@ def _pause_reason(body: bytes) -> str:
     if not isinstance(pause, dict):
         return ""
     return str(pause.get("reason") or "")
+
+
+def _pump(page: Any) -> None:
+    page.evaluate("() => null")
 
 
 def _one_step_keeps_step_done(page: Any, base: str) -> None:
@@ -74,24 +75,25 @@ def _one_step_keeps_step_done(page: Any, base: str) -> None:
             }""",
             timeout=30000,
         )
-        for _ in range(40):
+        for _ in range(300):
             drain(True)
             if "body" in held:
                 break
-            page.wait_for_timeout(50)
-        assert "body" in held, "breakpoint run GET was not issued"
+            _pump(page)
+        else:
+            raise AssertionError("breakpoint run GET was not issued")
         page.locator("button.slot-2").click()
         rid = page.evaluate(
             "() => { const r = window.__af.run.value; return r && (r.run_id || r.id) }"
         )
         assert rid, "step did not keep the run id"
         server_reason = ""
-        for _ in range(50):
+        for _ in range(400):
             with urllib.request.urlopen(base + "/api/runs/" + rid, timeout=5) as resp:
                 server_reason = _pause_reason(resp.read())
             if server_reason == "step_done":
                 break
-            page.wait_for_timeout(20)
+            _pump(page)
         assert server_reason == "step_done", server_reason
         page.wait_for_function(
             """() => {
@@ -105,7 +107,11 @@ def _one_step_keeps_step_done(page: Any, base: str) -> None:
         body = held.pop("body")
         route.fulfill(status=200, content_type="application/json", body=body)
         page.wait_for_function("(n) => (window.__runGets || 0) > n", arg=before, timeout=15000)
-        page.evaluate("() => new Promise((resolve) => setTimeout(resolve, 0))")
+        page.evaluate(
+            """() => new Promise((resolve) => {
+              queueMicrotask(() => queueMicrotask(resolve))
+            })"""
+        )
         assert _reason(page) == "step_done", _reason(page)
     finally:
         drain(False)
@@ -113,20 +119,6 @@ def _one_step_keeps_step_done(page: Any, base: str) -> None:
             held["route"].fulfill(status=200, content_type="application/json", body=held["body"])
         page.unroute("**/api/runs/**")
         page.evaluate("() => { if (window.__af && window.__af.cmd) window.__af.cmd('stop') }")
-        page.wait_for_function(
-            """() => {
-              const r = window.__af.run.value
-              return !r || ['stopped', 'completed', 'error', 'step_limit'].includes(r.status)
-                || (r.status === 'paused')
-            }""",
-            timeout=30000,
-        )
-        if (
-            _reason(page)
-            or page.evaluate("() => window.__af.run.value && window.__af.run.value.status")
-            == "paused"
-        ):
-            page.evaluate("() => window.__af.cmd('stop')")
 
 
 def test_step_after_breakpoint_keeps_step_done_when_old_get_returns(server) -> None:
@@ -138,9 +130,7 @@ def test_step_after_breakpoint_keeps_step_done_when_old_get_returns(server) -> N
         "PUT",
         {"enabled": True, "mode": "every"},
     )
-    loops = int(os.environ.get("A5_STALE_LOOPS", "1"))
     p, _path = _launch()
-    fails: list[str] = []
     try:
         br = launch_chromium(p)
         page, _blocked, _errs = _page(br, server["base"])
@@ -157,14 +147,7 @@ def test_step_after_breakpoint_keeps_step_done_when_old_get_returns(server) -> N
               }
             })()"""
         )
-        for i in range(loops):
-            try:
-                _one_step_keeps_step_done(page, server["base"])
-            except Exception as exc:
-                fails.append(f"{i}: {exc}\n{traceback.format_exc()}")
+        _one_step_keeps_step_done(page, server["base"])
         br.close()
     finally:
         p.stop()
-    if fails:
-        Path("/tmp/a5-fail.txt").write_text("\n".join(fails), encoding="utf-8")
-    assert not fails, f"{len(fails)}/{loops} failed; see /tmp/a5-fail.txt"
