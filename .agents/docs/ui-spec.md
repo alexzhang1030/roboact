@@ -62,7 +62,7 @@ Icon + word + border; icons alone must separate states in greyscale. Each `statu
 - Blue: `status.running` (only spinner).
 - Amber, emphasis: `status.paused_before`, `status.paused_after`, `status.paused` (after restart), `status.interrupted_unknown` (`state-unknown`), `status.awaiting`.
 - Red, emphasis: `status.error` plus summary.
-- 1px red dashed, no fill: `status.action_missing` (`state-unknown`).
+- 1px red dashed, no fill: `status.action_missing` (`state-unknown`), word in `--red`. The title row keeps the type icon; with the action gone, use `node-tool`.
 - 1px red dashed, no fill: `status.blocked` (`state-unknown`), for a node a pre-run check refused (§17). Never `status.error`: error means the node ran and failed; blocked means nothing ran. The reason goes in the summary row.
 - 1px amber dashed, no fill: `status.missing_input` (`state-unknown`), same treatment as action missing but amber.
 
@@ -73,9 +73,9 @@ Rules:
 - Timeout: normal node is error with `error.timeout_s`; `write` node is unknown with `error.timeout_write`.
 - Running detail, no progress bar: `status.running_pct`, `status.running_feedback`, `status.running_s`.
 - Precondition wait: `status.running_wait`, blue; log `rec.waited`. Stop gives stopped; limit gives error `error.precondition_failed`; pause or disconnect requeues and restarts the wait at zero.
-- Cancel rejected: still running, `status.cancel_rejected` amber; top bar adds `run.stop_rejected_note`. Retry = Stop again.
+- Cancel rejected: still running. The title row shows the spinner and `status.running`, in amber; the summary row shows `status.summary.cancel_rejected`, amber. The two-word `status.cancel_rejected` doesn't go in the title row: at 240px it cuts "Go to pose" to "Go …", and the user can't tell which node is still moving. The top bar adds `run.word.stop_rejected` and `run.stop_rejected_note`. Retry = Stop again.
 - Page disconnected > 10 s (PRD 14): on return the top bar shows `run.word.paused_operator_lost`, and a 12px line under the controls says what happened to the node that was running: `lost.cancelled` (cancelled), `lost.ran_to_end` (non-cancellable, ran to end, with seconds moved after the cut), or `lost.cancel_rejected` (refused, ran to end). That node keeps its own status (`status.stopped` or `status.done_*`); the robot state read back after cancel shows in its panel. The line stays until Continue or Stop.
-- Non-cancellable action (`cancel` says not cancellable): 12px `--muted` word `node.no_cancel` after the title, on the node and its palette row. Text only, no icon, no colour. If the title row is short of room, the title truncates with an ellipsis; the word stays.
+- Non-cancellable action (`cancel` says not cancellable): 12px `--muted` word `node.no_cancel` after the title, on the node and its palette row. Text only, no icon, no colour. While the node is idle or queued the word sits after the title. Once the node has any other status, the word moves to the end of the summary row (`Took 3.0 s · Can't cancel`), so the title keeps its room. If the title row is still short of room, the title truncates with an ellipsis.
 - Action missing: panel `error.action_missing`. Run is blocked while any exists; `run.action_missing_count` next to Run jumps to the first. Cleared only by replacing the action or deleting the node.
 - Missing input: a required value is empty (e.g. a secret param imported as `null`). Run is blocked until filled; `run.missing_input_count` sits next to Run beside the action-missing count.
 
@@ -212,7 +212,7 @@ Measured with HarfBuzz, `InterVariable.woff2`, weight 400, current `en.js`.
 - A non-cancellable `motion` action with `timeout_s` > 10 s blocks Run, checked before every run (PRD, Run blocked rule). The node gets `status.blocked` (§3) with `status.summary.no_cancel_too_long` in the summary row, and the panel shows `run.no_cancel_too_long`; the count sits next to Run with the other counts and jumps to the first node.
 - Start and End, checked before every full run, not for a run of selected nodes (PRD). The reason goes in the same line next to Run, red, one at a time: `run.need_one_start` ("This flow needs exactly one Start. Found {n}."), `run.need_one_end` ("This flow needs exactly one End. Found {n}."), `run.end_unreachable` ("End can't be reached from Start."). For two or more, all of them get `status.blocked` (§3), with `status.summary.extra_start` or `status.summary.extra_end` in the summary row; for unreachable, only End does, with `status.summary.end_unreachable`. The title row never shows `status.error` for these. Clicking the line jumps to the first marked node; with none found, it does nothing. A flow that fails this can still be saved, exported and imported.
 - When pre-run marks show and clear (this and the line above): they appear only after Run or F5 is pressed and refused, never while the user is still editing. While they show, the check reruns on every edit; a node's mark and the line next to Run go away as soon as that check passes, or when the node is deleted. Starting a run, opening or importing another flow, or reloading clears them too.
-- Import: a node with `kind: output` rejects the whole file with `flow.output_renamed` ("{path}: `output` is now `end`."), in the same list as the other import errors.
+- Import: a node with `kind: output` rejects the whole file with `flow.output_renamed`, in the same list as the other import errors. Each error line is body text (13px, UI font); only {path}, {id}, {old} and {new} are set in `<code>` (mono). No backticks appear on screen.
 - File format and versioning are defined elsewhere.
 
 ## 18. Forbidden
@@ -329,12 +329,14 @@ run.no_cancel_too_long_count: "{n} nodes can't be cancelled and run too long"
 run.need_one_start: "This flow needs exactly one Start. Found {n}."
 run.need_one_end: "This flow needs exactly one End. Found {n}."
 run.end_unreachable: "End can't be reached from Start."
+status.summary.cancel_rejected: "Cancel rejected. Still moving."
 status.blocked: "Can't run"
+status.action_missing: "Action gone"
 status.summary.extra_start: "{n} Starts. Keep one."
 status.summary.extra_end: "{n} Ends. Keep one."
 status.summary.end_unreachable: "Not reachable from Start"
 status.summary.no_cancel_too_long: "Can't cancel. Runs up to {s} s."
-flow.output_renamed: "{path}: `output` is now `end`."
+flow.output_renamed: "{path}: {old} is now {new}." ({old} = output, {new} = end)
 node.end: "End"
 auth.title: "Sign in"
 auth.help: "The server prints a sign-in link in its terminal each time it starts. Open that link, or paste the token from it."

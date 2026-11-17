@@ -59,7 +59,10 @@ export default markRaw(defineComponent({
     })
     const kind = computed(() => KIND[st.value.status] || st.value.status || 'idle')
     const icon = computed(() => ICONS[st.value.status] || 'state-idle')
-    const typeIcon = computed(() => (spec.value && spec.value.icon) || '')
+    const typeIcon = computed(() => {
+      if (kind.value === 'missing') return 'node-tool'
+      return (spec.value && spec.value.icon) || ''
+    })
     const title = computed(() => {
       const custom = props.data && props.data.title
       if (custom) return custom
@@ -193,10 +196,9 @@ export default markRaw(defineComponent({
     <div class="fn-title">
       <span v-if="typeIcon" class="fn-type-ico" :style="{ '--ico': icoUrl(typeIcon) }"></span>
       <span v-if="write" class="fn-side" :style="{ '--ico': icoUrl('mark-write') }" :title="sideTitle"></span>
-      <span class="fn-name" :class="{ full: isActionMissing }">{{ title }}</span>
+      <span class="fn-name">{{ title }}</span>
       <span v-if="noCancel" class="fn-no-cancel" data-testid="node-no-cancel">{{ t('node.no_cancel') }}</span>
-      <span v-if="isActionMissing" class="fn-gone-x" aria-hidden="true">×</span>
-      <span class="fn-st" v-else>
+      <span class="fn-st">
         <span class="ico" :data-kind="kind" :style="{ '--ico': icoUrl(icon) }"></span>
         <span class="fn-st-word">{{ word }}</span>
       </span>
