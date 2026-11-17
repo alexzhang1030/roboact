@@ -10,7 +10,7 @@ import pytest
 from roboact.adapter import CancelSpec, FakeAdapter
 from roboact.nodes import bind_adapter
 
-from tests.helpers import adapter_ctx, recs, run_until, wait_status
+from tests.helpers import adapter_ctx, cont, recs, run_until, wait_status
 from tests.http_api import http_json, motion_graph, put_flow
 from tests.test_a23_a37 import pose_flow
 
@@ -127,6 +127,47 @@ def test_lost_outcome_cancel_rejected(tmp_path) -> None:
         assert adapter.cancel_calls
         go_recs = [r for r in recs(store, rid) if r["node_id"] == "go"]
         assert go_recs[-1]["status"] == "done"
+        await hub.stop()
+
+    asyncio.run(go())
+
+
+def test_lost_outcome_does_not_stick_to_the_next_gap(tmp_path) -> None:
+    """A later between-node disconnect must not repeat the previous outcome."""
+
+    async def go() -> None:
+        adapter = FakeAdapter()
+        adapter.async_steps = 1
+        adapter.async_sleep_s = 2.0
+        bind_adapter(adapter)
+        ex, _store, _adapter, hub = adapter_ctx(tmp_path, adapter)
+        ex.ui_lost_s = 0.2
+        rid, _ = await run_until(ex, _store, pose_flow(), "running", timeout=2)
+        ex.note_ui(rid)
+        st = await wait_status(ex, rid, "paused", timeout=4)
+        first = st.pause
+        assert first is not None
+        assert first["reason"] == "operator_lost"
+        assert first["lost_outcome"] == "cancelled"
+        await cont(ex, rid)
+        second = None
+        t0 = asyncio.get_event_loop().time()
+        while asyncio.get_event_loop().time() - t0 < 4:
+            cur = ex.get(rid)
+            pause = cur.pause if cur else None
+            if (
+                cur
+                and cur.status == "paused"
+                and pause
+                and pause.get("pause_id") != first["pause_id"]
+            ):
+                second = pause
+                break
+            await asyncio.sleep(0.01)
+        assert second is not None
+        assert second["reason"] == "operator_lost"
+        assert "lost_outcome" not in second
+        assert "lost_extra_s" not in second
         await hub.stop()
 
     asyncio.run(go())
