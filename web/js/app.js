@@ -754,6 +754,18 @@ const App = defineComponent({
       return { ...r, id: r.run_id || r.id, run_id: r.run_id || r.id }
     }
 
+    function takeRun(next) {
+      const incoming = normalizeRun(next)
+      if (!incoming) return
+      const live = run.value
+      const same = live && (live.run_id || live.id) === (incoming.run_id || incoming.id)
+      const liveMs = Number(live && live.paused_at_ms || 0)
+      const nextMs = Number(incoming.paused_at_ms || 0)
+      if (same && live && live.status === 'paused' && incoming.status !== 'paused') return
+      if (same && live && live.status === 'paused' && liveMs && nextMs && nextMs < liveMs) return
+      run.value = incoming
+    }
+
     function applyNodesEvent(ev) {
       const map = {}
       const list = Array.isArray(ev.nodes) ? ev.nodes : Object.entries(ev.nodes || {}).map(([id, st]) => ({ node_id: id, ...st }))
@@ -856,11 +868,28 @@ const App = defineComponent({
       es.onopen = () => { conn.value = 'ok' }
     }
 
+    function pauseStamp() {
+      const r = run.value
+      if (!r) return ''
+      const p = r.pause || null
+      return [
+        r.status || '',
+        r.run_id || r.id || '',
+        p ? (p.pause_id || '') : '',
+        p ? (p.reason || '') : '',
+      ].join('\n')
+    }
+
     async function refreshRecords(runId) {
+      // Captured before the GET. A step can move the pause while this
+      // response is still in flight; applying that older body would put the
+      // breakpoint pause back on screen.
+      const stamp = pauseStamp()
       try {
         const r = await get('/api/runs/' + runId)
+        if (pauseStamp() !== stamp) return
         records.value = r.records || []
-        if (r.run) run.value = { ...run.value, ...r.run }
+        if (r.run) takeRun(r.run)
         rebuildSources()
       } catch (_) {}
     }
@@ -932,7 +961,7 @@ const App = defineComponent({
         resetStatus()
         const rid = r.run_id || (r.run && (r.run.run_id || r.run.id))
         const snap = r.run || await get('/api/runs/' + rid)
-        run.value = normalizeRun(snap)
+        takeRun(snap)
         applyNodeStates(snap.nodes || snap.node_status)
         applyPauseReason(snap.pause)
         records.value = []
@@ -957,8 +986,10 @@ const App = defineComponent({
         const r = await send('/api/runs/' + rid + '/' + action, 'POST', {
           pause_id, client_id: CLIENT_ID, ...(body || {}),
         })
-        if (r.run) run.value = normalizeRun(r.run)
-        else if (r.status) run.value = { ...run.value, status: r.status }
+        if (r.run) takeRun(r.run)
+        else if (r.status && !(run.value && run.value.status === 'paused' && r.status === 'running')) {
+          run.value = { ...run.value, status: r.status }
+        }
         if (action === 'continue' || action === 'approve') storageErr.value = ''
       } catch (e) {
         if (e.code === 'pause_mismatch') showMismatch()
