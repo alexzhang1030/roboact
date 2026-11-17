@@ -70,12 +70,24 @@ def chrome_path() -> str | None:
     return None
 
 
-def launch_chromium(playwright_obj: Any, path: str | None = None) -> Any:
-    """Launch Chromium, or skip when no browser is installed.
+def missing_browser(msg: str) -> None:
+    """Outside CI a missing browser skips. In CI it fails the job."""
+    if os.environ.get("CI"):
+        pytest.fail("Playwright is required in CI: " + msg)
+    pytest.skip("playwright/chromium not available: " + msg)
 
-    The aarch64 CI job is `uv sync --frozen` + pytest (wheel check). It does
-    not install Playwright's browser. Missing Chromium is not a wheel miss.
-    """
+
+def import_playwright() -> Any:
+    try:
+        import playwright.sync_api as pw
+    except ImportError as e:
+        missing_browser(str(e))
+        raise
+    return pw
+
+
+def launch_chromium(playwright_obj: Any, path: str | None = None) -> Any:
+    """Launch Chromium. CI must have the browser; a missing one fails the job."""
     exe = path or chrome_path()
     kwargs: dict[str, Any] = {"args": ["--no-sandbox"]}
     if exe:
@@ -83,7 +95,8 @@ def launch_chromium(playwright_obj: Any, path: str | None = None) -> Any:
     try:
         return playwright_obj.chromium.launch(**kwargs)
     except Exception as e:
-        pytest.skip("playwright/chromium not available: " + str(e))
+        missing_browser(str(e))
+        raise
 
 
 def free_port() -> int:

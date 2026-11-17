@@ -6,12 +6,11 @@ import itertools
 import time
 from pathlib import Path
 
-import pytest
 from roboact import A5_MAX_MS, A5_P95_MS
 from roboact.adapter import FAKE_ACTIONS
 from roboact.catalog import zh
 
-from tests.conftest import launch_chromium
+from tests.conftest import import_playwright, launch_chromium
 from tests.http_api import (
     SSE_WRAP,
     echo_chain_graph,
@@ -26,7 +25,7 @@ from tests.test_ui import _launch, _page
 
 _ZH = _catalog(Path(__file__).resolve().parents[1] / "web" / "i18n" / "zh-CN.js")
 
-pw = pytest.importorskip("playwright.sync_api")
+pw = import_playwright()
 
 
 def _browser(p):

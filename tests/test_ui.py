@@ -7,12 +7,16 @@ import struct
 import urllib.parse
 import zlib
 
-import pytest
-
-from tests.conftest import chrome_path, emit_prd19_ci_past_capture, launch_chromium
+from tests.conftest import (
+    chrome_path,
+    emit_prd19_ci_past_capture,
+    import_playwright,
+    launch_chromium,
+    missing_browser,
+)
 from tests.prd19 import p95_frames, within_prd19_limit
 
-pw = pytest.importorskip("playwright.sync_api")
+pw = import_playwright()
 
 
 def _launch():
@@ -24,7 +28,8 @@ def _launch():
         p = pw.sync_playwright().start()
         return p, path
     except Exception as e:
-        pytest.skip("playwright/chromium not available: " + str(e))
+        missing_browser(str(e))
+        raise
 
 
 def _page(browser, base):

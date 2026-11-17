@@ -581,7 +581,7 @@ const App = defineComponent({
       } catch (e) { overlay.value = mapError(e.code) || e.message }
     }
 
-    function setBpRound() {
+    async function setBpRound() {
       const n = selectedNode.value
       if (!n) return
       const raw = prompt(t('params.bp_prompt'), ((n.data.breakpoints || {}).before || {}).round || '')
@@ -592,6 +592,13 @@ const App = defineComponent({
       bps.before = cur
       n.data = { ...n.data, breakpoints: bps }
       scheduleSave(true)
+      try {
+        await send('/api/flows/' + meta.value.id + '/breakpoints/' + n.id + '/before', 'PUT', {
+          enabled: true,
+          mode: cur.round ? 'round' : 'every',
+          round: cur.round || null,
+        })
+      } catch (e) { overlay.value = mapError(e.code) || e.message }
     }
 
     function removeSelected() {
@@ -635,6 +642,8 @@ const App = defineComponent({
         const r = await send('/api/flows/' + meta.value.id, 'PUT', body)
         meta.value = { ...meta.value, version: r.flow.version, name: r.flow.name }
         await refreshRunCheck()
+        const rid = run.value && (run.value.run_id || run.value.id)
+        if (rid) await refreshRecords(rid)
       } catch (e) { overlay.value = mapError(e.code) || e.message }
     }
 
@@ -774,6 +783,18 @@ const App = defineComponent({
       return { ...r, id: r.run_id || r.id, run_id: r.run_id || r.id }
     }
 
+    function takeRun(next) {
+      const incoming = normalizeRun(next)
+      if (!incoming) return
+      const live = run.value
+      const same = live && (live.run_id || live.id) === (incoming.run_id || incoming.id)
+      const liveMs = Number(live && live.paused_at_ms || 0)
+      const nextMs = Number(incoming.paused_at_ms || 0)
+      if (same && live && live.status === 'paused' && incoming.status !== 'paused') return
+      if (same && live && live.status === 'paused' && liveMs && nextMs && nextMs < liveMs) return
+      run.value = incoming
+    }
+
     function applyNodesEvent(ev) {
       const map = {}
       const list = Array.isArray(ev.nodes) ? ev.nodes : Object.entries(ev.nodes || {}).map(([id, st]) => ({ node_id: id, ...st }))
@@ -823,6 +844,7 @@ const App = defineComponent({
           run.value = normalizeRun(ev)
           applyNodeStates(ev.nodes)
           applyPauseReason(ev.pause)
+          refreshRecords(runId)
           if (window.__afPauseTimes && ev.status === 'paused' && ev.paused_at_ms) {
             window.__afPauseTimes.push({
               at: performance.now(),
@@ -875,11 +897,28 @@ const App = defineComponent({
       es.onopen = () => { conn.value = 'ok' }
     }
 
+    function pauseStamp() {
+      const r = run.value
+      if (!r) return ''
+      const p = r.pause || null
+      return [
+        r.status || '',
+        r.run_id || r.id || '',
+        p ? (p.pause_id || '') : '',
+        p ? (p.reason || '') : '',
+      ].join('\n')
+    }
+
     async function refreshRecords(runId) {
+      // Captured before the GET. A step can move the pause while this
+      // response is still in flight; applying that older body would put the
+      // breakpoint pause back on screen.
+      const stamp = pauseStamp()
       try {
         const r = await get('/api/runs/' + runId)
+        if (pauseStamp() !== stamp) return
         records.value = r.records || []
-        if (r.run) run.value = { ...run.value, ...r.run }
+        if (r.run) takeRun(r.run)
         rebuildSources()
       } catch (_) {}
     }
@@ -951,14 +990,16 @@ const App = defineComponent({
         resetStatus()
         const rid = r.run_id || (r.run && (r.run.run_id || r.run.id))
         const snap = r.run || await get('/api/runs/' + rid)
-        run.value = normalizeRun(snap)
+        takeRun(snap)
         applyNodeStates(snap.nodes || snap.node_status)
         applyPauseReason(snap.pause)
         records.value = []
         listen(rid)
       } catch (e) {
+        const detail = (e.body && e.body.detail) || {}
+        const named = (detail.errors && detail.errors[0]) || detail
         const pre = e.code === 'need_one_end' || e.code === 'need_one_start' || e.code === 'end_unreachable' || e.code === 'motion_timeout_cap'
-        rejectMsg.value = mapError(e.code, (e.body && e.body.detail) || {}) || e.message
+        rejectMsg.value = mapError(e.code, named) || (e.body && e.body.message) || e.message
         if (pre) {
           preRunShown.value = true
           await refreshRunCheck()
@@ -974,8 +1015,10 @@ const App = defineComponent({
         const r = await send('/api/runs/' + rid + '/' + action, 'POST', {
           pause_id, client_id: CLIENT_ID, ...(body || {}),
         })
-        if (r.run) run.value = normalizeRun(r.run)
-        else if (r.status) run.value = { ...run.value, status: r.status }
+        if (r.run) takeRun(r.run)
+        else if (r.status && !(run.value && run.value.status === 'paused' && r.status === 'running')) {
+          run.value = { ...run.value, status: r.status }
+        }
         if (action === 'continue' || action === 'approve') storageErr.value = ''
       } catch (e) {
         if (e.code === 'pause_mismatch') showMismatch()
@@ -1147,12 +1190,14 @@ const App = defineComponent({
       if (nodeBusy.value || !selected.value) return
       const opener = (ev && ev.currentTarget) || document.activeElement
       const spec = specOf(selectedNode.value)
-      const rec = shownRec.value
+      const wanted = singleRound.value == null || singleRound.value === '' ? null : Number(singleRound.value)
+      const list = records.value.filter(r => r.node_id === selected.value && (wanted == null || r.round === wanted))
+      const rec = list.length ? list[list.length - 1] : shownRec.value
       const extra = {
         node_id: selected.value,
         source_run_id: rec && rec.run_id,
         step: rec && rec.step,
-        source_round: singleRound.value,
+        source_round: wanted,
       }
       if (spec && spec.side_effect === 'motion') {
         const text = adapterConfirmText(spec) || t('confirm.default')
